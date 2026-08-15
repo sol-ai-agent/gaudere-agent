@@ -1,0 +1,12 @@
+.git
+.github
+build
+autom4te.cache
+home
+secrets
+.env
+*.key
+*.pem
+*.db
+*.sqlite
+*.sqlite3
