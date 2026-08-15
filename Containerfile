@@ -8,6 +8,7 @@ USER root
 RUN dnf install -y \
         autoconf \
         automake \
+        diffutils \
         gcc-c++ \
         git \
         libtool \
