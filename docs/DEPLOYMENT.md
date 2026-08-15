@@ -16,14 +16,22 @@ specific provider contract requires it.
 ## Build
 
 No host compiler or SQLite development package is required. The multi-stage
-Containerfile installs build dependencies only inside its disposable Fedora
+Containerfile installs missing build dependencies only inside its disposable
 builder stage.
+
+The build script first detects and reuses
+`localhost/al_openai_cpp:10.0.0`, Bertrand's existing Autotools/GCC
+development image. It falls back to the fully qualified Fedora 44 image only
+when the local builder is absent.
 
 ```sh
 ./scripts/build-image.sh
 ```
 
-The build pins the Gaudere library commit through `GAUDERE_REF`.
+The build pins the Gaudere library commit through `GAUDERE_REF`. Reusing the
+local builder does not reuse its development mounts, shell configuration, or
+history files; those belong to the interactive development workflow and are
+not required by the reproducible image build.
 
 ## Install the user Quadlet
 

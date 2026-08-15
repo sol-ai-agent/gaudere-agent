@@ -1,6 +1,9 @@
-FROM registry.fedoraproject.org/fedora:44 AS builder
+ARG BUILDER_IMAGE=registry.fedoraproject.org/fedora:44
+FROM ${BUILDER_IMAGE} AS builder
 
 ARG GAUDERE_REF=6f6ad032bbfff837f17f84067132a2922c0f474b
+
+USER root
 
 RUN dnf install -y \
         autoconf \
