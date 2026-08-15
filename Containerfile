@@ -23,7 +23,8 @@ RUN cd /src/gaudere \
     && autoreconf --install --force \
     && mkdir build \
     && cd build \
-    && ../configure --prefix=/usr/local CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror" \
+    && ../configure --prefix=/opt/gaudere \
+       CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror" \
     && make --jobs=2 check \
     && make install
 
@@ -33,11 +34,12 @@ RUN cd /src/gaudere-agent \
     && autoreconf --install --force \
     && mkdir build \
     && cd build \
-    && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
-       LD_LIBRARY_PATH=/usr/local/lib \
-       ../configure --prefix=/usr/local CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror" \
-    && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
-       LD_LIBRARY_PATH=/usr/local/lib \
+    && PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+       LD_LIBRARY_PATH=/opt/gaudere/lib \
+       ../configure --prefix=/opt/gaudere-agent \
+       CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror" \
+    && PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+       LD_LIBRARY_PATH=/opt/gaudere/lib \
        make --jobs=2 check \
     && make install
 
@@ -47,7 +49,9 @@ RUN dnf install -y libstdc++ sqlite-libs \
     && dnf clean all \
     && useradd --uid 1000 --create-home --shell /sbin/nologin gaudere
 
-COPY --from=builder /usr/local /usr/local
+COPY --from=builder /opt/gaudere/lib/libgaudere.so* /usr/local/lib/
+COPY --from=builder /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /usr/local/lib/
+COPY --from=builder /opt/gaudere-agent/bin/gaudere-agent /usr/local/bin/
 
 RUN echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
     && ldconfig
