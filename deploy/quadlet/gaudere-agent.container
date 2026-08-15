@@ -2,6 +2,9 @@
 Description=Gaudere Agent local prototype
 Documentation=https://github.com/sol-ai-agent/gaudere-agent
 
+[Quadlet]
+DefaultDependencies=false
+
 [Container]
 Image=localhost/gaudere-agent:dev
 ContainerName=gaudere-agent

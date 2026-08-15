@@ -44,6 +44,10 @@ systemctl --user status gaudere-agent.service
 The installer does not enable the unit. With lingering disabled, the service
 exists only while the user manager is available.
 
+The Quadlet disables its implicit network-online dependency because the
+container intentionally uses `Network=none`. This avoids waiting for a host
+network target that the current runtime neither uses nor needs.
+
 Persistent state is stored at:
 
 ```text
