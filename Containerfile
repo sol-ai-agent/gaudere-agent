@@ -44,15 +44,18 @@ RUN cd /src/gaudere-agent \
        make --jobs=2 check \
     && make install
 
+RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
+    && cp -a /opt/gaudere/lib/libgaudere.so* /opt/runtime/lib/ \
+    && cp -a /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /opt/runtime/lib/ \
+    && cp /opt/gaudere-agent/bin/gaudere-agent /opt/runtime/bin/
+
 FROM registry.fedoraproject.org/fedora:44
 
 RUN dnf install -y libstdc++ sqlite-libs \
     && dnf clean all \
     && useradd --uid 1000 --create-home --shell /sbin/nologin gaudere
 
-COPY --from=builder /opt/gaudere/lib/libgaudere.so* /usr/local/lib/
-COPY --from=builder /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /usr/local/lib/
-COPY --from=builder /opt/gaudere-agent/bin/gaudere-agent /usr/local/bin/
+COPY --from=builder /opt/runtime/ /usr/local/
 
 RUN echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
     && ldconfig
