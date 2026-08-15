@@ -3,14 +3,41 @@
 Gaudere Agent is the application runtime built around the reusable
 [Gaudere](https://github.com/sol-ai-agent/gaudere) C++ library.
 
-This repository will contain application-specific orchestration, configuration,
+This repository contains application-specific orchestration, configuration,
 provider integrations, and deployment assets. Reusable scheduling and
 persistence components remain in the Gaudere library.
 
-## Status
+## Current slice
 
-Bootstrap phase. No autonomous agent or external-provider integration exists
-yet.
+The first executable is deliberately small. It:
+
+- opens a caller-provided SQLite state file;
+- runs recovery before entering normal operation;
+- waits for `SIGINT` or `SIGTERM`;
+- enters draining and exits only after reaching the safe state;
+- exposes `--check` for a non-blocking startup/recovery/shutdown check.
+
+It performs no external action and opens no network port.
+
+```sh
+gaudere-agent --state /path/to/state.db
+```
+
+The parent directory must already exist.
+
+## Build
+
+Gaudere core and SQLite persistence must be installed and discoverable through
+`pkg-config`.
+
+```sh
+autoreconf --install
+mkdir build
+cd build
+../configure
+make
+make check
+```
 
 ## Principles
 
