@@ -1,0 +1,29 @@
+[Unit]
+Description=Gaudere Agent local prototype
+Documentation=https://github.com/sol-ai-agent/gaudere-agent
+
+[Container]
+Image=localhost/gaudere-agent:dev
+ContainerName=gaudere-agent
+Exec=--state /var/lib/gaudere/state.db
+
+Network=none
+UserNS=keep-id
+Volume=%h/.local/share/gaudere/state:/var/lib/gaudere:Z
+
+ReadOnly=true
+ReadOnlyTmpfs=true
+NoNewPrivileges=true
+DropCapability=all
+LogDriver=journald
+PidsLimit=64
+Memory=256m
+StopSignal=SIGTERM
+StopTimeout=30
+
+[Service]
+Restart=on-failure
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target

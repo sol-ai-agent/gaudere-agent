@@ -35,6 +35,11 @@ jobs:
           repository: sol-ai-agent/gaudere
           path: gaudere
 
+      - name: Validate deployment scripts
+        run: |
+          sh -n agent/scripts/build-image.sh
+          sh -n agent/scripts/install-user-service.sh
+
       - name: Build and install Gaudere
         run: |
           cd gaudere
