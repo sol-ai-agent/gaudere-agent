@@ -1,5 +1,7 @@
 #include <gaudere/persistence/sqlite/ActionStore.hpp>
+#include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/scheduling/wake/Runtime.hpp>
+#include <gaudere/work/Runtime.hpp>
 
 #include <chrono>
 #include <csignal>
@@ -62,12 +64,15 @@ int main(int argc, char* argv[])
     try {
         const auto options = parse_options(argc, argv);
         const auto signals = block_shutdown_signals();
+        const auto now = [] { return std::chrono::system_clock::now(); };
 
-        gaudere::persistence::sqlite::ActionStore store(options.state_path);
-        gaudere::scheduling::wake::Runtime runtime(
-            store, [] { return std::chrono::system_clock::now(); });
+        gaudere::persistence::sqlite::ActionStore action_store(options.state_path);
+        gaudere::persistence::sqlite::TaskStore task_store(options.state_path);
+        gaudere::scheduling::wake::Runtime action_runtime(action_store, now);
+        gaudere::work::Runtime work_runtime(task_store, now);
 
-        runtime.recover();
+        action_runtime.recover();
+        work_runtime.recover();
         std::cout << "gaudere-agent: running\n";
 
         if (!options.check_only) {
@@ -79,9 +84,12 @@ int main(int argc, char* argv[])
                       << received << '\n';
         }
 
-        runtime.request_shutdown();
-        if (!runtime.try_mark_safe()) {
-            std::cerr << "gaudere-agent: unsafe to stop; running actions remain\n";
+        action_runtime.request_shutdown();
+        work_runtime.request_shutdown();
+        const bool actions_safe = action_runtime.try_mark_safe();
+        const bool work_safe = work_runtime.try_mark_safe();
+        if (!actions_safe || !work_safe) {
+            std::cerr << "gaudere-agent: unsafe to stop; running work remains\n";
             return 2;
         }
 
