@@ -17,9 +17,16 @@ The executable is deliberately small. It:
 - enters draining and exits only after both runtimes reach the safe state;
 - exposes `--check` for a non-blocking startup/recovery/shutdown check.
 
-It still performs no external action, executes no task provider, and opens no
-network port. Pending bounded tasks may exist durably in the state database,
-but this slice does not yet dispatch them.
+The application source also defines a provider-agnostic `TaskExecutor` boundary.
+A handler receives one already-started bounded task plus a durable cancellation
+probe and must return success, explicit failure, acknowledged cancellation, or
+manual review. Handler exceptions are converted to manual review because an
+external effect may already have happened.
+
+The executor boundary is currently exercised only by deterministic local tests.
+The production loop still performs no external action, dispatches no task
+provider, and opens no network port. Pending bounded tasks may exist durably in
+the state database, but this slice does not yet select or dispatch them.
 
 ```sh
 gaudere-agent --state /path/to/state.db
