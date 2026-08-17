@@ -79,7 +79,12 @@ ExecuteResult TaskExecutor::execute(const std::string& id,
             : ExecuteResult::state_conflict;
 
     case HandlerOutcome::cancelled:
-        return runtime_.mark_cancelled(id)
+        if (runtime_.mark_cancelled(id)) {
+            return ExecuteResult::completed;
+        }
+        return runtime_.require_manual_review(
+                   id, "invalid_handler_result",
+                   "handler returned cancelled without a durable cancellation request")
             ? ExecuteResult::completed
             : ExecuteResult::state_conflict;
 
