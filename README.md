@@ -9,15 +9,17 @@ persistence components remain in the Gaudere library.
 
 ## Current slice
 
-The first executable is deliberately small. It:
+The executable is deliberately small. It:
 
-- opens a caller-provided SQLite state file;
-- runs recovery before entering normal operation;
+- opens a caller-provided SQLite state file for recoverable actions and bounded work tasks;
+- recovers both runtimes before entering normal operation;
 - waits for `SIGINT` or `SIGTERM`;
-- enters draining and exits only after reaching the safe state;
+- enters draining and exits only after both runtimes reach the safe state;
 - exposes `--check` for a non-blocking startup/recovery/shutdown check.
 
-It performs no external action and opens no network port.
+It still performs no external action, executes no task provider, and opens no
+network port. Pending bounded tasks may exist durably in the state database,
+but this slice does not yet dispatch them.
 
 ```sh
 gaudere-agent --state /path/to/state.db
@@ -43,7 +45,7 @@ make check
 
 - C++17 and Linux-first development.
 - Outbound-only networking on the initial workstation.
-- Recoverable, idempotent actions.
+- Recoverable, idempotent actions and bounded durable tasks.
 - Rootless and least-privilege deployment where practical.
 - Provider-specific code kept outside the generic Gaudere core.
 - Secrets never committed.
