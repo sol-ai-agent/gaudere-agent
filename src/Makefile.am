@@ -9,6 +9,8 @@ gaudere_agent_SOURCES = \
 	TaskDispatcher.hpp \
 	TaskExecutor.cpp \
 	TaskExecutor.hpp \
+	TaskReport.cpp \
+	TaskReport.hpp \
 	WorkController.cpp \
 	WorkController.hpp
 gaudere_agent_LDADD = $(GAUDERE_LIBS)
