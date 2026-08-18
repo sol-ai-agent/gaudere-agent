@@ -27,13 +27,6 @@ say()
     printf '\n==> %s\n' "$*"
 }
 
-container_args()
-{
-    # This function exists only as documentation; POSIX sh cannot return argv.
-    # Keep run_offline/start_service flags in sync with the hardened local shape.
-    :
-}
-
 run_offline()
 {
     "$podman_command" run --rm \
@@ -102,7 +95,11 @@ expect_line "$cancel_output" '^cancel_reason="host validation cancellation"$'
 say "exclusive state ownership while service is live"
 start_service
 sleep 0.3
-if lock_output=$(run_offline --task validation-echo 2>&1); then
+# Test the second process inside the already-running container. Starting a second
+# container with the same bind mount and :Z could relabel the directory to another
+# private SELinux category, so podman exec deliberately avoids touching the label.
+if lock_output=$("$podman_command" exec "$container_name" \
+    gaudere-agent --state /var/lib/gaudere/state.db --task validation-echo 2>&1); then
     printf 'validation failure: second process acquired live state database\n' >&2
     printf '%s\n' "$lock_output" >&2
     exit 1
