@@ -18,11 +18,12 @@ WorkController::WorkController(gaudere::scheduling::wake::Scheduler& scheduler,
 
 bool WorkController::start()
 {
-    if (started_ || stopping_ || worker_.empty()
-        || runtime_.state() != gaudere::work::RuntimeState::running) {
+    bool expected = false;
+    if (stopping_.load() || worker_.empty()
+        || runtime_.state() != gaudere::work::RuntimeState::running
+        || !started_.compare_exchange_strong(expected, true)) {
         return false;
     }
-    started_ = true;
     static_cast<void>(scheduler_.request_after(std::chrono::seconds{0}));
     schedule_recovery_deadline();
     return true;
@@ -30,7 +31,7 @@ bool WorkController::start()
 
 void WorkController::notify_work()
 {
-    if (!started_ || stopping_) {
+    if (!started_.load() || stopping_.load()) {
         return;
     }
     static_cast<void>(scheduler_.request_after(std::chrono::seconds{0}));
@@ -38,24 +39,30 @@ void WorkController::notify_work()
 
 WorkCycleResult WorkController::wait_and_run()
 {
-    if (!started_ || stopping_) {
+    if (!started_.load()) {
         return WorkCycleResult::stopped;
+    }
+    if (stopping_.load()) {
+        return enter_draining();
     }
 
-    if (scheduler_.wait() == gaudere::scheduling::wake::WaitResult::stopped) {
-        stopping_ = true;
-        return WorkCycleResult::stopped;
-    }
-    if (stopping_) {
-        return WorkCycleResult::stopped;
+    if (scheduler_.wait() == gaudere::scheduling::wake::WaitResult::stopped
+        || stopping_.load()) {
+        return enter_draining();
     }
 
     static_cast<void>(runtime_.recover_expired());
     bool worked = false;
     for (;;) {
+        if (stopping_.load()) {
+            return enter_draining();
+        }
         switch (dispatcher_.dispatch_one(worker_)) {
         case DispatchResult::dispatched:
             worked = true;
+            if (stopping_.load()) {
+                return enter_draining();
+            }
             continue;
         case DispatchResult::idle:
             schedule_recovery_deadline();
@@ -69,17 +76,19 @@ WorkCycleResult WorkController::wait_and_run()
 
 void WorkController::stop()
 {
-    if (stopping_) {
-        return;
-    }
-    stopping_ = true;
+    stopping_.store(true);
     scheduler_.stop();
+}
+
+WorkCycleResult WorkController::enter_draining()
+{
     runtime_.request_shutdown();
+    return WorkCycleResult::stopped;
 }
 
 void WorkController::schedule_recovery_deadline()
 {
-    if (stopping_) {
+    if (stopping_.load()) {
         return;
     }
     if (const auto deadline = runtime_.next_recovery_at()) {
