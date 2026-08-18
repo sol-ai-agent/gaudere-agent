@@ -57,6 +57,39 @@ model intentionally has one process owning a given SQLite state database. Reusin
 the same echo ID is idempotent and returns the already-persisted successful result.
 The parent directory for the state file must already exist.
 
+## Persistent state and migration
+
+The rootless Fedora/Podman deployment stores Gaudere's persistent state on the host
+outside the source checkout and outside the container image:
+
+```text
+~/.local/share/gaudere/state/
+```
+
+The Quadlet mounts that directory as `/var/lib/gaudere` inside the container, and
+the service currently uses:
+
+```text
+~/.local/share/gaudere/state/state.db
+```
+
+as its SQLite state database. This database is durable application state, not a
+build artifact or cache. It contains recoverable actions, bounded tasks, leases,
+and durable task results, and must be included in backup and machine-migration
+procedures. Re-cloning the Git repositories or rebuilding the container image does
+not restore this state.
+
+Before copying or backing up the live database directly, stop the user service so
+that the current single-owner model has no open writer:
+
+```sh
+systemctl --user stop gaudere-agent.service
+```
+
+For a machine migration, preserve the whole `~/.local/share/gaudere/state/`
+directory, restore it for the target user, then reinstall/rebuild the service. The
+repository checkout and the persistent runtime state are deliberately separate.
+
 ## Build
 
 Gaudere core and SQLite persistence must be installed and discoverable through
