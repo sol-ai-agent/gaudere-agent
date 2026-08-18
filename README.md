@@ -13,11 +13,13 @@ The executable is deliberately small. It:
 
 - opens a caller-provided SQLite state file for recoverable actions and bounded work tasks;
 - recovers both runtimes before entering normal operation;
-- waits for `SIGINT` or `SIGTERM`;
-- enters draining and exits only after both runtimes reach the safe state;
+- starts an event-driven bounded-work controller with an immediate startup wake;
+- schedules future recovery at the exact earliest active lease deadline rather than polling;
+- waits for `SIGINT` or `SIGTERM` on a dedicated signal-wait thread while all work-runtime transitions remain serialized on the main worker thread;
+- stops future work wakes before entering draining and exits only after both runtimes reach the safe state;
 - exposes `--check` for a non-blocking startup/recovery/shutdown check.
 
-The application source defines two provider-agnostic work boundaries:
+The application source defines three provider-agnostic work boundaries:
 
 - `TaskExecutor` starts one bounded task, invokes one handler, and records its
   success, explicit failure, acknowledged cancellation, or manual-review result.
@@ -27,11 +29,16 @@ The application source defines two provider-agnostic work boundaries:
   explicitly by task kind; `dispatch_one()` selects only pending kinds that have a
   registered handler and delegates exactly one task to `TaskExecutor`. Unknown
   future provider kinds remain pending and do not block supported work.
+- `WorkController` composes the wake Scheduler, bounded-work Runtime, and dispatcher.
+  It owns no thread and performs no periodic polling. New in-process work can request
+  an immediate wake, while interrupted active work schedules its exact durable lease
+  recovery deadline.
 
-Both boundaries are currently exercised only by deterministic local tests. There
-is deliberately no dispatch loop, polling thread, provider, external action, or
-network port yet. Pending bounded tasks may exist durably in the state database,
-but the production process does not automatically execute them.
+The production event loop is now active, but its handler registry is intentionally
+empty. It therefore performs lease recovery and lifecycle coordination without yet
+executing any pending task kind. Deterministic local handlers remain test-only until
+an explicit first production capability is selected. There is still no provider,
+external action, network port, subprocess, host capability, or secret.
 
 ```sh
 gaudere-agent --state /path/to/state.db
