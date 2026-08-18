@@ -57,7 +57,8 @@ WorkCycleResult WorkController::wait_and_run()
         if (stopping_.load()) {
             return enter_draining();
         }
-        switch (dispatcher_.dispatch_one(worker_)) {
+        switch (dispatcher_.dispatch_one(
+            worker_, [this] { return stopping_.load(); })) {
         case DispatchResult::dispatched:
             worked = true;
             if (stopping_.load()) {
