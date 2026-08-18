@@ -6,6 +6,7 @@
 #include <gaudere/scheduling/wake/Scheduler.hpp>
 #include <gaudere/work/Runtime.hpp>
 
+#include <atomic>
 #include <cstddef>
 #include <string>
 
@@ -24,8 +25,12 @@ enum class WorkCycleResult {
  * immediate first wake. notify_work() advances the scheduler to an immediate
  * wake after accepted in-process work. wait_and_run() blocks in Scheduler,
  * recovers expired leases, drains eligible pending work through TaskDispatcher,
- * then schedules the exact next lease recovery deadline. stop() permanently
- * stops future wakes before asking the work runtime to drain.
+ * then schedules the exact next lease recovery deadline.
+ *
+ * stop() is safe to call from another thread: it only publishes the stop request
+ * and wakes/stops Scheduler. The worker thread that is inside wait_and_run()
+ * performs the Runtime transition to draining, so runtime state changes never
+ * race a synchronous TaskHandler invocation.
  */
 class WorkController {
 public:
@@ -40,14 +45,15 @@ public:
     void stop();
 
 private:
+    [[nodiscard]] WorkCycleResult enter_draining();
     void schedule_recovery_deadline();
 
     gaudere::scheduling::wake::Scheduler& scheduler_;
     gaudere::work::Runtime& runtime_;
     TaskDispatcher& dispatcher_;
     std::string worker_;
-    bool started_ = false;
-    bool stopping_ = false;
+    std::atomic_bool started_{false};
+    std::atomic_bool stopping_{false};
 };
 
 } // namespace gaudere_agent
