@@ -10,6 +10,16 @@ agent="../src/gaudere-agent"
 "$agent" --state "$state" --check
 test -f "$state"
 
+"$agent" --state "$state" --echo smoke-echo "hello gaudere" >"$temporary_directory/echo-output" 2>&1
+grep -q "gaudere-agent: echo result: hello gaudere" "$temporary_directory/echo-output"
+grep -q "gaudere-agent: safe" "$temporary_directory/echo-output"
+
+# Reusing the same durable id is idempotent: the persisted result is returned
+# rather than creating or executing a second task.
+"$agent" --state "$state" --echo smoke-echo "hello gaudere" >"$temporary_directory/echo-repeat" 2>&1
+grep -q "gaudere-agent: echo result: hello gaudere" "$temporary_directory/echo-repeat"
+grep -q "gaudere-agent: safe" "$temporary_directory/echo-repeat"
+
 "$agent" --state "$state" >"$temporary_directory/output" 2>&1 &
 agent_pid=$!
 sleep 1
