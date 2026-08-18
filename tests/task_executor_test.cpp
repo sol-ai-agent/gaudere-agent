@@ -108,6 +108,16 @@ private:
     std::string id_;
 };
 
+class WorkerStopHandler final : public TaskHandler {
+public:
+    HandlerResult execute(const TaskContext& context) override
+    {
+        expect(context.cancellation_requested(),
+               "handler observes the worker-stop cancellation probe");
+        return HandlerResult{HandlerOutcome::cancelled, {}, {}, {}, {}};
+    }
+};
+
 void test_success_round_trip()
 {
     TemporaryDatabase database;
@@ -213,6 +223,26 @@ void test_cooperative_cancellation()
            "cooperative cancellation is durable");
 }
 
+void test_worker_stop_cancellation()
+{
+    TemporaryDatabase database;
+    SqliteStore store(database.path.string());
+    Runtime runtime(store, [] { return gaudere::work::TimePoint{}; });
+    runtime.recover();
+    expect(runtime.submit(make_task("worker-stop")) == SubmitResult::accepted,
+           "worker-stop task is submitted");
+    TaskExecutor executor(runtime, store);
+    WorkerStopHandler handler;
+    expect(executor.execute("worker-stop", "local-test", handler,
+                            [] { return true; }) == ExecuteResult::completed,
+           "worker-stop cancellation completes on the worker thread");
+    const auto done = store.find("worker-stop");
+    expect(done && done->status == TaskStatus::cancelled && done->result
+               && done->result->failure_code == "cancelled"
+               && done->cancel_reason == "worker shutdown requested",
+           "worker stop becomes a durable acknowledged cancellation");
+}
+
 } // namespace
 
 int main()
@@ -222,6 +252,7 @@ int main()
     test_explicit_failure();
     test_exception_requires_manual_review();
     test_cooperative_cancellation();
+    test_worker_stop_cancellation();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return 1;
