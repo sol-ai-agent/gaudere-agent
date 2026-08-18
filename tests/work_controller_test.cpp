@@ -145,13 +145,17 @@ void test_future_lease_wakes_recovery_without_polling()
     interrupted.lease = gaudere::work::Lease{
         "dead-worker", std::chrono::system_clock::now() + 40ms};
     harness.store.save(interrupted);
+    const auto durable = harness.store.find("interrupted");
+    expect(durable && durable->lease,
+           "interrupted lease is persisted before controller start");
 
     expect(harness.controller.start(), "controller starts with future lease");
     expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
            "initial wake leaves an unexpired lease untouched");
     const auto deadline = harness.scheduler.next();
-    expect(deadline && *deadline == interrupted.lease->expires_at,
-           "controller schedules the exact future lease deadline");
+    expect(deadline && durable && durable->lease
+               && *deadline == durable->lease->expires_at,
+           "controller schedules the exact durable lease deadline");
 
     expect(harness.controller.wait_and_run() == WorkCycleResult::worked,
            "lease deadline wakes recovery and redispatches interrupted work");
