@@ -6,7 +6,8 @@
 namespace gaudere_agent {
 namespace {
 
-bool cancellation_requested(gaudere::work::TaskStore& store, const std::string& id)
+bool durable_cancellation_requested(gaudere::work::TaskStore& store,
+                                    const std::string& id)
 {
     const auto task = store.find(id);
     return task && task->status == gaudere::work::TaskStatus::cancel_requested;
@@ -22,7 +23,8 @@ TaskExecutor::TaskExecutor(gaudere::work::Runtime& runtime,
 
 ExecuteResult TaskExecutor::execute(const std::string& id,
                                     std::string worker,
-                                    TaskHandler& handler)
+                                    TaskHandler& handler,
+                                    CancellationProbe worker_stop_requested)
 {
     if (!runtime_.start(id, std::move(worker))) {
         return ExecuteResult::not_startable;
@@ -33,9 +35,11 @@ ExecuteResult TaskExecutor::execute(const std::string& id,
         return ExecuteResult::state_conflict;
     }
 
-    const TaskContext context{
-        *task,
-        [this, id] { return cancellation_requested(store_, id); }};
+    const auto cancellation_probe = [this, id, worker_stop_requested] {
+        return durable_cancellation_requested(store_, id)
+            || (worker_stop_requested && worker_stop_requested());
+    };
+    const TaskContext context{*task, cancellation_probe};
 
     HandlerResult result;
     try {
@@ -81,6 +85,14 @@ ExecuteResult TaskExecutor::execute(const std::string& id,
     case HandlerOutcome::cancelled:
         if (runtime_.mark_cancelled(id)) {
             return ExecuteResult::completed;
+        }
+        if (worker_stop_requested && worker_stop_requested()) {
+            if (!runtime_.request_cancel(id, "worker shutdown requested")) {
+                return ExecuteResult::state_conflict;
+            }
+            return runtime_.mark_cancelled(id)
+                ? ExecuteResult::completed
+                : ExecuteResult::state_conflict;
         }
         return runtime_.require_manual_review(
                    id, "invalid_handler_result",

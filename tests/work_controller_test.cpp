@@ -4,10 +4,12 @@
 #include <gaudere/scheduling/wake/Scheduler.hpp>
 #include <gaudere/work/Runtime.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace {
@@ -74,6 +76,20 @@ public:
     }
 };
 
+class BlockingHandler final : public TaskHandler {
+public:
+    HandlerResult execute(const TaskContext& context) override
+    {
+        entered.store(true);
+        while (!context.cancellation_requested()) {
+            std::this_thread::sleep_for(1ms);
+        }
+        return HandlerResult{HandlerOutcome::cancelled, {}, {}, {}, {}};
+    }
+
+    std::atomic_bool entered{false};
+};
+
 struct Harness {
     explicit Harness(const std::filesystem::path& path)
         : store(path.string()),
@@ -85,6 +101,8 @@ struct Harness {
         runtime.recover();
         expect(dispatcher.register_handler("local.echo", echo),
                "local echo handler registration succeeds");
+        expect(dispatcher.register_handler("local.blocking", blocking),
+               "blocking handler registration succeeds");
     }
 
     SqliteStore store;
@@ -93,6 +111,7 @@ struct Harness {
     TaskDispatcher dispatcher;
     Scheduler scheduler;
     EchoHandler echo;
+    BlockingHandler blocking;
     WorkController controller;
 };
 
@@ -209,6 +228,38 @@ void test_stop_prevents_new_dispatch()
            "draining runtime becomes safe when no task was started");
 }
 
+void test_stop_cancels_cooperative_running_handler()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path);
+    expect(harness.runtime.submit(
+               make_task("blocking", "local.blocking", "wait"))
+               == SubmitResult::accepted,
+           "blocking task is submitted");
+    expect(harness.controller.start(), "controller starts for blocking task");
+
+    std::thread stopper([&] {
+        while (!harness.blocking.entered.load()) {
+            std::this_thread::sleep_for(1ms);
+        }
+        harness.controller.stop();
+    });
+
+    expect(harness.controller.wait_and_run() == WorkCycleResult::stopped,
+           "worker drains after cooperative handler observes stop");
+    stopper.join();
+
+    const auto task = harness.store.find("blocking");
+    expect(task && task->status == TaskStatus::cancelled && task->result
+               && task->result->failure_code == "cancelled"
+               && task->cancel_reason == "worker shutdown requested",
+           "running handler stop is acknowledged durably as cancellation");
+    expect(harness.runtime.state() == gaudere::work::RuntimeState::draining,
+           "runtime enters draining only after handler cancellation completes");
+    expect(harness.runtime.try_mark_safe(),
+           "cancelled running handler leaves runtime safe to stop");
+}
+
 } // namespace
 
 int main()
@@ -218,6 +269,7 @@ int main()
     test_future_lease_wakes_recovery_without_polling();
     test_unknown_kind_remains_pending();
     test_stop_prevents_new_dispatch();
+    test_stop_cancels_cooperative_running_handler();
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return 1;

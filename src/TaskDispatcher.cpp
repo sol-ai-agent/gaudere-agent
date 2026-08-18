@@ -29,7 +29,9 @@ std::vector<std::string> TaskDispatcher::accepted_kinds() const
     return kinds;
 }
 
-DispatchResult TaskDispatcher::dispatch_one(const std::string& worker)
+DispatchResult TaskDispatcher::dispatch_one(
+    const std::string& worker,
+    TaskExecutor::CancellationProbe worker_stop_requested)
 {
     if (worker.empty()) {
         return DispatchResult::state_conflict;
@@ -45,7 +47,8 @@ DispatchResult TaskDispatcher::dispatch_one(const std::string& worker)
         return DispatchResult::state_conflict;
     }
 
-    switch (executor_.execute(task->id, worker, *found->second)) {
+    switch (executor_.execute(task->id, worker, *found->second,
+                              std::move(worker_stop_requested))) {
     case ExecuteResult::completed:
         return DispatchResult::dispatched;
     case ExecuteResult::not_startable:

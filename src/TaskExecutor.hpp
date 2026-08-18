@@ -43,11 +43,14 @@ enum class ExecuteResult {
 
 class TaskExecutor {
 public:
+    using CancellationProbe = std::function<bool()>;
+
     TaskExecutor(gaudere::work::Runtime& runtime, gaudere::work::TaskStore& store);
 
     [[nodiscard]] ExecuteResult execute(const std::string& id,
                                         std::string worker,
-                                        TaskHandler& handler);
+                                        TaskHandler& handler,
+                                        CancellationProbe worker_stop_requested = {});
 
 private:
     gaudere::work::Runtime& runtime_;
