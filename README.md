@@ -17,7 +17,8 @@ The executable is deliberately small. It:
 - schedules future recovery at the exact earliest active lease deadline rather than polling;
 - waits for `SIGINT` or `SIGTERM` on a dedicated signal-wait thread while all work-runtime transitions remain serialized on the main worker thread;
 - stops future work wakes before entering draining and exits only after both runtimes reach the safe state;
-- exposes `--check` for a non-blocking startup/recovery/shutdown check.
+- exposes `--check` for a non-blocking startup/recovery/shutdown check;
+- registers one production task kind, `local.echo`, whose only effect is to return its bounded text input as a durable task result.
 
 The application source defines three provider-agnostic work boundaries:
 
@@ -34,17 +35,27 @@ The application source defines three provider-agnostic work boundaries:
   an immediate wake, while interrupted active work schedules its exact durable lease
   recovery deadline.
 
-The production event loop is now active, but its handler registry is intentionally
-empty. It therefore performs lease recovery and lifecycle coordination without yet
-executing any pending task kind. Deterministic local handlers remain test-only until
-an explicit first production capability is selected. There is still no provider,
-external action, network port, subprocess, host capability, or secret.
+`local.echo` is the first deliberately harmless production capability. It uses the
+same durable submission, dispatch, lease, result, and safe-shutdown path that future
+handlers will use, but performs no external action and requires no network, secret,
+subprocess, or host capability.
+
+Normal service mode:
 
 ```sh
 gaudere-agent --state /path/to/state.db
 ```
 
-The parent directory must already exist.
+Offline operator test mode:
+
+```sh
+gaudere-agent --state /path/to/state.db --echo test-001 "hello Gaudere"
+```
+
+The echo mode must not be run concurrently with the service: the current operating
+model intentionally has one process owning a given SQLite state database. Reusing
+the same echo ID is idempotent and returns the already-persisted successful result.
+The parent directory for the state file must already exist.
 
 ## Build
 
