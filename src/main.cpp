@@ -1,8 +1,14 @@
+#include "TaskDispatcher.hpp"
+#include "TaskExecutor.hpp"
+#include "WorkController.hpp"
+
 #include <gaudere/persistence/sqlite/ActionStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/scheduling/wake/Runtime.hpp>
+#include <gaudere/scheduling/wake/Scheduler.hpp>
 #include <gaudere/work/Runtime.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -10,6 +16,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -70,24 +77,68 @@ int main(int argc, char* argv[])
         gaudere::persistence::sqlite::TaskStore task_store(options.state_path);
         gaudere::scheduling::wake::Runtime action_runtime(action_store, now);
         gaudere::work::Runtime work_runtime(task_store, now);
+        gaudere::scheduling::wake::Scheduler work_scheduler;
+        gaudere_agent::TaskExecutor task_executor(work_runtime, task_store);
+        gaudere_agent::TaskDispatcher task_dispatcher(task_store, task_executor);
+        gaudere_agent::WorkController work_controller(
+            work_scheduler, work_runtime, task_dispatcher, "main-worker");
 
         action_runtime.recover();
         work_runtime.recover();
+        if (!work_controller.start()) {
+            throw std::runtime_error("cannot start work controller");
+        }
         std::cout << "gaudere-agent: running\n";
 
+        int received = 0;
+        std::atomic_bool signal_wait_failed{false};
+        std::thread signal_waiter;
         if (!options.check_only) {
-            int received = 0;
-            if (sigwait(&signals, &received) != 0) {
-                throw std::runtime_error("cannot wait for shutdown signal");
+            signal_waiter = std::thread([&] {
+                int signal = 0;
+                if (sigwait(&signals, &signal) != 0) {
+                    signal_wait_failed.store(true);
+                } else {
+                    received = signal;
+                }
+                work_controller.stop();
+            });
+        }
+
+        bool work_conflict = false;
+        if (options.check_only) {
+            work_controller.stop();
+        }
+        for (;;) {
+            const auto result = work_controller.wait_and_run();
+            if (result == gaudere_agent::WorkCycleResult::stopped) {
+                break;
             }
+            if (result == gaudere_agent::WorkCycleResult::state_conflict) {
+                work_conflict = true;
+                work_controller.stop();
+            }
+        }
+
+        if (signal_waiter.joinable()) {
+            signal_waiter.join();
+        }
+        if (received != 0) {
             std::cout << "gaudere-agent: shutdown requested by signal "
                       << received << '\n';
         }
 
         action_runtime.request_shutdown();
-        work_runtime.request_shutdown();
         const bool actions_safe = action_runtime.try_mark_safe();
         const bool work_safe = work_runtime.try_mark_safe();
+        if (signal_wait_failed.load()) {
+            std::cerr << "gaudere-agent: cannot wait for shutdown signal\n";
+            return 1;
+        }
+        if (work_conflict) {
+            std::cerr << "gaudere-agent: work controller state conflict\n";
+            return 2;
+        }
         if (!actions_safe || !work_safe) {
             std::cerr << "gaudere-agent: unsafe to stop; running work remains\n";
             return 2;
