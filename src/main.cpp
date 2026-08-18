@@ -1,4 +1,5 @@
 #include "LocalEchoHandler.hpp"
+#include "LocalWaitHandler.hpp"
 #include "StateLock.hpp"
 #include "TaskDispatcher.hpp"
 #include "TaskExecutor.hpp"
@@ -27,6 +28,7 @@ struct Options {
     std::string state_path;
     bool check_only = false;
     bool echo = false;
+    bool enqueue_wait = false;
     bool inspect_task = false;
     bool cancel_task = false;
     std::string task_id;
@@ -36,7 +38,7 @@ struct Options {
 void usage(const char* program)
 {
     std::cout << "Usage: " << program
-              << " --state PATH [--check | --echo ID TEXT | --task ID | --cancel ID REASON]\n";
+              << " --state PATH [--check | --echo ID TEXT | --enqueue-wait ID MS | --task ID | --cancel ID REASON]\n";
 }
 
 Options parse_options(const int argc, char* argv[])
@@ -50,6 +52,10 @@ Options parse_options(const int argc, char* argv[])
             options.check_only = true;
         } else if (argument == "--echo" && index + 2 < argc) {
             options.echo = true;
+            options.task_id = argv[++index];
+            options.text = argv[++index];
+        } else if (argument == "--enqueue-wait" && index + 2 < argc) {
+            options.enqueue_wait = true;
             options.task_id = argv[++index];
             options.text = argv[++index];
         } else if (argument == "--task" && index + 1 < argc) {
@@ -71,18 +77,24 @@ Options parse_options(const int argc, char* argv[])
     }
     const int modes = static_cast<int>(options.check_only)
         + static_cast<int>(options.echo)
+        + static_cast<int>(options.enqueue_wait)
         + static_cast<int>(options.inspect_task)
         + static_cast<int>(options.cancel_task);
     if (modes > 1) {
         throw std::invalid_argument(
-            "--check, --echo, --task, and --cancel are mutually exclusive");
+            "--check, --echo, --enqueue-wait, --task, and --cancel are mutually exclusive");
     }
-    if ((options.echo || options.inspect_task || options.cancel_task)
-        && options.task_id.empty()) {
+    if ((options.echo || options.enqueue_wait || options.inspect_task
+         || options.cancel_task) && options.task_id.empty()) {
         throw std::invalid_argument("task ID must not be empty");
     }
     if (options.cancel_task && options.text.empty()) {
         throw std::invalid_argument("cancellation reason must not be empty");
+    }
+    if (options.enqueue_wait
+        && !gaudere_agent::parse_local_wait_duration(options.text)) {
+        throw std::invalid_argument(
+            "--enqueue-wait MS must be an integer from 1 to 5000");
     }
     return options;
 }
@@ -112,6 +124,25 @@ gaudere::work::Task make_echo_task(const Options& options)
     task.limits.max_output_bytes = 4096;
     task.limits.max_runtime = std::chrono::seconds{1};
     task.limits.max_attempts = 1;
+    return task;
+}
+
+gaudere::work::Task make_wait_task(const Options& options)
+{
+    const auto duration = gaudere_agent::parse_local_wait_duration(options.text);
+    if (!duration) {
+        throw std::invalid_argument("invalid local.wait duration");
+    }
+    gaudere::work::Task task;
+    task.id = options.task_id;
+    task.idempotency_key = "local.wait:" + options.task_id;
+    task.kind = "local.wait";
+    task.input_content_type = "text/plain";
+    task.input = options.text;
+    task.limits.max_input_bytes = 32;
+    task.limits.max_output_bytes = 64;
+    task.limits.max_runtime = *duration + std::chrono::milliseconds{250};
+    task.limits.max_attempts = 2;
     return task;
 }
 
@@ -152,6 +183,24 @@ int cancel_task(gaudere::work::Runtime& runtime,
     return 0;
 }
 
+int enqueue_wait(gaudere::work::Runtime& runtime,
+                 gaudere::work::TaskStore& store,
+                 const Options& options)
+{
+    runtime.recover();
+    const auto submit = runtime.submit(make_wait_task(options));
+    if (submit != gaudere::work::SubmitResult::accepted
+        && submit != gaudere::work::SubmitResult::duplicate) {
+        throw std::runtime_error("local.wait submission rejected");
+    }
+    const auto task = store.find(options.task_id);
+    if (!task) {
+        throw std::runtime_error("queued local.wait task is missing");
+    }
+    gaudere_agent::print_task_report(std::cout, *task);
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -173,16 +222,21 @@ int main(int argc, char* argv[])
         if (options.cancel_task) {
             return cancel_task(work_runtime, task_store, options.task_id, options.text);
         }
+        if (options.enqueue_wait) {
+            return enqueue_wait(work_runtime, task_store, options);
+        }
 
         gaudere::scheduling::wake::Scheduler work_scheduler;
         gaudere_agent::TaskExecutor task_executor(work_runtime, task_store);
         gaudere_agent::TaskDispatcher task_dispatcher(task_store, task_executor);
         gaudere_agent::LocalEchoHandler echo_handler;
+        gaudere_agent::LocalWaitHandler wait_handler;
         gaudere_agent::WorkController work_controller(
             work_scheduler, work_runtime, task_dispatcher, "main-worker");
 
-        if (!task_dispatcher.register_handler("local.echo", echo_handler)) {
-            throw std::runtime_error("cannot register local.echo handler");
+        if (!task_dispatcher.register_handler("local.echo", echo_handler)
+            || !task_dispatcher.register_handler("local.wait", wait_handler)) {
+            throw std::runtime_error("cannot register local task handlers");
         }
 
         action_runtime.recover();
