@@ -192,13 +192,15 @@ void test_stop_prevents_new_dispatch()
                == SubmitResult::accepted,
            "late task exists before shutdown begins");
     harness.controller.stop();
+    expect(harness.runtime.state() == gaudere::work::RuntimeState::running,
+           "cross-thread stop does not mutate runtime state directly");
     harness.controller.notify_work();
     expect(harness.controller.wait_and_run() == WorkCycleResult::stopped,
-           "stopped controller cannot dispatch again");
+           "worker observes stop before any new dispatch");
     expect(harness.store.find("late")->status == TaskStatus::pending,
            "shutdown leaves not-yet-started work pending");
     expect(harness.runtime.state() == gaudere::work::RuntimeState::draining,
-           "controller requests work runtime draining after stopping wakes");
+           "worker thread serializes the transition to draining");
     expect(harness.runtime.try_mark_safe(),
            "draining runtime becomes safe when no task was started");
 }
