@@ -1,6 +1,6 @@
 AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS)
 
-check_PROGRAMS = task_executor_test task_dispatcher_test
+check_PROGRAMS = task_executor_test task_dispatcher_test work_controller_test
 TESTS = smoke.sh $(check_PROGRAMS)
 EXTRA_DIST = smoke.sh
 
@@ -17,3 +17,13 @@ task_dispatcher_test_SOURCES = \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
 task_dispatcher_test_LDADD = $(GAUDERE_LIBS)
+
+work_controller_test_SOURCES = \
+	work_controller_test.cpp \
+	../src/WorkController.cpp \
+	../src/WorkController.hpp \
+	../src/TaskDispatcher.cpp \
+	../src/TaskDispatcher.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp
+work_controller_test_LDADD = $(GAUDERE_LIBS)
