@@ -136,6 +136,34 @@ The current real Fedora checkout used for development is:
 That path is a checkout location, not persistent runtime state; it may change on a
 new system without changing where the database is restored.
 
+## Real-host runtime validation
+
+After building `localhost/gaudere-agent:dev`, the host-only validation script can
+exercise the current runtime invariants without writing to the real
+`~/.local/share/gaudere/state/state.db`:
+
+```sh
+sh scripts/validate-host-runtime.sh
+```
+
+The script creates a disposable state directory below
+`~/.local/share/gaudere/validation/`, mounts it with a private SELinux label, and
+removes it when validation finishes. The normal systemd service may remain running
+because the validation database is separate.
+
+It checks:
+
+- startup/check and durable echo;
+- pending offline cancellation;
+- exclusive process ownership with a second `gaudere-agent` launched by `podman exec` inside the live validation container, avoiding a second `:Z` relabel;
+- graceful SIGTERM cancellation of a running `local.wait`;
+- hard SIGKILL leaving a durable first-attempt lease;
+- replacement startup, exact lease-expiry recovery without polling, and successful second-attempt completion.
+
+Set `KEEP_GAUDERE_VALIDATION_STATE=1` to preserve the disposable validation directory
+afterward for diagnosis. `GAUDERE_IMAGE` may override the image tag and `PODMAN` may
+override the Podman command.
+
 ## Build
 
 Gaudere core and SQLite persistence must be installed and discoverable through
