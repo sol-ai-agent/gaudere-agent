@@ -17,17 +17,19 @@ The executable is deliberately small. It:
 - starts an event-driven bounded-work controller with an immediate startup wake;
 - schedules future recovery at the exact earliest active lease deadline rather than polling;
 - waits for `SIGINT` or `SIGTERM` on a dedicated signal-wait thread while all work-runtime transitions remain serialized on the main worker thread;
+- lets a cooperative running handler observe worker stop through an atomic probe, while the worker thread itself persists any resulting cancellation;
 - stops future work wakes before entering draining and exits only after both runtimes reach the safe state;
-- exposes `--check` for a non-blocking startup/recovery/shutdown check;
-- exposes offline task inspection and cancellation commands;
-- registers one production task kind, `local.echo`, whose only effect is to return its bounded text input as a durable task result.
+- exposes offline task submission/inspection/cancellation commands;
+- registers two effect-free local production task kinds: `local.echo` and `local.wait`.
 
 The application source defines three provider-agnostic work boundaries:
 
 - `TaskExecutor` starts one bounded task, invokes one handler, and records its
   success, explicit failure, acknowledged cancellation, or manual-review result.
   Handler exceptions become manual review because an external effect may already
-  have happened.
+  have happened. A worker-stop probe may be exposed to the handler, but durable
+  cancellation transitions are still serialized through `TaskExecutor` on the
+  worker thread.
 - `TaskDispatcher` is a single-owner, one-worker selector. Handlers are registered
   explicitly by task kind; `dispatch_one()` selects only pending kinds that have a
   registered handler and delegates exactly one task to `TaskExecutor`. Unknown
@@ -37,10 +39,11 @@ The application source defines three provider-agnostic work boundaries:
   an immediate wake, while interrupted active work schedules its exact durable lease
   recovery deadline.
 
-`local.echo` is the first deliberately harmless production capability. It uses the
-same durable submission, dispatch, lease, result, and safe-shutdown path that future
-handlers will use, but performs no external action and requires no network, secret,
-subprocess, or host capability.
+`local.echo` returns bounded text input as a durable result. `local.wait` accepts an
+integer duration from 1 to 5000 milliseconds, waits locally in short increments, and
+checks the cancellation probe between increments. It performs no external action and
+exists to exercise graceful interruption, hard-crash lease recovery, and bounded
+attempt semantics before any provider or network capability is introduced.
 
 Normal service mode:
 
@@ -52,15 +55,26 @@ Offline operator commands:
 
 ```sh
 gaudere-agent --state /path/to/state.db --echo test-001 "hello Gaudere"
-gaudere-agent --state /path/to/state.db --task test-001
-gaudere-agent --state /path/to/state.db --cancel test-001 "operator request"
+gaudere-agent --state /path/to/state.db --enqueue-wait wait-001 1000
+gaudere-agent --state /path/to/state.db --task wait-001
+gaudere-agent --state /path/to/state.db --cancel wait-001 "operator request"
 ```
 
+`--enqueue-wait` creates a durable pending `local.wait` task without executing it;
+the normal service picks it up on its immediate startup wake. Wait tasks have two
+attempts so a hard-killed first execution can be recovered after its lease expires.
 `--task` reports durable metadata, attempts, lease/cancellation information, and a
 terminal result when one exists. Text fields are escaped before being written to the
 terminal. `--cancel` cancels pending work immediately; active work receives a durable
 cancellation request that is finalized cooperatively by its worker or by lease
 recovery.
+
+On graceful process shutdown, the signal thread only publishes stop and wakes the
+Scheduler. It does not mutate the work Runtime or SQLite. A cooperative running
+handler may observe that stop request and return `cancelled`; the main worker then
+persists `cancel_requested` followed by `cancelled` before entering draining. If the
+process dies between those durable transitions, normal lease recovery can finish the
+cancellation later.
 
 All modes use an exclusive sibling lock file (`state.db.lock`). A second
 `gaudere-agent` process targeting the same state database fails immediately while the
@@ -72,8 +86,8 @@ offline command:
 systemctl --user stop gaudere-agent.service
 ```
 
-Reusing the same echo ID is idempotent and returns the already-persisted successful
-result. The parent directory for the state file must already exist.
+Reusing the same echo or wait ID is idempotent and never overwrites the original
+durable task. The parent directory for the state file must already exist.
 
 ## Persistent state and migration
 
