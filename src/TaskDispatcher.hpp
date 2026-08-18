@@ -28,7 +28,9 @@ public:
     TaskDispatcher(gaudere::work::TaskStore& store, TaskExecutor& executor);
 
     [[nodiscard]] bool register_handler(std::string kind, TaskHandler& handler);
-    [[nodiscard]] DispatchResult dispatch_one(const std::string& worker);
+    [[nodiscard]] DispatchResult dispatch_one(
+        const std::string& worker,
+        TaskExecutor::CancellationProbe worker_stop_requested = {});
 
 private:
     [[nodiscard]] std::vector<std::string> accepted_kinds() const;
