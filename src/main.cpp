@@ -52,14 +52,15 @@ Options parse_options(const int argc, char* argv[])
     return options;
 }
 
-sigset_t block_shutdown_signals()
+sigset_t block_control_signals()
 {
     sigset_t signals;
     sigemptyset(&signals);
     sigaddset(&signals, SIGINT);
     sigaddset(&signals, SIGTERM);
+    sigaddset(&signals, SIGUSR1);
     if (pthread_sigmask(SIG_BLOCK, &signals, nullptr) != 0) {
-        throw std::runtime_error("cannot block shutdown signals");
+        throw std::runtime_error("cannot block control signals");
     }
     return signals;
 }
@@ -70,7 +71,7 @@ int main(int argc, char* argv[])
 {
     try {
         const auto options = parse_options(argc, argv);
-        const auto signals = block_shutdown_signals();
+        const auto signals = block_control_signals();
         const auto now = [] { return std::chrono::system_clock::now(); };
 
         gaudere::persistence::sqlite::ActionStore action_store(options.state_path);
@@ -92,13 +93,16 @@ int main(int argc, char* argv[])
 
         int received = 0;
         std::atomic_bool signal_wait_failed{false};
+        std::atomic_bool internal_wake{false};
         std::thread signal_waiter;
         if (!options.check_only) {
             signal_waiter = std::thread([&] {
                 int signal = 0;
                 if (sigwait(&signals, &signal) != 0) {
                     signal_wait_failed.store(true);
-                } else {
+                } else if (signal != SIGUSR1) {
+                    received = signal;
+                } else if (!internal_wake.load()) {
                     received = signal;
                 }
                 work_controller.stop();
@@ -117,14 +121,23 @@ int main(int argc, char* argv[])
             if (result == gaudere_agent::WorkCycleResult::state_conflict) {
                 work_conflict = true;
                 work_controller.stop();
+                if (signal_waiter.joinable()) {
+                    internal_wake.store(true);
+                    if (pthread_kill(signal_waiter.native_handle(), SIGUSR1) != 0) {
+                        signal_wait_failed.store(true);
+                    }
+                }
             }
         }
 
         if (signal_waiter.joinable()) {
             signal_waiter.join();
         }
-        if (received != 0) {
+        if (received == SIGINT || received == SIGTERM) {
             std::cout << "gaudere-agent: shutdown requested by signal "
+                      << received << '\n';
+        } else if (received == SIGUSR1) {
+            std::cout << "gaudere-agent: shutdown requested by control signal "
                       << received << '\n';
         }
 
@@ -132,7 +145,7 @@ int main(int argc, char* argv[])
         const bool actions_safe = action_runtime.try_mark_safe();
         const bool work_safe = work_runtime.try_mark_safe();
         if (signal_wait_failed.load()) {
-            std::cerr << "gaudere-agent: cannot wait for shutdown signal\n";
+            std::cerr << "gaudere-agent: cannot coordinate shutdown signal\n";
             return 1;
         }
         if (work_conflict) {
