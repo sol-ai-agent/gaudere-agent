@@ -115,18 +115,6 @@ not restore this state.
 semantic Gaudere state and may be recreated on a new machine. The SQLite database
 (and any SQLite side files present while it is live) are the important data.
 
-Before copying or backing up the live database directly, stop the user service so
-that the current single-owner model has no open writer:
-
-```sh
-systemctl --user stop gaudere-agent.service
-```
-
-For a machine migration, preserve the whole `~/.local/share/gaudere/state/`
-directory after the service has stopped, restore it for the target user, then
-reinstall/rebuild the service. The repository checkout and the persistent runtime
-state are deliberately separate.
-
 The current real Fedora checkout used for development is:
 
 ```text
@@ -135,6 +123,65 @@ The current real Fedora checkout used for development is:
 
 That path is a checkout location, not persistent runtime state; it may change on a
 new system without changing where the database is restored.
+
+### Stopped-state backup
+
+The host backup script archives the complete durable state directory except for the
+coordination-only `state.db.lock`. It acquires the same advisory lock used by
+`gaudere-agent` and refuses to proceed if any process currently owns the database.
+It therefore remains safe even if Gaudere is later launched by something other than
+systemd.
+
+For the normal Fedora deployment:
+
+```sh
+systemctl --user stop gaudere-agent.service
+archive=$(sh scripts/backup-state.sh)
+printf '%s\n' "$archive"
+systemctl --user start gaudere-agent.service
+```
+
+The default backup directory is:
+
+```text
+~/.local/share/gaudere/backups/
+```
+
+Each backup is a `gaudere-state-*.tar.gz` archive accompanied by a `.sha256` file.
+The script holds the state lock until archive creation completes. `GAUDERE_STATE_DIR`
+and `GAUDERE_BACKUP_DIR` may override the source and destination directories.
+
+Before restoring or transferring a backup, verify its checksum from its backup
+directory:
+
+```sh
+sha256sum -c gaudere-state-*.tar.gz.sha256
+```
+
+A restore should be extracted into a **new empty directory first**, never directly
+over a live state directory. Validate that copy before replacing the current state.
+The disposable validator below automates exactly that sequence. Keeping the old
+state directory intact until the restored copy has passed validation provides the
+rollback path for a real migration.
+
+### Disposable backup/restore validation
+
+After building `localhost/gaudere-agent:dev`:
+
+```sh
+sh scripts/validate-state-backup.sh
+```
+
+This uses only disposable directories under `~/.local/share/gaudere/validation/`.
+It creates durable task state, proves that a live owner blocks backup, creates and
+checksums a stopped-state archive, extracts it into a fresh directory, reads the
+original durable task from the restored database, and writes a new task afterward to
+prove the restored database remains usable. It does not touch the real
+`~/.local/share/gaudere/state/` directory.
+
+Set `KEEP_GAUDERE_VALIDATION_STATE=1` to keep the disposable directories for
+inspection after the test. `GAUDERE_IMAGE` and `PODMAN` have the same override
+semantics as the runtime validator below.
 
 ## Real-host runtime validation
 
