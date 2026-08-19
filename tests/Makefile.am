@@ -5,6 +5,7 @@ check_PROGRAMS = \
 	file_secret_source_test \
 	local_wait_handler_test \
 	openai_activation_test \
+	openai_one_shot_test \
 	openai_responses_hardening_test \
 	openai_responses_provider_test \
 	provider_task_handler_test \
@@ -53,6 +54,20 @@ openai_activation_test_SOURCES = \
 	../src/SecretSource.hpp \
 	../src/TaskExecutor.hpp
 openai_activation_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
+
+openai_one_shot_test_SOURCES = \
+	openai_one_shot_test.cpp \
+	../src/OpenAIOneShot.cpp \
+	../src/OpenAIOneShot.hpp \
+	../src/TaskDispatcher.cpp \
+	../src/TaskDispatcher.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp \
+	../src/TaskReport.cpp \
+	../src/TaskReport.hpp \
+	../src/WorkController.cpp \
+	../src/WorkController.hpp
+openai_one_shot_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 openai_responses_hardening_test_SOURCES = \
 	openai_responses_hardening_test.cpp \
