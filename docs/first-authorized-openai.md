@@ -21,8 +21,9 @@ Gaudere.
 Before any secret is installed on the host:
 
 1. Create/select the dedicated `Gaudere` project.
-2. In project Limits / Model Usage, initially allow only `gpt-5.6-luna` if the UI
-   permits a model allowlist.
+2. In project Limits / Model Usage, initially allow only `gpt-5.6-sol` if the UI
+   permits a model allowlist. The generic `gpt-5.6` alias currently routes to Sol, but
+   the bootstrap configuration uses the explicit Sol model name.
 3. Set conservative project rate limits for that model.
 4. Set a low monthly project spend limit and enable **hard enforcement**. For the
    experimental bootstrap phase, `$5/month` is the recommended starting ceiling; it
@@ -31,12 +32,11 @@ Before any secret is installed on the host:
    is visible well before the limit.
 6. Create a new **project** secret key owned by Bertrand.
 7. Choose `Restricted` permissions.
-8. Permit only the request/write permission necessary for the Responses endpoint and
-   set unrelated API resources/endpoints to `None`. Do not continue with an `All`
-   permission key merely to make the first test easier.
+8. Permit only Read/Write on the Responses endpoint as required by the current key UI,
+   and set unrelated API resources/endpoints to `None`.
 
 The exact permission labels are OpenAI UI metadata and may evolve. If the UI cannot
-express a Responses-only restricted key, stop and review the actual permission list
+express this narrow Responses-only key, stop and review the actual permission list
 before broadening it.
 
 ## Install the key locally
@@ -70,11 +70,11 @@ restart/activation model.
 
 ## Rebuild before using the real key
 
-The first real-host provider image predates two later hardenings. Pull and rebuild
-current main before an authorized call so the image includes:
+Pull and rebuild current main before an authorized call so the image includes:
 
 - normalized provider HTTP diagnostics that never persist provider `error.message`;
-- explicit OpenAI `max_output_tokens: 1024` generation bound.
+- explicit OpenAI `max_output_tokens: 1024` generation bound;
+- the explicit `gpt-5.6-sol` authorized-validation default.
 
 ```sh
 git pull --ff-only
@@ -96,7 +96,7 @@ It uses:
 - disposable SQLite state beneath `~/.local/share/gaudere/validation/`;
 - the existing rootless Podman secret mounted mode `0400`;
 - no published inbound port;
-- model `gpt-5.6-luna` by default;
+- model `gpt-5.6-sol` by default;
 - the normal durable Task -> Action -> effect marker -> OpenAI adapter -> HTTPS path;
 - the provider-wide 1024 output-token cap.
 
