@@ -1,5 +1,6 @@
 #include "LocalEchoHandler.hpp"
 #include "LocalWaitHandler.hpp"
+#include "OpenAIActivation.hpp"
 #include "StateLock.hpp"
 #include "TaskDispatcher.hpp"
 #include "TaskExecutor.hpp"
@@ -18,27 +19,40 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
 
 namespace {
 
+constexpr const char* openai_task_kind = "provider.openai.responses";
+
 struct Options {
     std::string state_path;
     bool check_only = false;
     bool echo = false;
     bool enqueue_wait = false;
+    bool enqueue_openai = false;
     bool inspect_task = false;
     bool cancel_task = false;
+    bool openai_enabled = false;
+    bool openai_secret_explicit = false;
+    bool secret_directory_explicit = false;
     std::string task_id;
     std::string text;
+    std::string openai_model;
+    std::string openai_secret = "openai-api-key";
+    std::string secret_directory = "/run/secrets";
 };
 
 void usage(const char* program)
 {
-    std::cout << "Usage: " << program
-              << " --state PATH [--check | --echo ID TEXT | --enqueue-wait ID MS | --task ID | --cancel ID REASON]\n";
+    std::cout
+        << "Usage: " << program << " --state PATH "
+        << "[--check | --echo ID TEXT | --enqueue-wait ID MS | "
+        << "--enqueue-openai ID TEXT | --task ID | --cancel ID REASON] "
+        << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
 Options parse_options(const int argc, char* argv[])
@@ -58,6 +72,10 @@ Options parse_options(const int argc, char* argv[])
             options.enqueue_wait = true;
             options.task_id = argv[++index];
             options.text = argv[++index];
+        } else if (argument == "--enqueue-openai" && index + 2 < argc) {
+            options.enqueue_openai = true;
+            options.task_id = argv[++index];
+            options.text = argv[++index];
         } else if (argument == "--task" && index + 1 < argc) {
             options.inspect_task = true;
             options.task_id = argv[++index];
@@ -65,6 +83,15 @@ Options parse_options(const int argc, char* argv[])
             options.cancel_task = true;
             options.task_id = argv[++index];
             options.text = argv[++index];
+        } else if (argument == "--openai-model" && index + 1 < argc) {
+            options.openai_enabled = true;
+            options.openai_model = argv[++index];
+        } else if (argument == "--openai-secret" && index + 1 < argc) {
+            options.openai_secret_explicit = true;
+            options.openai_secret = argv[++index];
+        } else if (argument == "--secret-dir" && index + 1 < argc) {
+            options.secret_directory_explicit = true;
+            options.secret_directory = argv[++index];
         } else if (argument == "--help") {
             usage(argv[0]);
             std::exit(0);
@@ -72,30 +99,60 @@ Options parse_options(const int argc, char* argv[])
             throw std::invalid_argument("unknown or incomplete argument: " + argument);
         }
     }
+
     if (options.state_path.empty()) {
         throw std::invalid_argument("--state PATH is required");
     }
+
     const int modes = static_cast<int>(options.check_only)
         + static_cast<int>(options.echo)
         + static_cast<int>(options.enqueue_wait)
+        + static_cast<int>(options.enqueue_openai)
         + static_cast<int>(options.inspect_task)
         + static_cast<int>(options.cancel_task);
     if (modes > 1) {
         throw std::invalid_argument(
-            "--check, --echo, --enqueue-wait, --task, and --cancel are mutually exclusive");
+            "--check, --echo, --enqueue-wait, --enqueue-openai, --task, and --cancel are mutually exclusive");
     }
-    if ((options.echo || options.enqueue_wait || options.inspect_task
-         || options.cancel_task) && options.task_id.empty()) {
+
+    if ((options.echo || options.enqueue_wait || options.enqueue_openai
+         || options.inspect_task || options.cancel_task)
+        && options.task_id.empty()) {
         throw std::invalid_argument("task ID must not be empty");
     }
     if (options.cancel_task && options.text.empty()) {
         throw std::invalid_argument("cancellation reason must not be empty");
+    }
+    if (options.enqueue_openai && options.text.empty()) {
+        throw std::invalid_argument("OpenAI task input must not be empty");
     }
     if (options.enqueue_wait
         && !gaudere_agent::parse_local_wait_duration(options.text)) {
         throw std::invalid_argument(
             "--enqueue-wait MS must be an integer from 1 to 5000");
     }
+
+    if (!options.openai_enabled
+        && (options.openai_secret_explicit || options.secret_directory_explicit)) {
+        throw std::invalid_argument(
+            "--openai-secret and --secret-dir require --openai-model");
+    }
+    if (options.openai_enabled && options.openai_model.empty()) {
+        throw std::invalid_argument("OpenAI model must not be empty");
+    }
+    if (options.openai_enabled && options.openai_secret.empty()) {
+        throw std::invalid_argument("OpenAI secret name must not be empty");
+    }
+    if (options.openai_enabled && options.secret_directory.empty()) {
+        throw std::invalid_argument("secret directory must not be empty");
+    }
+    if (options.openai_enabled
+        && (options.echo || options.enqueue_wait || options.enqueue_openai
+            || options.inspect_task || options.cancel_task)) {
+        throw std::invalid_argument(
+            "OpenAI activation is only valid in service mode or with --check");
+    }
+
     return options;
 }
 
@@ -146,6 +203,23 @@ gaudere::work::Task make_wait_task(const Options& options)
     return task;
 }
 
+gaudere::work::Task make_openai_task(const Options& options)
+{
+    gaudere::work::Task task;
+    task.id = options.task_id;
+    task.idempotency_key = "openai.responses:" + options.task_id;
+    task.kind = openai_task_kind;
+    task.input_content_type = "text/plain; charset=utf-8";
+    task.input = options.text;
+    task.limits.max_input_bytes = 16 * 1024;
+    task.limits.max_output_bytes = 64 * 1024;
+    task.limits.max_runtime = std::chrono::seconds{60};
+    // Attempt two is a reconciliation opportunity after process death. The
+    // ProviderTaskHandler sees the existing Action and never calls OpenAI again.
+    task.limits.max_attempts = 2;
+    return task;
+}
+
 int inspect_task(gaudere::work::TaskStore& store, const std::string& id)
 {
     const auto task = store.find(id);
@@ -183,21 +257,23 @@ int cancel_task(gaudere::work::Runtime& runtime,
     return 0;
 }
 
-int enqueue_wait(gaudere::work::Runtime& runtime,
+int enqueue_task(gaudere::work::Runtime& runtime,
                  gaudere::work::TaskStore& store,
-                 const Options& options)
+                 gaudere::work::Task task,
+                 const std::string& description)
 {
     runtime.recover();
-    const auto submit = runtime.submit(make_wait_task(options));
+    const auto id = task.id;
+    const auto submit = runtime.submit(task);
     if (submit != gaudere::work::SubmitResult::accepted
         && submit != gaudere::work::SubmitResult::duplicate) {
-        throw std::runtime_error("local.wait submission rejected");
+        throw std::runtime_error(description + " submission rejected");
     }
-    const auto task = store.find(options.task_id);
-    if (!task) {
-        throw std::runtime_error("queued local.wait task is missing");
+    const auto stored = store.find(id);
+    if (!stored) {
+        throw std::runtime_error(description + " task is missing after submission");
     }
-    gaudere_agent::print_task_report(std::cout, *task);
+    gaudere_agent::print_task_report(std::cout, *stored);
     return 0;
 }
 
@@ -223,7 +299,12 @@ int main(int argc, char* argv[])
             return cancel_task(work_runtime, task_store, options.task_id, options.text);
         }
         if (options.enqueue_wait) {
-            return enqueue_wait(work_runtime, task_store, options);
+            return enqueue_task(work_runtime, task_store, make_wait_task(options),
+                                "local.wait");
+        }
+        if (options.enqueue_openai) {
+            return enqueue_task(work_runtime, task_store, make_openai_task(options),
+                                "OpenAI Responses");
         }
 
         gaudere::scheduling::wake::Scheduler work_scheduler;
@@ -233,10 +314,24 @@ int main(int argc, char* argv[])
         gaudere_agent::LocalWaitHandler wait_handler;
         gaudere_agent::WorkController work_controller(
             work_scheduler, work_runtime, task_dispatcher, "main-worker");
+        std::unique_ptr<gaudere_agent::OpenAIActivation> openai_activation;
 
         if (!task_dispatcher.register_handler("local.echo", echo_handler)
             || !task_dispatcher.register_handler("local.wait", wait_handler)) {
             throw std::runtime_error("cannot register local task handlers");
+        }
+
+        if (options.openai_enabled) {
+            openai_activation = std::make_unique<gaudere_agent::OpenAIActivation>(
+                action_runtime, action_store, options.openai_model,
+                options.openai_secret, options.secret_directory);
+            if (!task_dispatcher.register_handler(
+                    openai_task_kind, openai_activation->handler())) {
+                throw std::runtime_error("cannot register OpenAI provider handler");
+            }
+            std::cout << "gaudere-agent: OpenAI provider enabled model="
+                      << options.openai_model << " secret="
+                      << options.openai_secret << '\n';
         }
 
         action_runtime.recover();
