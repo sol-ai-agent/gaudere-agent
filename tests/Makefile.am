@@ -3,6 +3,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS
 check_PROGRAMS = \
 	curl_http_transport_test \
 	file_secret_source_test \
+	live_control_test \
 	local_wait_handler_test \
 	openai_activation_test \
 	openai_one_shot_test \
@@ -30,6 +31,12 @@ file_secret_source_test_SOURCES = \
 	../src/FileSecretSource.hpp \
 	../src/SecretSource.hpp
 file_secret_source_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+live_control_test_SOURCES = \
+	live_control_test.cpp \
+	../src/LiveControl.cpp \
+	../src/LiveControl.hpp
+live_control_test_LDADD = $(JSON_LIBS)
 
 local_wait_handler_test_SOURCES = \
 	local_wait_handler_test.cpp \
