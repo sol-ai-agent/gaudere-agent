@@ -16,6 +16,7 @@ namespace {
 using Json = nlohmann::json;
 
 constexpr std::uint64_t max_openai_output_bytes = 256 * 1024;
+constexpr std::uint64_t max_openai_output_tokens = 1024;
 constexpr std::uint64_t max_openai_response_bytes = 1024 * 1024;
 constexpr std::uint64_t response_envelope_bytes = 64 * 1024;
 
@@ -182,6 +183,7 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
     Json payload = {
         {"model", model_},
         {"input", request.input},
+        {"max_output_tokens", max_openai_output_tokens},
         {"store", false},
         {"stream", false}
     };
