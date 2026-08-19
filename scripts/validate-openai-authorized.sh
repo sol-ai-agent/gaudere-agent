@@ -3,7 +3,7 @@ set -eu
 
 podman_command=${PODMAN:-podman}
 image=${GAUDERE_IMAGE:-localhost/gaudere-agent:dev}
-model=${GAUDERE_OPENAI_VALIDATION_MODEL:-gpt-5.6-luna}
+model=${GAUDERE_OPENAI_VALIDATION_MODEL:-gpt-5.6-sol}
 secret_name=${GAUDERE_OPENAI_SECRET_NAME:-gaudere-openai-api-key}
 secret_target="gaudere-openai-api-key"
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
