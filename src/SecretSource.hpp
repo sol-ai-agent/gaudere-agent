@@ -44,7 +44,9 @@ public:
 
     [[nodiscard]] std::string_view view() const noexcept
     {
-        return std::string_view(bytes_.data(), bytes_.size());
+        return bytes_.empty()
+            ? std::string_view{}
+            : std::string_view(bytes_.data(), bytes_.size());
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return bytes_.size(); }
