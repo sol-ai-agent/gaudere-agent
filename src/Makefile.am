@@ -1,6 +1,7 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent
+bin_PROGRAMS = gaudere-agent gaudere-control
+
 gaudere_agent_SOURCES = \
 	main.cpp \
 	CurlHttpTransport.cpp \
@@ -8,6 +9,8 @@ gaudere_agent_SOURCES = \
 	FileSecretSource.cpp \
 	FileSecretSource.hpp \
 	HttpTransport.hpp \
+	LiveControl.cpp \
+	LiveControl.hpp \
 	LocalEchoHandler.cpp \
 	LocalEchoHandler.hpp \
 	LocalWaitHandler.cpp \
@@ -33,3 +36,9 @@ gaudere_agent_SOURCES = \
 	WorkController.cpp \
 	WorkController.hpp
 gaudere_agent_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
+
+gaudere_control_SOURCES = \
+	control_main.cpp \
+	LiveControl.cpp \
+	LiveControl.hpp
+gaudere_control_LDADD = $(JSON_LIBS)
