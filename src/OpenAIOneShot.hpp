@@ -1,6 +1,7 @@
 #ifndef GAUDERE_AGENT_OPENAI_ONE_SHOT_HPP
 #define GAUDERE_AGENT_OPENAI_ONE_SHOT_HPP
 
+#include "OpenAITask.hpp"
 #include "WorkController.hpp"
 
 #include <gaudere/work/Runtime.hpp>
@@ -9,11 +10,6 @@
 #include <string>
 
 namespace gaudere_agent {
-
-inline constexpr const char* openai_task_kind = "provider.openai.responses";
-
-[[nodiscard]] gaudere::work::Task make_openai_task(std::string id,
-                                                    std::string input);
 
 /** Submit/reuse one durable OpenAI task and drive the existing WorkController
  * until the task reaches a terminal state, then print its report and stop the
