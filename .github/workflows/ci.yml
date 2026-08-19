@@ -46,6 +46,7 @@ jobs:
           sh -n agent/scripts/install-user-service.sh
           sh -n agent/scripts/install-openai-secret.sh
           sh -n agent/scripts/backup-state.sh
+          sh -n agent/scripts/control-service.sh
           sh -n agent/scripts/validate-host-runtime.sh
           sh -n agent/scripts/validate-state-backup.sh
           sh -n agent/scripts/validate-provider-secret.sh
