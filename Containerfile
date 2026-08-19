@@ -11,6 +11,7 @@ RUN dnf install -y \
         diffutils \
         gcc-c++ \
         git \
+        json-devel \
         libtool \
         make \
         pkgconf-pkg-config \
