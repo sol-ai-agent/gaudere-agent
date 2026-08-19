@@ -12,6 +12,7 @@ RUN dnf install -y \
         gcc-c++ \
         git \
         json-devel \
+        libcurl-devel \
         libtool \
         make \
         pkgconf-pkg-config \
@@ -52,7 +53,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
 
 FROM registry.fedoraproject.org/fedora:44
 
-RUN dnf install -y libstdc++ sqlite-libs \
+RUN dnf install -y libcurl libstdc++ sqlite-libs \
     && dnf clean all \
     && useradd --uid 1000 --create-home --shell /sbin/nologin gaudere
 
