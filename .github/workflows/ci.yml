@@ -22,6 +22,7 @@ jobs:
           gcc-c++
           git
           gzip
+          json-devel
           libtool
           make
           pkgconf-pkg-config

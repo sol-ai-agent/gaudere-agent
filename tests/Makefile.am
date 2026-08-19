@@ -1,8 +1,10 @@
-AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS)
+AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS)
 
 check_PROGRAMS = \
 	file_secret_source_test \
 	local_wait_handler_test \
+	openai_responses_hardening_test \
+	openai_responses_provider_test \
 	provider_task_handler_test \
 	state_lock_test \
 	task_dispatcher_test \
@@ -17,13 +19,31 @@ file_secret_source_test_SOURCES = \
 	../src/FileSecretSource.cpp \
 	../src/FileSecretSource.hpp \
 	../src/SecretSource.hpp
-file_secret_source_test_LDADD = $(GAUDERE_LIBS)
+file_secret_source_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 local_wait_handler_test_SOURCES = \
 	local_wait_handler_test.cpp \
 	../src/LocalWaitHandler.cpp \
 	../src/LocalWaitHandler.hpp
-local_wait_handler_test_LDADD = $(GAUDERE_LIBS)
+local_wait_handler_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+openai_responses_hardening_test_SOURCES = \
+	openai_responses_hardening_test.cpp \
+	../src/HttpTransport.hpp \
+	../src/OpenAIResponsesProvider.cpp \
+	../src/OpenAIResponsesProvider.hpp \
+	../src/Provider.hpp \
+	../src/SecretSource.hpp
+openai_responses_hardening_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+openai_responses_provider_test_SOURCES = \
+	openai_responses_provider_test.cpp \
+	../src/HttpTransport.hpp \
+	../src/OpenAIResponsesProvider.cpp \
+	../src/OpenAIResponsesProvider.hpp \
+	../src/Provider.hpp \
+	../src/SecretSource.hpp
+openai_responses_provider_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 provider_task_handler_test_SOURCES = \
 	provider_task_handler_test.cpp \
@@ -32,19 +52,19 @@ provider_task_handler_test_SOURCES = \
 	../src/ProviderTaskHandler.hpp \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
-provider_task_handler_test_LDADD = $(GAUDERE_LIBS)
+provider_task_handler_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 state_lock_test_SOURCES = \
 	state_lock_test.cpp \
 	../src/StateLock.cpp \
 	../src/StateLock.hpp
-state_lock_test_LDADD = $(GAUDERE_LIBS)
+state_lock_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 task_executor_test_SOURCES = \
 	task_executor_test.cpp \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
-task_executor_test_LDADD = $(GAUDERE_LIBS)
+task_executor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 task_dispatcher_test_SOURCES = \
 	task_dispatcher_test.cpp \
@@ -52,13 +72,13 @@ task_dispatcher_test_SOURCES = \
 	../src/TaskDispatcher.hpp \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
-task_dispatcher_test_LDADD = $(GAUDERE_LIBS)
+task_dispatcher_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 task_report_test_SOURCES = \
 	task_report_test.cpp \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
-task_report_test_LDADD = $(GAUDERE_LIBS)
+task_report_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 work_controller_test_SOURCES = \
 	work_controller_test.cpp \
@@ -68,4 +88,4 @@ work_controller_test_SOURCES = \
 	../src/TaskDispatcher.hpp \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
-work_controller_test_LDADD = $(GAUDERE_LIBS)
+work_controller_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)

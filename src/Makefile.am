@@ -1,14 +1,17 @@
-AM_CPPFLAGS = $(GAUDERE_CFLAGS)
+AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS)
 
 bin_PROGRAMS = gaudere-agent
 gaudere_agent_SOURCES = \
 	main.cpp \
 	FileSecretSource.cpp \
 	FileSecretSource.hpp \
+	HttpTransport.hpp \
 	LocalEchoHandler.cpp \
 	LocalEchoHandler.hpp \
 	LocalWaitHandler.cpp \
 	LocalWaitHandler.hpp \
+	OpenAIResponsesProvider.cpp \
+	OpenAIResponsesProvider.hpp \
 	Provider.hpp \
 	ProviderTaskHandler.cpp \
 	ProviderTaskHandler.hpp \
@@ -23,4 +26,4 @@ gaudere_agent_SOURCES = \
 	TaskReport.hpp \
 	WorkController.cpp \
 	WorkController.hpp
-gaudere_agent_LDADD = $(GAUDERE_LIBS)
+gaudere_agent_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
