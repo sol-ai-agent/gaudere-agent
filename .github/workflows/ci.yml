@@ -47,6 +47,7 @@ jobs:
           sh -n agent/scripts/backup-state.sh
           sh -n agent/scripts/validate-host-runtime.sh
           sh -n agent/scripts/validate-state-backup.sh
+          sh -n agent/scripts/validate-provider-secret.sh
 
       - name: Build and install Gaudere
         run: |

@@ -59,6 +59,34 @@ Action is created.
 provider wiring and secret preflight, starts no provider task, and makes no network
 request by itself.
 
+## Disposable Podman secret validation
+
+After building `localhost/gaudere-agent:dev`, the host can validate the real Podman
+secret-delivery path without using a real credential or enabling networking:
+
+```sh
+sh scripts/validate-provider-secret.sh
+```
+
+The validator:
+
+1. creates a temporary state directory below `~/.local/share/gaudere/validation/`;
+2. creates a synthetic Podman secret from standard input with no trailing newline;
+3. runs the hardened container with `Network=none` and mounts that secret as
+   `/run/secrets/validation-openai-key`;
+4. first mounts it as mode `0444` and proves Gaudere rejects group/other-readable
+   credential files;
+5. then mounts the same synthetic value as UID/GID 1000 and mode `0400` and proves
+   OpenAI activation preflight reaches `safe` successfully;
+6. removes the synthetic Podman secret on exit.
+
+The real service may remain running because validation uses a separate SQLite state
+directory and a separate container invocation. No OpenAI request is made.
+
+Set `KEEP_GAUDERE_VALIDATION_STATE=1` to keep the temporary state directory for
+diagnostics. `GAUDERE_IMAGE` and `PODMAN` have the same override purpose as the other
+host validators.
+
 ## Deployment status
 
 This activation mechanism is compiled but **not deployed as enabled configuration**.
