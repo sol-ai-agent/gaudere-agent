@@ -31,6 +31,12 @@ PKG_CHECK_MODULES(
     [],
     [AC_MSG_FAILURE([nlohmann JSON 3.11.0 or newer is required])])
 
+PKG_CHECK_MODULES(
+    [CURL],
+    [libcurl >= 8.0.0],
+    [],
+    [AC_MSG_FAILURE([libcurl 8.0.0 or newer is required])])
+
 AC_SEARCH_LIBS(
     [pthread_sigmask],
     [pthread],
