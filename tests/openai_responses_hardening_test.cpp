@@ -1,5 +1,7 @@
 #include "OpenAIResponsesProvider.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
 #include <iostream>
 #include <optional>
@@ -12,6 +14,7 @@ namespace {
 
 using namespace gaudere_agent;
 using namespace std::chrono_literals;
+using Json = nlohmann::json;
 
 int failures = 0;
 
@@ -36,14 +39,16 @@ public:
 class Transport final : public HttpTransport {
 public:
     HttpTransportResult perform(
-        const HttpRequest&,
+        const HttpRequest& request,
         std::optional<HttpSensitiveHeader>) override
     {
         ++calls;
+        last_request = request;
         return result;
     }
 
     int calls = 0;
+    HttpRequest last_request;
     HttpTransportResult result{
         HttpTransportOutcome::response,
         HttpResponse{200, {}, R"({"id":"resp","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]})"},
@@ -91,6 +96,22 @@ void test_control_character_in_secret_is_rejected()
            "secret containing newline is rejected");
     expect(transport.calls == 0,
            "invalid bearer secret never reaches HTTP transport");
+}
+
+void test_provider_sets_explicit_output_token_cap()
+{
+    Secret secret;
+    Transport transport;
+    OpenAIResponsesProvider provider(transport, secret, "gpt-test");
+
+    const auto result = provider.invoke(request());
+    expect(result.outcome == ProviderOutcome::succeeded,
+           "bounded output-token fixture succeeds");
+    const auto body = Json::parse(transport.last_request.body);
+    expect(body.contains("max_output_tokens")
+               && body.at("max_output_tokens").is_number_unsigned()
+               && body.at("max_output_tokens").get<std::uint64_t>() == 1024,
+           "every OpenAI Responses request has an explicit 1024-token generation cap");
 }
 
 void test_non_json_http_error_preserves_status()
@@ -149,6 +170,7 @@ int main()
 {
     test_plain_http_endpoint_is_rejected();
     test_control_character_in_secret_is_rejected();
+    test_provider_sets_explicit_output_token_cap();
     test_non_json_http_error_preserves_status();
     test_provider_http_error_message_is_not_persisted();
     test_failed_status_error_message_is_not_persisted();
