@@ -57,21 +57,6 @@ std::optional<std::string> json_string(const Json& object, const char* key)
     return found->get<std::string>();
 }
 
-std::string provider_error_message(const Json& document,
-                                   const std::string& fallback)
-{
-    if (!document.is_object()) {
-        return fallback;
-    }
-    const auto error = document.find("error");
-    if (error != document.end() && error->is_object()) {
-        if (const auto message = json_string(*error, "message")) {
-            return *message;
-        }
-    }
-    return fallback;
-}
-
 std::string incomplete_reason(const Json& document)
 {
     if (!document.is_object()) {
@@ -238,15 +223,13 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
 
     const auto& response = *transport_result.response;
     if (response.status < 200 || response.status >= 300) {
-        std::string message = "OpenAI returned HTTP " + std::to_string(response.status);
-        try {
-            const auto document = Json::parse(response.body);
-            message = provider_error_message(document, message);
-        } catch (...) {
-            // The HTTP status itself is already a definite provider response.
-        }
+        // Provider-supplied error text is deliberately not persisted. Authentication
+        // errors may echo masked fragments of the credential and other provider
+        // messages may contain request data. The durable status code is sufficient
+        // to classify a definite HTTP rejection; raw response text stays at the
+        // transient transport boundary.
         return rejected("openai_http_" + std::to_string(response.status),
-                        std::move(message));
+                        "OpenAI returned HTTP " + std::to_string(response.status));
     }
 
     Json document;
@@ -269,8 +252,9 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
         return rejected("openai_incomplete", incomplete_reason(document));
     }
     if (*status == "failed") {
-        return rejected("openai_failed",
-                        provider_error_message(document, "OpenAI response failed"));
+        // As with non-2xx responses, do not durably retain provider-supplied error
+        // messages. They are not part of Gaudere's trusted diagnostic vocabulary.
+        return rejected("openai_failed", "OpenAI response reported failed status");
     }
     if (*status != "completed") {
         return rejected("openai_unexpected_status",
