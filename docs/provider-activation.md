@@ -20,7 +20,7 @@ Action and converge the Task to manual review without replay.
 
 ## Explicit service activation
 
-OpenAI is registered only when service/check mode receives an explicit model:
+OpenAI is registered only when service/check/one-shot mode receives an explicit model:
 
 ```sh
 gaudere-agent --state /path/to/state.db \
@@ -40,6 +40,28 @@ accepted as a command-line option or ordinary environment variable.
 The OpenAI endpoint is not configurable through service activation. Production
 activation always uses the adapter's fixed HTTPS endpoint, so changing local model or
 secret-name configuration cannot redirect the Bearer credential to another host.
+
+## Durable one-shot execution
+
+A deliberately bounded operator/test invocation can activate the provider, submit one
+durable task, drive the normal WorkController until that task becomes terminal, print
+the durable task report, and drain to `safe`:
+
+```sh
+gaudere-agent --state /path/to/state.db \
+  --openai-once task-id "bounded text input" \
+  --openai-model MODEL \
+  --openai-secret SECRET_NAME
+```
+
+This is not a bypass around Task/Action durability: it uses the same TaskStore,
+TaskExecutor, TaskDispatcher, WorkController, provider Action, effect-start marker,
+and terminal result path as service execution. Reusing an already-terminal task ID
+reports the existing durable result without invoking the provider again.
+
+Unlike long-running service mode, one-shot mode does not block SIGINT/SIGTERM. Killing
+it during an external call is therefore treated as a real process crash; the durable
+provider effect marker prevents a replacement process from blindly replaying the call.
 
 ## Startup preflight
 
@@ -83,9 +105,43 @@ The validator:
 The real service may remain running because validation uses a separate SQLite state
 directory and a separate container invocation. No OpenAI request is made.
 
-Set `KEEP_GAUDERE_VALIDATION_STATE=1` to keep the temporary state directory for
-diagnostics. `GAUDERE_IMAGE` and `PODMAN` have the same override purpose as the other
-host validators.
+## Disposable OpenAI network validation
+
+The next validation deliberately crosses the outbound Internet boundary but still uses
+**no real API credential**:
+
+```sh
+sh scripts/validate-openai-network.sh
+```
+
+It creates a disposable state directory and a synthetic, deliberately invalid Podman
+secret, then starts one hardened container with Podman's normal outbound networking
+and **no published inbound ports**. It runs one `--openai-once` task against the fixed
+OpenAI HTTPS Responses endpoint.
+
+The expected success condition is not model output. It is a definite HTTP 4xx response
+from the OpenAI API, recorded durably as:
+
+```text
+status=failed
+attempts=1/2
+failure_code="openai_http_4xx"
+```
+
+followed by `gaudere-agent: safe`. A DNS/TLS/timeout/transfer ambiguity becomes
+`manual_review` and causes the validator to fail. This proves the Task -> Action ->
+OpenAI adapter -> libcurl -> DNS/TLS/HTTP path independently of a usable credential.
+
+The script defaults to model `gpt-5.6`, matching the OpenAI platform example observed
+when the validator was authored. `GAUDERE_OPENAI_VALIDATION_MODEL` may override that
+non-secret validation model if the public model surface changes later.
+
+This network validator is **not run in CI**. CI checks only its shell syntax. Running it
+on the Fedora host remains a separate operator-visible decision because it is the first
+intentional outbound OpenAI request made by Gaudere.
+
+For both host validators, `KEEP_GAUDERE_VALIDATION_STATE=1` keeps disposable state for
+diagnostics. `GAUDERE_IMAGE` and `PODMAN` may override the image and Podman command.
 
 ## Deployment status
 
@@ -99,7 +155,7 @@ Network=none
 and contains no `Secret=` line and no `--openai-model` argument. Therefore the real
 service still registers only the local effect-free handlers.
 
-The first real secret mount and outbound-network validation remain separate,
+The first real secret mount and normal provider activation remain separate,
 operator-visible steps. During the initial phase Bertrand retains direct control over
 creating, replacing, and revoking the provider secret. A future Gaudere-owned identity
 may be considered separately, with an external human recovery/revocation path retained.

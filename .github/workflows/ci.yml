@@ -48,6 +48,7 @@ jobs:
           sh -n agent/scripts/validate-host-runtime.sh
           sh -n agent/scripts/validate-state-backup.sh
           sh -n agent/scripts/validate-provider-secret.sh
+          sh -n agent/scripts/validate-openai-network.sh
 
       - name: Build and install Gaudere
         run: |

@@ -1,6 +1,7 @@
 #include "LocalEchoHandler.hpp"
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
+#include "OpenAIOneShot.hpp"
 #include "StateLock.hpp"
 #include "TaskDispatcher.hpp"
 #include "TaskExecutor.hpp"
@@ -26,14 +27,13 @@
 
 namespace {
 
-constexpr const char* openai_task_kind = "provider.openai.responses";
-
 struct Options {
     std::string state_path;
     bool check_only = false;
     bool echo = false;
     bool enqueue_wait = false;
     bool enqueue_openai = false;
+    bool openai_once = false;
     bool inspect_task = false;
     bool cancel_task = false;
     bool openai_enabled = false;
@@ -51,7 +51,8 @@ void usage(const char* program)
     std::cout
         << "Usage: " << program << " --state PATH "
         << "[--check | --echo ID TEXT | --enqueue-wait ID MS | "
-        << "--enqueue-openai ID TEXT | --task ID | --cancel ID REASON] "
+        << "--enqueue-openai ID TEXT | --openai-once ID TEXT | --task ID | "
+        << "--cancel ID REASON] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -74,6 +75,10 @@ Options parse_options(const int argc, char* argv[])
             options.text = argv[++index];
         } else if (argument == "--enqueue-openai" && index + 2 < argc) {
             options.enqueue_openai = true;
+            options.task_id = argv[++index];
+            options.text = argv[++index];
+        } else if (argument == "--openai-once" && index + 2 < argc) {
+            options.openai_once = true;
             options.task_id = argv[++index];
             options.text = argv[++index];
         } else if (argument == "--task" && index + 1 < argc) {
@@ -108,22 +113,23 @@ Options parse_options(const int argc, char* argv[])
         + static_cast<int>(options.echo)
         + static_cast<int>(options.enqueue_wait)
         + static_cast<int>(options.enqueue_openai)
+        + static_cast<int>(options.openai_once)
         + static_cast<int>(options.inspect_task)
         + static_cast<int>(options.cancel_task);
     if (modes > 1) {
         throw std::invalid_argument(
-            "--check, --echo, --enqueue-wait, --enqueue-openai, --task, and --cancel are mutually exclusive");
+            "--check, --echo, --enqueue-wait, --enqueue-openai, --openai-once, --task, and --cancel are mutually exclusive");
     }
 
     if ((options.echo || options.enqueue_wait || options.enqueue_openai
-         || options.inspect_task || options.cancel_task)
+         || options.openai_once || options.inspect_task || options.cancel_task)
         && options.task_id.empty()) {
         throw std::invalid_argument("task ID must not be empty");
     }
     if (options.cancel_task && options.text.empty()) {
         throw std::invalid_argument("cancellation reason must not be empty");
     }
-    if (options.enqueue_openai && options.text.empty()) {
+    if ((options.enqueue_openai || options.openai_once) && options.text.empty()) {
         throw std::invalid_argument("OpenAI task input must not be empty");
     }
     if (options.enqueue_wait
@@ -136,6 +142,9 @@ Options parse_options(const int argc, char* argv[])
         && (options.openai_secret_explicit || options.secret_directory_explicit)) {
         throw std::invalid_argument(
             "--openai-secret and --secret-dir require --openai-model");
+    }
+    if (options.openai_once && !options.openai_enabled) {
+        throw std::invalid_argument("--openai-once requires --openai-model");
     }
     if (options.openai_enabled && options.openai_model.empty()) {
         throw std::invalid_argument("OpenAI model must not be empty");
@@ -150,7 +159,7 @@ Options parse_options(const int argc, char* argv[])
         && (options.echo || options.enqueue_wait || options.enqueue_openai
             || options.inspect_task || options.cancel_task)) {
         throw std::invalid_argument(
-            "OpenAI activation is only valid in service mode or with --check");
+            "OpenAI activation is only valid in service mode, with --check, or with --openai-once");
     }
 
     return options;
@@ -199,23 +208,6 @@ gaudere::work::Task make_wait_task(const Options& options)
     task.limits.max_input_bytes = 32;
     task.limits.max_output_bytes = 64;
     task.limits.max_runtime = *duration + std::chrono::milliseconds{250};
-    task.limits.max_attempts = 2;
-    return task;
-}
-
-gaudere::work::Task make_openai_task(const Options& options)
-{
-    gaudere::work::Task task;
-    task.id = options.task_id;
-    task.idempotency_key = "openai.responses:" + options.task_id;
-    task.kind = openai_task_kind;
-    task.input_content_type = "text/plain; charset=utf-8";
-    task.input = options.text;
-    task.limits.max_input_bytes = 16 * 1024;
-    task.limits.max_output_bytes = 64 * 1024;
-    task.limits.max_runtime = std::chrono::seconds{60};
-    // Attempt two is a reconciliation opportunity after process death. The
-    // ProviderTaskHandler sees the existing Action and never calls OpenAI again.
     task.limits.max_attempts = 2;
     return task;
 }
@@ -283,7 +275,11 @@ int main(int argc, char* argv[])
 {
     try {
         const auto options = parse_options(argc, argv);
-        const auto signals = block_control_signals();
+        sigset_t signals{};
+        if (!options.openai_once) {
+            signals = block_control_signals();
+        }
+
         gaudere_agent::StateLock state_lock(options.state_path);
         const auto now = [] { return std::chrono::system_clock::now(); };
 
@@ -303,8 +299,10 @@ int main(int argc, char* argv[])
                                 "local.wait");
         }
         if (options.enqueue_openai) {
-            return enqueue_task(work_runtime, task_store, make_openai_task(options),
-                                "OpenAI Responses");
+            return enqueue_task(
+                work_runtime, task_store,
+                gaudere_agent::make_openai_task(options.task_id, options.text),
+                "OpenAI Responses");
         }
 
         gaudere::scheduling::wake::Scheduler work_scheduler;
@@ -326,7 +324,7 @@ int main(int argc, char* argv[])
                 action_runtime, action_store, options.openai_model,
                 options.openai_secret, options.secret_directory);
             if (!task_dispatcher.register_handler(
-                    openai_task_kind, openai_activation->handler())) {
+                    gaudere_agent::openai_task_kind, openai_activation->handler())) {
                 throw std::runtime_error("cannot register OpenAI provider handler");
             }
             std::cout << "gaudere-agent: OpenAI provider enabled model="
@@ -361,6 +359,10 @@ int main(int argc, char* argv[])
             std::cout << "gaudere-agent: echo result: " << stored->result->output << '\n';
             work_controller.stop();
             static_cast<void>(work_controller.wait_and_run());
+        } else if (options.openai_once) {
+            gaudere_agent::run_openai_once(
+                work_runtime, task_store, work_controller,
+                options.task_id, options.text);
         } else {
             int received = 0;
             std::atomic_bool signal_wait_failed{false};
