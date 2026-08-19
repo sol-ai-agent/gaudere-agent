@@ -1,3 +1,5 @@
+#include "LiveControl.hpp"
+#include "LiveControlProcessor.hpp"
 #include "LocalEchoHandler.hpp"
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
@@ -44,6 +46,7 @@ struct Options {
     std::string openai_model;
     std::string openai_secret = "openai-api-key";
     std::string secret_directory = "/run/secrets";
+    std::string control_socket;
 };
 
 void usage(const char* program)
@@ -53,6 +56,7 @@ void usage(const char* program)
         << "[--check | --echo ID TEXT | --enqueue-wait ID MS | "
         << "--enqueue-openai ID TEXT | --openai-once ID TEXT | --task ID | "
         << "--cancel ID REASON] "
+        << "[--control-socket PATH] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -88,6 +92,8 @@ Options parse_options(const int argc, char* argv[])
             options.cancel_task = true;
             options.task_id = argv[++index];
             options.text = argv[++index];
+        } else if (argument == "--control-socket" && index + 1 < argc) {
+            options.control_socket = argv[++index];
         } else if (argument == "--openai-model" && index + 1 < argc) {
             options.openai_enabled = true;
             options.openai_model = argv[++index];
@@ -119,6 +125,9 @@ Options parse_options(const int argc, char* argv[])
     if (modes > 1) {
         throw std::invalid_argument(
             "--check, --echo, --enqueue-wait, --enqueue-openai, --openai-once, --task, and --cancel are mutually exclusive");
+    }
+    if (!options.control_socket.empty() && modes != 0) {
+        throw std::invalid_argument("--control-socket is only valid in service mode");
     }
 
     if ((options.echo || options.enqueue_wait || options.enqueue_openai
@@ -364,6 +373,23 @@ int main(int argc, char* argv[])
                 work_runtime, task_store, work_controller,
                 options.task_id, options.text);
         } else {
+            std::unique_ptr<gaudere_agent::LiveControlMailbox> control_mailbox;
+            std::unique_ptr<gaudere_agent::LiveControlProcessor> control_processor;
+            std::unique_ptr<gaudere_agent::LiveControlServer> control_server;
+            if (!options.control_socket.empty()) {
+                control_mailbox = std::make_unique<gaudere_agent::LiveControlMailbox>();
+                control_processor = std::make_unique<gaudere_agent::LiveControlProcessor>(
+                    work_runtime, task_store, options.openai_enabled);
+                control_server = std::make_unique<gaudere_agent::LiveControlServer>(
+                    options.control_socket, *control_mailbox,
+                    [&work_controller] { work_controller.notify_work(); });
+                if (!control_server->start()) {
+                    throw std::runtime_error("cannot start live control server");
+                }
+                std::cout << "gaudere-agent: control socket="
+                          << options.control_socket << '\n';
+            }
+
             int received = 0;
             std::atomic_bool signal_wait_failed{false};
             std::atomic_bool internal_wake{false};
@@ -387,6 +413,13 @@ int main(int argc, char* argv[])
                 work_controller.stop();
             }
             for (;;) {
+                if (control_processor) {
+                    const auto control = control_processor->process(*control_mailbox);
+                    if (control.work_may_be_pending) {
+                        work_controller.notify_work();
+                    }
+                }
+
                 const auto result = work_controller.wait_and_run();
                 if (result == gaudere_agent::WorkCycleResult::stopped) {
                     break;
@@ -401,6 +434,11 @@ int main(int argc, char* argv[])
                         }
                     }
                 }
+            }
+
+            if (control_server) {
+                control_server->stop();
+                control_server->join();
             }
 
             if (signal_waiter.joinable()) {
