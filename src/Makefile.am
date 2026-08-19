@@ -11,6 +11,8 @@ gaudere_agent_SOURCES = \
 	HttpTransport.hpp \
 	LiveControl.cpp \
 	LiveControl.hpp \
+	LiveControlProcessor.cpp \
+	LiveControlProcessor.hpp \
 	LocalEchoHandler.cpp \
 	LocalEchoHandler.hpp \
 	LocalWaitHandler.cpp \
@@ -21,6 +23,8 @@ gaudere_agent_SOURCES = \
 	OpenAIOneShot.hpp \
 	OpenAIResponsesProvider.cpp \
 	OpenAIResponsesProvider.hpp \
+	OpenAITask.cpp \
+	OpenAITask.hpp \
 	Provider.hpp \
 	ProviderTaskHandler.cpp \
 	ProviderTaskHandler.hpp \
