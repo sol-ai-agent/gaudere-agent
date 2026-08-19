@@ -1,12 +1,14 @@
 #ifndef GAUDERE_AGENT_LIVE_CONTROL_HPP
 #define GAUDERE_AGENT_LIVE_CONTROL_HPP
 
+#include <fcntl.h>
+
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <iosfwd>
 #include <memory>
 #include <mutex>
-#include <condition_variable>
-#include <deque>
 #include <string>
 #include <thread>
 #include <vector>
