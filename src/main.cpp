@@ -284,6 +284,11 @@ int main(int argc, char* argv[])
 {
     try {
         const auto options = parse_options(argc, argv);
+        // Service/operator output is deliberately unbuffered so journald and test
+        // harnesses observe readiness and shutdown transitions when they happen,
+        // not only when the process eventually exits.
+        std::cout << std::unitbuf;
+
         sigset_t signals{};
         if (!options.openai_once) {
             signals = block_control_signals();
@@ -346,9 +351,9 @@ int main(int argc, char* argv[])
         if (!work_controller.start()) {
             throw std::runtime_error("cannot start work controller");
         }
-        std::cout << "gaudere-agent: running\n";
 
         if (options.echo) {
+            std::cout << "gaudere-agent: running\n";
             const auto submit = work_runtime.submit(make_echo_task(options));
             if (submit != gaudere::work::SubmitResult::accepted
                 && submit != gaudere::work::SubmitResult::duplicate) {
@@ -369,6 +374,7 @@ int main(int argc, char* argv[])
             work_controller.stop();
             static_cast<void>(work_controller.wait_and_run());
         } else if (options.openai_once) {
+            std::cout << "gaudere-agent: running\n";
             gaudere_agent::run_openai_once(
                 work_runtime, task_store, work_controller,
                 options.task_id, options.text);
@@ -389,6 +395,11 @@ int main(int argc, char* argv[])
                 std::cout << "gaudere-agent: control socket="
                           << options.control_socket << '\n';
             }
+
+            // `running` is a readiness statement. Do not emit it until every
+            // mandatory service resource for this mode (notably live control)
+            // has been initialized successfully.
+            std::cout << "gaudere-agent: running\n";
 
             int received = 0;
             std::atomic_bool signal_wait_failed{false};

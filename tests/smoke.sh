@@ -109,6 +109,24 @@ grep -q '^status=succeeded$' "$temporary_directory/crash-done"
 grep -q '^attempts=2/2$' "$temporary_directory/crash-done"
 grep -q '^result_output="waited 500 ms"$' "$temporary_directory/crash-done"
 
+# A mandatory service resource failure must happen before readiness is announced.
+# A regular file at the requested socket path is deliberately non-destructive: the
+# listener must refuse it rather than unlinking it.
+bad_control_path="$temporary_directory/not-a-socket"
+printf '%s\n' 'keep me' >"$bad_control_path"
+if "$agent" --state "$state" --control-socket "$bad_control_path" \
+    >"$temporary_directory/bad-control-startup" 2>&1; then
+    echo "service unexpectedly started with an invalid control socket path" >&2
+    exit 1
+fi
+grep -q 'control socket path exists and is not a socket' \
+  "$temporary_directory/bad-control-startup"
+if grep -q '^gaudere-agent: running$' "$temporary_directory/bad-control-startup"; then
+    echo "service announced running before mandatory control resource was ready" >&2
+    exit 1
+fi
+grep -q '^keep me$' "$bad_control_path"
+
 # A second process can submit and inspect work through the owner's local Unix socket
 # without opening SQLite. The service is deliberately provider-disabled here.
 control_socket="$temporary_directory/control.sock"
@@ -129,6 +147,26 @@ while [ ! -S "$control_socket" ]; do
     fi
     sleep 0.02
 done
+
+# Readiness must be observable while the process is still alive. This prevents
+# buffered stdout from making journald appear silent until shutdown.
+i=0
+while ! grep -q '^gaudere-agent: running$' "$temporary_directory/live-control-service"; do
+    if ! kill -0 "$live_pid" 2>/dev/null; then
+        cat "$temporary_directory/live-control-service" >&2
+        echo "live control service exited before readiness became visible" >&2
+        exit 1
+    fi
+    i=$((i + 1))
+    if [ "$i" -ge 100 ]; then
+        cat "$temporary_directory/live-control-service" >&2
+        echo "live control readiness remained buffered" >&2
+        exit 1
+    fi
+    sleep 0.02
+done
+grep -q "^gaudere-agent: control socket=$control_socket$" \
+  "$temporary_directory/live-control-service"
 
 "$control" --socket "$control_socket" echo live-echo "hello live control" \
   >"$temporary_directory/live-submit" 2>&1
