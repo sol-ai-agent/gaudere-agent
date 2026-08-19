@@ -153,6 +153,9 @@ public:
     void wait()
     {
         if (worker_.joinable()) {
+            if (listener_ >= 0) {
+                static_cast<void>(::shutdown(listener_, SHUT_RDWR));
+            }
             worker_.join();
         }
     }
@@ -391,8 +394,6 @@ void test_protocol_and_header_validation(CurlGlobal& global)
 
 int main()
 {
-    // libcurl global initialization is deliberately completed before any test
-    // starts the loopback server thread.
     CurlGlobal global;
 
     test_post_and_bearer(global);
