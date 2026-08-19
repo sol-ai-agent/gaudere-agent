@@ -1,6 +1,6 @@
 #include "LiveControlProcessor.hpp"
 
-#include "OpenAIOneShot.hpp"
+#include "OpenAITask.hpp"
 #include "TaskReport.hpp"
 
 #include <chrono>
