@@ -37,7 +37,19 @@ public:
      * This is exposed so activation can reject a missing/newline-containing secret
      * before any provider Task or external-effect Action starts.
      */
-    [[nodiscard]] static bool valid_api_key(std::string_view value) noexcept;
+    [[nodiscard]] static bool valid_api_key(const std::string_view value) noexcept
+    {
+        if (value.empty()) {
+            return false;
+        }
+        for (const unsigned char character : value) {
+            if (character < 0x21 || character > 0x7e) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     [[nodiscard]] static std::string client_request_id(std::string_view key);
 
 private:
