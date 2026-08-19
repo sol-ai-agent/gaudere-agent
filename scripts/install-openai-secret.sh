@@ -44,7 +44,13 @@ restore_terminal()
         echo_disabled=0
     fi
 }
-trap restore_terminal EXIT HUP INT TERM
+interrupted()
+{
+    restore_terminal
+    exit 130
+}
+trap restore_terminal EXIT
+trap interrupted HUP INT TERM
 
 printf 'Paste OpenAI API key (input hidden): ' > /dev/tty
 stty -echo < /dev/tty
@@ -60,18 +66,18 @@ if [ -z "$secret_value" ]; then
     printf 'gaudere secret install: key must not be empty\n' >&2
     exit 1
 fi
-if ! LC_ALL=C printf '%s' "$secret_value" | grep -Eq '^[!-~]+$'; then
+if ! printf '%s' "$secret_value" | LC_ALL=C grep -Eq '^[!-~]+$'; then
     printf 'gaudere secret install: key must be printable single-line ASCII without whitespace\n' >&2
     exit 1
 fi
 
 if [ "$replace" = "1" ]; then
-    LC_ALL=C printf '%s' "$secret_value" \
+    printf '%s' "$secret_value" \
         | "$podman_command" secret create --replace \
             --label gaudere-purpose=openai-api \
             "$secret_name" - >/dev/null
 else
-    LC_ALL=C printf '%s' "$secret_value" \
+    printf '%s' "$secret_value" \
         | "$podman_command" secret create \
             --label gaudere-purpose=openai-api \
             "$secret_name" - >/dev/null
