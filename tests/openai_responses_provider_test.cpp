@@ -238,8 +238,8 @@ void test_http_error_is_definite_rejection()
     const auto result = provider.invoke(request());
     expect(result.outcome == ProviderOutcome::rejected
                && result.failure_code == "openai_http_401"
-               && result.failure_message == "invalid synthetic credential",
-           "HTTP error response is a definite provider rejection");
+               && result.failure_message == "OpenAI returned HTTP 401",
+           "HTTP error response is a definite provider rejection without persisting provider error text");
 }
 
 void test_incomplete_and_failed_responses()
@@ -266,8 +266,8 @@ void test_incomplete_and_failed_responses()
     const auto failed = failed_provider.invoke(request());
     expect(failed.outcome == ProviderOutcome::rejected
                && failed.failure_code == "openai_failed"
-               && failed.failure_message == "model failed",
-           "failed response is a definite provider rejection");
+               && failed.failure_message == "OpenAI response reported failed status",
+           "failed response is a definite provider rejection with normalized diagnostic");
 }
 
 void test_refusal_and_no_text()
