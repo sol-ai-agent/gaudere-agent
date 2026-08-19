@@ -67,6 +67,20 @@ if ! "$podman_command" image exists "$image"; then
     exit 1
 fi
 
+# Fail clearly before creating any validation state/secret when the image predates
+# provider activation. This commonly means the preceding image build failed and an
+# older localhost/gaudere-agent:dev tag is still present.
+help_output=$("$podman_command" run --rm \
+    --network none \
+    --read-only \
+    --cap-drop=all \
+    --security-opt=no-new-privileges \
+    "$image" --help 2>&1 || true)
+if ! printf '%s\n' "$help_output" | grep -q -- '--openai-model'; then
+    printf 'validation failure: image %s does not support --openai-model; rebuild the current main image first\n' "$image" >&2
+    exit 1
+fi
+
 say "create synthetic Podman secret from stdin"
 printf '%s' 'synthetic-openai-validation-key' \
     | "$podman_command" secret create "$secret_name" - >/dev/null
