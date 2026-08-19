@@ -23,6 +23,8 @@ gaudere_agent_SOURCES = \
 	OpenAIOneShot.hpp \
 	OpenAIResponsesProvider.cpp \
 	OpenAIResponsesProvider.hpp \
+	OpenAITask.cpp \
+	OpenAITask.hpp \
 	Provider.hpp \
 	ProviderTaskHandler.cpp \
 	ProviderTaskHandler.hpp \
