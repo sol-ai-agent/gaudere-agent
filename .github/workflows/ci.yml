@@ -23,6 +23,7 @@ jobs:
           git
           gzip
           json-devel
+          libcurl-devel
           libtool
           make
           pkgconf-pkg-config
