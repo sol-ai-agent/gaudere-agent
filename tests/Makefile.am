@@ -2,6 +2,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS)
 
 check_PROGRAMS = \
 	local_wait_handler_test \
+	provider_task_handler_test \
 	state_lock_test \
 	task_dispatcher_test \
 	task_executor_test \
@@ -15,6 +16,15 @@ local_wait_handler_test_SOURCES = \
 	../src/LocalWaitHandler.cpp \
 	../src/LocalWaitHandler.hpp
 local_wait_handler_test_LDADD = $(GAUDERE_LIBS)
+
+provider_task_handler_test_SOURCES = \
+	provider_task_handler_test.cpp \
+	../src/Provider.hpp \
+	../src/ProviderTaskHandler.cpp \
+	../src/ProviderTaskHandler.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp
+provider_task_handler_test_LDADD = $(GAUDERE_LIBS)
 
 state_lock_test_SOURCES = \
 	state_lock_test.cpp \

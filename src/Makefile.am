@@ -7,6 +7,9 @@ gaudere_agent_SOURCES = \
 	LocalEchoHandler.hpp \
 	LocalWaitHandler.cpp \
 	LocalWaitHandler.hpp \
+	Provider.hpp \
+	ProviderTaskHandler.cpp \
+	ProviderTaskHandler.hpp \
 	StateLock.cpp \
 	StateLock.hpp \
 	TaskDispatcher.cpp \
