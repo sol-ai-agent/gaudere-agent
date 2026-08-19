@@ -3,6 +3,8 @@ AM_CPPFLAGS = $(GAUDERE_CFLAGS)
 bin_PROGRAMS = gaudere-agent
 gaudere_agent_SOURCES = \
 	main.cpp \
+	FileSecretSource.cpp \
+	FileSecretSource.hpp \
 	LocalEchoHandler.cpp \
 	LocalEchoHandler.hpp \
 	LocalWaitHandler.cpp \
@@ -10,6 +12,7 @@ gaudere_agent_SOURCES = \
 	Provider.hpp \
 	ProviderTaskHandler.cpp \
 	ProviderTaskHandler.hpp \
+	SecretSource.hpp \
 	StateLock.cpp \
 	StateLock.hpp \
 	TaskDispatcher.cpp \

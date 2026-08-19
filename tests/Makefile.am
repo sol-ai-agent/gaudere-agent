@@ -1,6 +1,7 @@
 AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS)
 
 check_PROGRAMS = \
+	file_secret_source_test \
 	local_wait_handler_test \
 	provider_task_handler_test \
 	state_lock_test \
@@ -10,6 +11,13 @@ check_PROGRAMS = \
 	work_controller_test
 TESTS = smoke.sh $(check_PROGRAMS)
 EXTRA_DIST = smoke.sh
+
+file_secret_source_test_SOURCES = \
+	file_secret_source_test.cpp \
+	../src/FileSecretSource.cpp \
+	../src/FileSecretSource.hpp \
+	../src/SecretSource.hpp
+file_secret_source_test_LDADD = $(GAUDERE_LIBS)
 
 local_wait_handler_test_SOURCES = \
 	local_wait_handler_test.cpp \
