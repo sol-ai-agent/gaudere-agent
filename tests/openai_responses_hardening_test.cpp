@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -60,6 +61,23 @@ ProviderRequest request()
     return value;
 }
 
+void test_plain_http_endpoint_is_rejected()
+{
+    Secret secret;
+    Transport transport;
+    try {
+        OpenAIResponsesProvider provider(
+            transport, secret, "gpt-test", "openai-api-key",
+            "http://api.openai.invalid/v1/responses");
+        static_cast<void>(provider);
+        expect(false, "plain HTTP OpenAI endpoint is rejected");
+    } catch (const std::invalid_argument&) {
+        // Expected.
+    } catch (...) {
+        expect(false, "plain HTTP endpoint throws invalid_argument");
+    }
+}
+
 void test_control_character_in_secret_is_rejected()
 {
     Secret secret;
@@ -93,6 +111,7 @@ void test_non_json_http_error_preserves_status()
 
 int main()
 {
+    test_plain_http_endpoint_is_rejected();
     test_control_character_in_secret_is_rejected();
     test_non_json_http_error_preserves_status();
 

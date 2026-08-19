@@ -1,6 +1,7 @@
-AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS)
+AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
 check_PROGRAMS = \
+	curl_http_transport_test \
 	file_secret_source_test \
 	local_wait_handler_test \
 	openai_responses_hardening_test \
@@ -13,6 +14,13 @@ check_PROGRAMS = \
 	work_controller_test
 TESTS = smoke.sh $(check_PROGRAMS)
 EXTRA_DIST = smoke.sh
+
+curl_http_transport_test_SOURCES = \
+	curl_http_transport_test.cpp \
+	../src/CurlHttpTransport.cpp \
+	../src/CurlHttpTransport.hpp \
+	../src/HttpTransport.hpp
+curl_http_transport_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
 
 file_secret_source_test_SOURCES = \
 	file_secret_source_test.cpp \

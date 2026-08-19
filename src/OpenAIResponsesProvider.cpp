@@ -123,8 +123,8 @@ OpenAIResponsesProvider::OpenAIResponsesProvider(
     if (secret_name_.empty()) {
         throw std::invalid_argument("OpenAI secret name must not be empty");
     }
-    if (endpoint_.empty()) {
-        throw std::invalid_argument("OpenAI endpoint must not be empty");
+    if (endpoint_.rfind("https://", 0) != 0) {
+        throw std::invalid_argument("OpenAI endpoint must use https://");
     }
 }
 
