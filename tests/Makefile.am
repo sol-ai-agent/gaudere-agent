@@ -4,6 +4,7 @@ check_PROGRAMS = \
 	curl_http_transport_test \
 	file_secret_source_test \
 	local_wait_handler_test \
+	openai_activation_test \
 	openai_responses_hardening_test \
 	openai_responses_provider_test \
 	provider_task_handler_test \
@@ -34,6 +35,24 @@ local_wait_handler_test_SOURCES = \
 	../src/LocalWaitHandler.cpp \
 	../src/LocalWaitHandler.hpp
 local_wait_handler_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+openai_activation_test_SOURCES = \
+	openai_activation_test.cpp \
+	../src/CurlHttpTransport.cpp \
+	../src/CurlHttpTransport.hpp \
+	../src/FileSecretSource.cpp \
+	../src/FileSecretSource.hpp \
+	../src/HttpTransport.hpp \
+	../src/OpenAIActivation.cpp \
+	../src/OpenAIActivation.hpp \
+	../src/OpenAIResponsesProvider.cpp \
+	../src/OpenAIResponsesProvider.hpp \
+	../src/Provider.hpp \
+	../src/ProviderTaskHandler.cpp \
+	../src/ProviderTaskHandler.hpp \
+	../src/SecretSource.hpp \
+	../src/TaskExecutor.hpp
+openai_activation_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
 
 openai_responses_hardening_test_SOURCES = \
 	openai_responses_hardening_test.cpp \

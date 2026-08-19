@@ -11,6 +11,42 @@ agent="../src/gaudere-agent"
 test -f "$state"
 test -f "$state.lock"
 
+# Provider configuration can be preflighted without sending a network request.
+# The secret value stays in a protected synthetic file; only its name is printed.
+secret_directory="$temporary_directory/secrets"
+mkdir "$secret_directory"
+printf '%s' 'synthetic-openai-key' >"$secret_directory/smoke-openai-key"
+chmod 0400 "$secret_directory/smoke-openai-key"
+"$agent" --state "$state" --check \
+  --openai-model gpt-test \
+  --openai-secret smoke-openai-key \
+  --secret-dir "$secret_directory" \
+  >"$temporary_directory/provider-check" 2>&1
+grep -q 'gaudere-agent: OpenAI provider enabled model=gpt-test secret=smoke-openai-key' \
+  "$temporary_directory/provider-check"
+grep -q 'gaudere-agent: safe' "$temporary_directory/provider-check"
+
+# An OpenAI task can be queued offline. Without explicit provider activation the
+# normal service does not recognize that kind, so it remains pending and unstarted.
+"$agent" --state "$state" --enqueue-openai pending-openai "offline only" \
+  >"$temporary_directory/openai-enqueue" 2>&1
+grep -q '^status=pending$' "$temporary_directory/openai-enqueue"
+grep -q '^attempts=0/2$' "$temporary_directory/openai-enqueue"
+
+"$agent" --state "$state" >"$temporary_directory/openai-disabled-service" 2>&1 &
+openai_disabled_pid=$!
+sleep 0.3
+kill -TERM "$openai_disabled_pid"
+wait "$openai_disabled_pid"
+grep -q 'gaudere-agent: safe' "$temporary_directory/openai-disabled-service"
+"$agent" --state "$state" --task pending-openai \
+  >"$temporary_directory/openai-pending-report" 2>&1
+grep -q '^status=pending$' "$temporary_directory/openai-pending-report"
+grep -q '^attempts=0/2$' "$temporary_directory/openai-pending-report"
+"$agent" --state "$state" --cancel pending-openai "provider disabled smoke cleanup" \
+  >"$temporary_directory/openai-cancel" 2>&1
+grep -q '^status=cancelled$' "$temporary_directory/openai-cancel"
+
 "$agent" --state "$state" --echo smoke-echo "hello gaudere" >"$temporary_directory/echo-output" 2>&1
 grep -q "gaudere-agent: echo result: hello gaudere" "$temporary_directory/echo-output"
 grep -q "gaudere-agent: safe" "$temporary_directory/echo-output"
