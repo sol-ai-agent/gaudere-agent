@@ -1,0 +1,45 @@
+#ifndef GAUDERE_AGENT_LIVE_CONTROL_PROCESSOR_HPP
+#define GAUDERE_AGENT_LIVE_CONTROL_PROCESSOR_HPP
+
+#include "LiveControl.hpp"
+
+#include <gaudere/work/Runtime.hpp>
+#include <gaudere/work/TaskStore.hpp>
+
+#include <cstddef>
+
+namespace gaudere_agent {
+
+struct LiveControlProcessResult {
+    std::size_t processed = 0;
+    bool work_may_be_pending = false;
+};
+
+/**
+ * Worker-thread side of the live control boundary.
+ *
+ * This is the only live-control object that knows Runtime/TaskStore. Call process()
+ * only from the same worker thread that owns normal Runtime/SQLite transitions.
+ * The AF_UNIX listener has access only to LiveControlMailbox and the scheduler wake
+ * callback, never to this processor or durable state.
+ */
+class LiveControlProcessor {
+public:
+    LiveControlProcessor(gaudere::work::Runtime& runtime,
+                         gaudere::work::TaskStore& store,
+                         bool openai_enabled);
+
+    [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
+
+private:
+    [[nodiscard]] LiveControlReply process_one(const LiveControlCommand& command,
+                                               bool& work_may_be_pending);
+
+    gaudere::work::Runtime& runtime_;
+    gaudere::work::TaskStore& store_;
+    bool openai_enabled_;
+};
+
+} // namespace gaudere_agent
+
+#endif
