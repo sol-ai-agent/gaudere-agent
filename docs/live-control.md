@@ -5,10 +5,12 @@ The normal rootless Podman service owns its SQLite state database exclusively. A
 The deployed service therefore exposes a local Unix-domain control socket **inside the container only**:
 
 ```text
-/run/gaudere-control.sock
+/tmp/gaudere-control.sock
 ```
 
-The socket is created mode `0600`, is ephemeral under the container's writable `/run`, is not part of durable state or backups, and is not published as a host TCP/UDP port.
+The socket is created mode `0600`, is ephemeral on the container's writable tmpfs-backed `/tmp`, is not part of durable state or backups, and is not published as a host TCP/UDP port.
+
+`/tmp` is intentional here. In the rootless read-only container, Gaudere runs as UID 1000 and cannot create a socket directly in the root-owned `/run` directory. The earlier real-host disposable validator already proved the `/tmp` path works under the same read-only/rootless constraints. If a private writable `/run/gaudere` submount is introduced later, the runtime path can move there explicitly.
 
 The Quadlet remains offline at this stage:
 
