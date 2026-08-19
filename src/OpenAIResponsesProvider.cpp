@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
-#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -36,8 +35,21 @@ bool text_plain(const std::string_view content_type)
         || content_type[prefix.size()] == ';';
 }
 
+bool safe_bearer_secret(const std::string_view secret) noexcept
+{
+    for (const unsigned char character : secret) {
+        if (character < 0x21 || character > 0x7e) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::optional<std::string> json_string(const Json& object, const char* key)
 {
+    if (!object.is_object()) {
+        return std::nullopt;
+    }
     const auto found = object.find(key);
     if (found == object.end() || !found->is_string()) {
         return std::nullopt;
@@ -48,6 +60,9 @@ std::optional<std::string> json_string(const Json& object, const char* key)
 std::string provider_error_message(const Json& document,
                                    const std::string& fallback)
 {
+    if (!document.is_object()) {
+        return fallback;
+    }
     const auto error = document.find("error");
     if (error != document.end() && error->is_object()) {
         if (const auto message = json_string(*error, "message")) {
@@ -59,6 +74,9 @@ std::string provider_error_message(const Json& document,
 
 std::string incomplete_reason(const Json& document)
 {
+    if (!document.is_object()) {
+        return "OpenAI response is incomplete";
+    }
     const auto details = document.find("incomplete_details");
     if (details != document.end() && details->is_object()) {
         if (const auto reason = json_string(*details, "reason")) {
@@ -170,6 +188,11 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
     if (secret->empty()) {
         return rejected("openai_secret_empty", "OpenAI API secret is empty");
     }
+    if (!safe_bearer_secret(secret->view())) {
+        return rejected(
+            "openai_secret_invalid",
+            "OpenAI API secret must contain printable ASCII without whitespace or line breaks");
+    }
 
     Json payload = {
         {"model", model_},
@@ -214,18 +237,23 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
     }
 
     const auto& response = *transport_result.response;
+    if (response.status < 200 || response.status >= 300) {
+        std::string message = "OpenAI returned HTTP " + std::to_string(response.status);
+        try {
+            const auto document = Json::parse(response.body);
+            message = provider_error_message(document, message);
+        } catch (...) {
+            // The HTTP status itself is already a definite provider response.
+        }
+        return rejected("openai_http_" + std::to_string(response.status),
+                        std::move(message));
+    }
+
     Json document;
     try {
         document = Json::parse(response.body);
     } catch (const std::exception& error) {
         return rejected("openai_invalid_json_response", error.what());
-    }
-
-    if (response.status < 200 || response.status >= 300) {
-        return rejected("openai_http_" + std::to_string(response.status),
-                        provider_error_message(
-                            document,
-                            "OpenAI returned HTTP " + std::to_string(response.status)));
     }
     if (!document.is_object()) {
         return rejected("openai_invalid_response",
