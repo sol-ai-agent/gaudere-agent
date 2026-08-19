@@ -10,7 +10,7 @@ workspace=$(mktemp -d "$validation_root/live-control.XXXXXX")
 state_directory="$workspace/state"
 mkdir -p "$state_directory"
 container="gaudere-live-control-validation-$$"
-socket=/tmp/gaudere-control.sock
+socket=/run/gaudere-control.sock
 
 cleanup()
 {
@@ -64,6 +64,7 @@ say "start disposable offline owner service"
     --network none \
     --userns keep-id \
     --read-only \
+    --read-only-tmpfs=true \
     --cap-drop=all \
     --security-opt=no-new-privileges \
     --pids-limit 64 \
@@ -137,7 +138,7 @@ expect_file_line "$workspace/direct-owner" 'state database is already owned'
 say "stop disposable service cleanly"
 "$podman_command" stop --time 10 "$container" >/dev/null
 "$podman_command" logs "$container" >"$workspace/logs" 2>&1
-expect_file_line "$workspace/logs" 'gaudere-agent: control socket=/tmp/gaudere-control.sock'
+expect_file_line "$workspace/logs" 'gaudere-agent: control socket=/run/gaudere-control.sock'
 expect_file_line "$workspace/logs" 'gaudere-agent: shutdown requested by signal 15'
 expect_file_line "$workspace/logs" 'gaudere-agent: safe'
 "$podman_command" rm "$container" >/dev/null
