@@ -4,6 +4,7 @@ check_PROGRAMS = \
 	curl_http_transport_test \
 	file_secret_source_test \
 	live_control_test \
+	live_control_processor_test \
 	local_wait_handler_test \
 	openai_activation_test \
 	openai_one_shot_test \
@@ -38,6 +39,18 @@ live_control_test_SOURCES = \
 	../src/LiveControl.hpp
 live_control_test_LDADD = $(JSON_LIBS)
 
+live_control_processor_test_SOURCES = \
+	live_control_processor_test.cpp \
+	../src/LiveControl.cpp \
+	../src/LiveControl.hpp \
+	../src/LiveControlProcessor.cpp \
+	../src/LiveControlProcessor.hpp \
+	../src/OpenAITask.cpp \
+	../src/OpenAITask.hpp \
+	../src/TaskReport.cpp \
+	../src/TaskReport.hpp
+live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
 local_wait_handler_test_SOURCES = \
 	local_wait_handler_test.cpp \
 	../src/LocalWaitHandler.cpp \
@@ -66,6 +79,8 @@ openai_one_shot_test_SOURCES = \
 	openai_one_shot_test.cpp \
 	../src/OpenAIOneShot.cpp \
 	../src/OpenAIOneShot.hpp \
+	../src/OpenAITask.cpp \
+	../src/OpenAITask.hpp \
 	../src/TaskDispatcher.cpp \
 	../src/TaskDispatcher.hpp \
 	../src/TaskExecutor.cpp \
