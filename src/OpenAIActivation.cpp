@@ -1,9 +1,31 @@
 #include "OpenAIActivation.hpp"
 
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace gaudere_agent {
+namespace {
+
+bool valid_model_name(const std::string_view value) noexcept
+{
+    if (value.empty() || value.size() > 128) {
+        return false;
+    }
+    for (const unsigned char character : value) {
+        const bool alpha_numeric =
+            (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z')
+            || (character >= '0' && character <= '9');
+        if (!alpha_numeric && character != '.' && character != '-'
+            && character != '_' && character != ':') {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
 
 OpenAIActivation::OpenAIActivation(
     gaudere::scheduling::wake::Runtime& action_runtime,
@@ -19,6 +41,10 @@ OpenAIActivation::OpenAIActivation(
       provider_(transport_, secrets_, model_, secret_name_),
       handler_(action_runtime, action_store, provider_)
 {
+    if (!valid_model_name(model_)) {
+        throw std::runtime_error("configured OpenAI model name is invalid");
+    }
+
     const auto credential = secrets_.load(secret_name_);
     if (!credential) {
         throw std::runtime_error("configured OpenAI API secret is missing");
