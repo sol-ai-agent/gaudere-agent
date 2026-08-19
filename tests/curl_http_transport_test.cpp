@@ -1,7 +1,10 @@
 #include "CurlHttpTransport.hpp"
 
 #include <arpa/inet.h>
+#include <cerrno>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -138,9 +141,7 @@ public:
 
     ~LoopbackServer()
     {
-        if (worker_.joinable()) {
-            worker_.join();
-        }
+        wait();
         if (listener_ >= 0) {
             ::close(listener_);
         }
@@ -148,6 +149,13 @@ public:
 
     LoopbackServer(const LoopbackServer&) = delete;
     LoopbackServer& operator=(const LoopbackServer&) = delete;
+
+    void wait()
+    {
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+    }
 
     [[nodiscard]] std::string url(const std::string_view path = "/") const
     {
@@ -164,7 +172,6 @@ private:
         const int client = ::accept4(listener_, reinterpret_cast<sockaddr*>(&peer),
                                      &peer_size, SOCK_CLOEXEC);
         if (client < 0) {
-            server_error_ = "accept failed";
             return;
         }
 
@@ -195,10 +202,8 @@ private:
             }
             request_ = std::move(data);
             responder_(client, request_);
-        } catch (const std::exception& error) {
-            server_error_ = error.what();
         } catch (...) {
-            server_error_ = "server exception";
+            // The client-side assertions report any resulting transport failure.
         }
         ::close(client);
     }
@@ -208,7 +213,6 @@ private:
     Responder responder_;
     std::thread worker_;
     std::string request_;
-    std::string server_error_;
 };
 
 HttpRequest post(const std::string& url,
@@ -255,6 +259,7 @@ void test_post_and_bearer(CurlGlobal& global)
     const auto result = transport.perform(
         post(server.url("/responses"), "request-body"),
         HttpSensitiveHeader{"Authorization", "Bearer ", "synthetic-token"});
+    server.wait();
 
     expect(result.outcome == HttpTransportOutcome::response && result.response,
            "loopback POST returns an HTTP response");
