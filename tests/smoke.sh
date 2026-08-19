@@ -6,6 +6,7 @@ trap 'rm -rf "$temporary_directory"' EXIT HUP INT TERM
 
 state="$temporary_directory/state.db"
 agent="../src/gaudere-agent"
+control="../src/gaudere-control"
 
 "$agent" --state "$state" --check
 test -f "$state"
@@ -107,6 +108,67 @@ grep -q "gaudere-agent: safe" "$temporary_directory/crash-recovery-output"
 grep -q '^status=succeeded$' "$temporary_directory/crash-done"
 grep -q '^attempts=2/2$' "$temporary_directory/crash-done"
 grep -q '^result_output="waited 500 ms"$' "$temporary_directory/crash-done"
+
+# A second process can submit and inspect work through the owner's local Unix socket
+# without opening SQLite. The service is deliberately provider-disabled here.
+control_socket="$temporary_directory/control.sock"
+"$agent" --state "$state" --control-socket "$control_socket" \
+  >"$temporary_directory/live-control-service" 2>&1 &
+live_pid=$!
+i=0
+while [ ! -S "$control_socket" ]; do
+    if ! kill -0 "$live_pid" 2>/dev/null; then
+        cat "$temporary_directory/live-control-service" >&2
+        echo "live control service exited before socket creation" >&2
+        exit 1
+    fi
+    i=$((i + 1))
+    if [ "$i" -ge 100 ]; then
+        echo "live control socket did not appear" >&2
+        exit 1
+    fi
+    sleep 0.02
+done
+
+"$control" --socket "$control_socket" echo live-echo "hello live control" \
+  >"$temporary_directory/live-submit" 2>&1
+grep -q '^status=pending$' "$temporary_directory/live-submit"
+
+if "$control" --socket "$control_socket" openai live-ai "must stay offline" \
+    >"$temporary_directory/live-openai" 2>&1; then
+    echo "live OpenAI submission unexpectedly succeeded while provider disabled" >&2
+    exit 1
+fi
+grep -q 'OpenAI provider is not enabled' "$temporary_directory/live-openai"
+
+live_done=0
+i=0
+while [ "$i" -lt 100 ]; do
+    "$control" --socket "$control_socket" task live-echo \
+      >"$temporary_directory/live-report" 2>&1
+    if grep -q '^status=succeeded$' "$temporary_directory/live-report"; then
+        live_done=1
+        break
+    fi
+    i=$((i + 1))
+    sleep 0.02
+done
+test "$live_done" -eq 1
+grep -q '^result_output="hello live control"$' "$temporary_directory/live-report"
+
+# Direct offline DB access is still rejected while the owner service is alive.
+if "$agent" --state "$state" --task live-echo \
+    >"$temporary_directory/live-direct-inspect" 2>&1; then
+    echo "direct inspection unexpectedly bypassed live state ownership" >&2
+    exit 1
+fi
+grep -q 'state database is already owned' "$temporary_directory/live-direct-inspect"
+
+kill -TERM "$live_pid"
+wait "$live_pid"
+grep -q 'gaudere-agent: control socket=' "$temporary_directory/live-control-service"
+grep -q 'gaudere-agent: safe' "$temporary_directory/live-control-service"
+test ! -e "$control_socket"
 
 # Offline maintenance commands cannot race the live service for the same DB.
 "$agent" --state "$state" >"$temporary_directory/output" 2>&1 &

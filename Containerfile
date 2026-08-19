@@ -49,7 +49,8 @@ RUN cd /src/gaudere-agent \
 RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp -a /opt/gaudere/lib/libgaudere.so* /opt/runtime/lib/ \
     && cp -a /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /opt/runtime/lib/ \
-    && cp /opt/gaudere-agent/bin/gaudere-agent /opt/runtime/bin/
+    && cp /opt/gaudere-agent/bin/gaudere-agent /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-control /opt/runtime/bin/
 
 FROM registry.fedoraproject.org/fedora:44
 
