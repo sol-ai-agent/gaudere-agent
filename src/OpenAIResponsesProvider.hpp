@@ -14,8 +14,7 @@ namespace gaudere_agent {
 /** Non-streaming OpenAI Responses adapter.
  *
  * The adapter itself owns no network implementation. It builds one bounded HTTP
- * request and delegates it to HttpTransport. Production does not register this
- * provider yet.
+ * request and delegates it to HttpTransport.
  */
 class OpenAIResponsesProvider final : public Provider {
 public:
@@ -33,6 +32,12 @@ public:
 
     [[nodiscard]] ProviderResult invoke(const ProviderRequest& request) override;
 
+    /** Validate the exact bytes that may be used as a Bearer API key.
+     *
+     * This is exposed so activation can reject a missing/newline-containing secret
+     * before any provider Task or external-effect Action starts.
+     */
+    [[nodiscard]] static bool valid_api_key(std::string_view value) noexcept;
     [[nodiscard]] static std::string client_request_id(std::string_view key);
 
 private:
