@@ -3,6 +3,7 @@ AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS)
 check_PROGRAMS = \
 	file_secret_source_test \
 	local_wait_handler_test \
+	openai_responses_hardening_test \
 	openai_responses_provider_test \
 	provider_task_handler_test \
 	state_lock_test \
@@ -25,6 +26,15 @@ local_wait_handler_test_SOURCES = \
 	../src/LocalWaitHandler.cpp \
 	../src/LocalWaitHandler.hpp
 local_wait_handler_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+openai_responses_hardening_test_SOURCES = \
+	openai_responses_hardening_test.cpp \
+	../src/HttpTransport.hpp \
+	../src/OpenAIResponsesProvider.cpp \
+	../src/OpenAIResponsesProvider.hpp \
+	../src/Provider.hpp \
+	../src/SecretSource.hpp
+openai_responses_hardening_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 openai_responses_provider_test_SOURCES = \
 	openai_responses_provider_test.cpp \
