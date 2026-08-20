@@ -1,6 +1,7 @@
 #include "ProviderTaskHandler.hpp"
 
 #include <gaudere/persistence/sqlite/ActionStore.hpp>
+#include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/scheduling/wake/Runtime.hpp>
 #include <gaudere/work/Runtime.hpp>
@@ -67,6 +68,16 @@ gaudere::work::Task make_task(std::string id)
     return task;
 }
 
+gaudere::budget::Policy generous_budget()
+{
+    gaudere::budget::Policy policy;
+    policy.max_total = 100;
+    policy.max_in_window = 100;
+    policy.window = 24h;
+    policy.min_interval = 0ms;
+    return policy;
+}
+
 class FakeProvider final : public Provider {
 public:
     enum class Mode {
@@ -110,13 +121,17 @@ private:
 struct Harness {
     explicit Harness(const std::filesystem::path& path,
                      FakeProvider::Mode mode,
-                     gaudere::scheduling::wake::TimePoint now = {})
+                     gaudere::scheduling::wake::TimePoint now = {},
+                     gaudere::budget::Policy policy = generous_budget())
         : action_store(path.string()),
           task_store(path.string()),
+          budget_store(path.string()),
           action_runtime(action_store, [now] { return now; }),
           work_runtime(task_store, [now] { return now; }),
           provider(mode),
-          handler(action_runtime, action_store, provider),
+          budget_policy(std::move(policy)),
+          handler(action_runtime, action_store, provider, budget_store,
+                  budget_policy, [now] { return now; }),
           executor(work_runtime, task_store)
     {
         action_runtime.recover();
@@ -125,9 +140,11 @@ struct Harness {
 
     gaudere::persistence::sqlite::ActionStore action_store;
     gaudere::persistence::sqlite::TaskStore task_store;
+    gaudere::persistence::sqlite::BudgetStore budget_store;
     ActionRuntime action_runtime;
     WorkRuntime work_runtime;
     FakeProvider provider;
+    gaudere::budget::Policy budget_policy;
     ProviderTaskHandler handler;
     TaskExecutor executor;
 };
@@ -349,6 +366,70 @@ void test_crash_after_effect_start_never_replays()
            "replacement process does not duplicate the provider call");
 }
 
+void test_budget_total_exhaustion_blocks_provider_before_action()
+{
+    TemporaryDatabase database;
+    gaudere::budget::Policy policy;
+    policy.max_total = 1;
+    policy.max_in_window = 1;
+    policy.window = 24h;
+    policy.min_interval = 0ms;
+
+    Harness harness(database.path, FakeProvider::Mode::success,
+                    gaudere::scheduling::wake::TimePoint{} + 10h, policy);
+    const auto first = make_task("budget-first");
+    const auto second = make_task("budget-second");
+
+    expect(harness.work_runtime.submit(first) == gaudere::work::SubmitResult::accepted,
+           "first budgeted task is submitted");
+    expect(harness.executor.execute(first.id, "worker", harness.handler)
+               == ExecuteResult::completed,
+           "first budgeted task completes");
+    expect(harness.provider.calls == 1,
+           "first budgeted task invokes provider exactly once");
+
+    expect(harness.work_runtime.submit(second) == gaudere::work::SubmitResult::accepted,
+           "second budgeted task is submitted");
+    expect(harness.executor.execute(second.id, "worker", harness.handler)
+               == ExecuteResult::completed,
+           "exhausted budget resolves second task without invocation");
+    const auto done = harness.task_store.find(second.id);
+    expect(done && done->status == TaskStatus::failed && done->result
+               && done->result->failure_code == "provider_budget_total_exhausted",
+           "total budget exhaustion is a durable task failure");
+    expect(harness.provider.calls == 1,
+           "total budget exhaustion prevents a second provider call");
+    expect(!harness.action_store.find("provider.call:fake:budget-second"),
+           "budget denial happens before creation of an external Action");
+}
+
+void test_duplicate_budget_permit_resumes_before_action()
+{
+    TemporaryDatabase database;
+    const auto now = gaudere::scheduling::wake::TimePoint{} + 20h;
+    Harness harness(database.path, FakeProvider::Mode::success, now);
+    const auto task = make_task("reserved-permit");
+    const std::string key = "provider.call:fake:" + task.idempotency_key;
+
+    expect(harness.budget_store.consume("provider.call:fake", key, now,
+                                        harness.budget_policy)
+               == gaudere::budget::ConsumeResult::accepted,
+           "test pre-consumes durable provider permit");
+    expect(!harness.action_store.find_by_idempotency_key(key),
+           "simulated crash point has permit but no provider Action");
+
+    expect(harness.work_runtime.submit(task) == gaudere::work::SubmitResult::accepted,
+           "task after reserved permit is submitted");
+    expect(harness.executor.execute(task.id, "worker", harness.handler)
+               == ExecuteResult::completed,
+           "duplicate durable permit resumes provider path");
+    expect(harness.provider.calls == 1,
+           "duplicate permit does not consume another call slot or block recovery");
+    const auto done = harness.task_store.find(task.id);
+    expect(done && done->status == TaskStatus::succeeded,
+           "task succeeds after recovering pre-action budget reservation");
+}
+
 } // namespace
 
 int main()
@@ -361,6 +442,8 @@ int main()
     test_existing_manual_review_is_not_replayed();
     test_confirmed_call_without_task_receipt_is_not_replayed();
     test_crash_after_effect_start_never_replays();
+    test_budget_total_exhaustion_blocks_provider_before_action();
+    test_duplicate_budget_permit_resumes_before_action();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";

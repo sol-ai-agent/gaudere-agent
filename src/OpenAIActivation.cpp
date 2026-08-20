@@ -1,5 +1,6 @@
 #include "OpenAIActivation.hpp"
 
+#include <chrono>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -27,19 +28,32 @@ bool valid_model_name(const std::string_view value) noexcept
 
 } // namespace
 
+gaudere::budget::Policy OpenAIActivation::bootstrap_budget_policy() noexcept
+{
+    gaudere::budget::Policy policy;
+    policy.max_total = 12;
+    policy.max_in_window = 4;
+    policy.window = std::chrono::hours{24};
+    policy.min_interval = std::chrono::minutes{15};
+    return policy;
+}
+
 OpenAIActivation::OpenAIActivation(
     gaudere::scheduling::wake::Runtime& action_runtime,
     gaudere::scheduling::wake::ActionStore& action_store,
+    gaudere::budget::Store& budget_store,
     std::string model,
     std::string secret_name,
     std::string secret_directory)
     : model_(std::move(model)),
       secret_name_(std::move(secret_name)),
+      budget_policy_(bootstrap_budget_policy()),
       secrets_(std::move(secret_directory)),
       curl_global_(),
       transport_(curl_global_),
       provider_(transport_, secrets_, model_, secret_name_),
-      handler_(action_runtime, action_store, provider_)
+      handler_(action_runtime, action_store, provider_, budget_store,
+               budget_policy_, [] { return std::chrono::system_clock::now(); })
 {
     if (!valid_model_name(model_)) {
         throw std::runtime_error("configured OpenAI model name is invalid");

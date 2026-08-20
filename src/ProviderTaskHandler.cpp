@@ -17,13 +17,25 @@ using gaudere::scheduling::wake::SubmitResult;
 ProviderTaskHandler::ProviderTaskHandler(
     gaudere::scheduling::wake::Runtime& action_runtime,
     gaudere::scheduling::wake::ActionStore& action_store,
-    Provider& provider)
+    Provider& provider,
+    gaudere::budget::Store& budget_store,
+    gaudere::budget::Policy budget_policy,
+    BudgetNow budget_now)
     : action_runtime_(action_runtime),
       action_store_(action_store),
-      provider_(provider)
+      provider_(provider),
+      budget_store_(budget_store),
+      budget_policy_(std::move(budget_policy)),
+      budget_now_(std::move(budget_now))
 {
     if (provider_.name().empty()) {
         throw std::invalid_argument("provider name must not be empty");
+    }
+    if (!gaudere::budget::valid_policy(budget_policy_)) {
+        throw std::invalid_argument("provider budget policy is invalid");
+    }
+    if (!budget_now_) {
+        throw std::invalid_argument("provider budget clock is required");
     }
 }
 
@@ -38,11 +50,44 @@ std::string ProviderTaskHandler::action_key(const gaudere::work::Task& task) con
         + task.idempotency_key;
 }
 
+std::string ProviderTaskHandler::budget_scope() const
+{
+    return "provider.call:" + std::string(provider_.name());
+}
+
 HandlerResult ProviderTaskHandler::manual_review(std::string code,
                                                  std::string message) const
 {
     return HandlerResult{HandlerOutcome::manual_review, {}, {},
                          std::move(code), std::move(message)};
+}
+
+HandlerResult ProviderTaskHandler::budget_denied(
+    const gaudere::budget::ConsumeResult result) const
+{
+    switch (result) {
+    case gaudere::budget::ConsumeResult::total_exhausted:
+        return HandlerResult{HandlerOutcome::failed, {}, {},
+                             "provider_budget_total_exhausted",
+                             "provider lifetime call budget is exhausted"};
+    case gaudere::budget::ConsumeResult::window_exhausted:
+        return HandlerResult{HandlerOutcome::failed, {}, {},
+                             "provider_budget_window_exhausted",
+                             "provider rolling-window call budget is exhausted"};
+    case gaudere::budget::ConsumeResult::cooldown:
+        return HandlerResult{HandlerOutcome::failed, {}, {},
+                             "provider_budget_cooldown",
+                             "provider minimum call interval has not elapsed"};
+    case gaudere::budget::ConsumeResult::clock_rollback:
+        return manual_review(
+            "provider_budget_clock_rollback",
+            "system clock moved backwards relative to the durable provider budget");
+    case gaudere::budget::ConsumeResult::accepted:
+    case gaudere::budget::ConsumeResult::duplicate:
+        break;
+    }
+    return manual_review("provider_budget_state_conflict",
+                         "provider budget returned an invalid admission result");
 }
 
 HandlerResult ProviderTaskHandler::existing_action_result(const Action& action)
@@ -88,6 +133,20 @@ HandlerResult ProviderTaskHandler::execute(const TaskContext& context)
     const auto key = action_key(context.task);
     if (const auto existing = action_store_.find_by_idempotency_key(key)) {
         return existing_action_result(*existing);
+    }
+
+    gaudere::budget::ConsumeResult budget_result;
+    try {
+        budget_result = budget_store_.consume(
+            budget_scope(), key, budget_now_(), budget_policy_);
+    } catch (...) {
+        return manual_review(
+            "provider_budget_unavailable",
+            "provider budget could not be checked and persisted before invocation");
+    }
+    if (budget_result != gaudere::budget::ConsumeResult::accepted
+        && budget_result != gaudere::budget::ConsumeResult::duplicate) {
+        return budget_denied(budget_result);
     }
 
     Action action;

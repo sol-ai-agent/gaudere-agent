@@ -1,5 +1,6 @@
 #include "OpenAIActivation.hpp"
 
+#include <gaudere/budget/Store.hpp>
 #include <gaudere/scheduling/wake/ActionStore.hpp>
 #include <gaudere/scheduling/wake/Runtime.hpp>
 
@@ -19,6 +20,7 @@ namespace {
 
 using namespace gaudere::scheduling::wake;
 using namespace gaudere_agent;
+using namespace std::chrono_literals;
 
 int failures = 0;
 
@@ -91,6 +93,21 @@ public:
     std::map<std::string, Action> actions;
 };
 
+class MemoryBudgetStore final : public gaudere::budget::Store {
+public:
+    gaudere::budget::ConsumeResult consume(
+        const std::string&,
+        const std::string&,
+        gaudere::budget::TimePoint,
+        const gaudere::budget::Policy&) override
+    {
+        ++consumes;
+        return gaudere::budget::ConsumeResult::accepted;
+    }
+
+    int consumes = 0;
+};
+
 struct TemporaryDirectory {
     TemporaryDirectory()
     {
@@ -128,32 +145,47 @@ void test_valid_activation_is_network_free()
     TemporaryDirectory directory;
     write_secret(directory.path / "operator-key", "synthetic-key");
     MemoryActionStore store;
+    MemoryBudgetStore budget_store;
     Runtime runtime(store, [] { return TimePoint{}; });
     runtime.recover();
 
-    OpenAIActivation activation(runtime, store, "gpt-test", "operator-key",
+    OpenAIActivation activation(runtime, store, budget_store,
+                                "gpt-test", "operator-key",
                                 directory.path.string());
     expect(activation.model() == "gpt-test", "activation exposes configured model");
     expect(activation.secret_name() == "operator-key",
            "activation exposes only configured secret name");
     expect(store.actions.empty(),
            "constructing activation creates no durable external Action");
+    expect(budget_store.consumes == 0,
+           "constructing activation consumes no provider call budget");
+
+    const auto policy = activation.budget_policy();
+    expect(policy.max_total == 12, "bootstrap budget allows twelve lifetime calls");
+    expect(policy.max_in_window == 4, "bootstrap budget allows four calls per window");
+    expect(policy.window == 24h, "bootstrap budget uses a rolling 24-hour window");
+    expect(policy.min_interval == 15min,
+           "bootstrap budget requires fifteen minutes between calls");
 }
 
 void test_missing_secret_fails_preflight()
 {
     TemporaryDirectory directory;
     MemoryActionStore store;
+    MemoryBudgetStore budget_store;
     Runtime runtime(store, [] { return TimePoint{}; });
     runtime.recover();
 
     expect_throw<std::runtime_error>(
         [&] {
-            OpenAIActivation activation(runtime, store, "gpt-test", "missing",
+            OpenAIActivation activation(runtime, store, budget_store,
+                                        "gpt-test", "missing",
                                         directory.path.string());
         },
         "missing OpenAI secret rejects activation");
     expect(store.actions.empty(), "failed preflight creates no Action");
+    expect(budget_store.consumes == 0,
+           "failed preflight consumes no provider call budget");
 }
 
 void test_newline_secret_fails_preflight()
@@ -161,31 +193,39 @@ void test_newline_secret_fails_preflight()
     TemporaryDirectory directory;
     write_secret(directory.path / "newline-key", "synthetic-key\n");
     MemoryActionStore store;
+    MemoryBudgetStore budget_store;
     Runtime runtime(store, [] { return TimePoint{}; });
     runtime.recover();
 
     expect_throw<std::runtime_error>(
         [&] {
-            OpenAIActivation activation(runtime, store, "gpt-test", "newline-key",
+            OpenAIActivation activation(runtime, store, budget_store,
+                                        "gpt-test", "newline-key",
                                         directory.path.string());
         },
         "newline-containing OpenAI secret rejects activation");
     expect(store.actions.empty(), "invalid credential creates no Action");
+    expect(budget_store.consumes == 0,
+           "invalid credential consumes no provider call budget");
 }
 
 void test_invalid_secret_name_fails_preflight()
 {
     TemporaryDirectory directory;
     MemoryActionStore store;
+    MemoryBudgetStore budget_store;
     Runtime runtime(store, [] { return TimePoint{}; });
     runtime.recover();
 
     expect_throw<std::invalid_argument>(
         [&] {
-            OpenAIActivation activation(runtime, store, "gpt-test", "../key",
+            OpenAIActivation activation(runtime, store, budget_store,
+                                        "gpt-test", "../key",
                                         directory.path.string());
         },
         "invalid secret name cannot escape configured secret directory");
+    expect(budget_store.consumes == 0,
+           "invalid secret name consumes no provider call budget");
 }
 
 } // namespace
