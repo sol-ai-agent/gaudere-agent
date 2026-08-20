@@ -11,6 +11,7 @@
 #include <gaudere/scheduling/wake/Runtime.hpp>
 
 #include <string>
+#include <string_view>
 
 namespace gaudere_agent {
 
@@ -37,6 +38,10 @@ public:
     OpenAIActivation& operator=(OpenAIActivation&&) = delete;
 
     [[nodiscard]] static gaudere::budget::Policy bootstrap_budget_policy() noexcept;
+    [[nodiscard]] static std::string_view bootstrap_budget_scope() noexcept
+    {
+        return "provider.call:openai.responses";
+    }
 
     [[nodiscard]] TaskHandler& handler() noexcept { return handler_; }
     [[nodiscard]] const std::string& model() const noexcept { return model_; }
