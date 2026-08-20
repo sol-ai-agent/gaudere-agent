@@ -18,7 +18,8 @@ namespace gaudere_agent {
 enum class LiveControlOperation {
     submit_echo,
     submit_openai,
-    inspect_task
+    inspect_task,
+    inspect_budget
 };
 
 struct LiveControlCommand {
