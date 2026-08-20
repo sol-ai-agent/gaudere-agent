@@ -72,6 +72,7 @@ jobs:
           sh -n agent/scripts/validate-openai-authorized.sh
           sh -n agent/scripts/validate-live-control.sh
           sh -n agent/scripts/validate-schema-migration-copy.sh
+          sh -n agent/scripts/deploy-schema-v3.sh
 
       - name: Build and install Gaudere
         run: |
@@ -169,6 +170,143 @@ jobs:
           grep -q '^status=succeeded$' "$workspace/migration.out"
           grep -q '^result_output="durable v2 result"$' "$workspace/migration.out"
           grep -q '^gaudere schema migration copy validation: PASS$' "$workspace/migration.out"
+
+      - name: Validate staged production schema deployment
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          agent_bin="$GITHUB_WORKSPACE/agent/build/src/gaudere-agent"
+          workspace=$(mktemp -d)
+          data_home="$workspace/data"
+          state="$data_home/gaudere/state"
+          backups="$data_home/gaudere/backups"
+          mkdir -p "$state" "$backups"
+          trap 'rm -rf "$workspace"' EXIT
+
+          python3 - "$state/state.db" <<'PY'
+          import sqlite3
+          import sys
+
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.executescript("""
+              PRAGMA user_version=2;
+              CREATE TABLE tasks (
+                id TEXT PRIMARY KEY NOT NULL,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL,
+                input_content_type TEXT NOT NULL,
+                input TEXT NOT NULL,
+                max_input_bytes INTEGER NOT NULL,
+                max_output_bytes INTEGER NOT NULL,
+                max_runtime_ms INTEGER NOT NULL,
+                max_attempts INTEGER NOT NULL,
+                attempts_started INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at_ms INTEGER,
+                cancel_reason TEXT NOT NULL,
+                result_content_type TEXT,
+                result_output TEXT,
+                result_failure_code TEXT,
+                result_failure_message TEXT
+              );
+              INSERT INTO tasks VALUES (
+                'ci-staged','local.echo:ci-staged','local.echo',
+                'text/plain','durable staged input',4096,4096,1000,1,1,3,
+                NULL,NULL,'','text/plain','durable staged result','',''
+              );
+              CREATE TABLE actions (
+                id TEXT PRIMARY KEY NOT NULL,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                critical INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                effect_result INTEGER NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at_ms INTEGER
+              );
+              CREATE TABLE budget_consumptions (
+                scope TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                consumed_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(scope,idempotency_key)
+              );
+              """)
+          PY
+
+          wrapper="$workspace/agent-wrapper.sh"
+          cat > "$wrapper" <<'SH'
+          #!/bin/sh
+          if [ "$1" = "--state" ] && [ "$2" = "$GAUDERE_TEST_LIVE_DB" ]; then
+              for argument in "$@"; do
+                  if [ "$argument" = "--task" ]; then
+                      exit 91
+                  fi
+              done
+          fi
+          exec "$GAUDERE_TEST_REAL_AGENT" "$@"
+          SH
+          chmod +x "$wrapper"
+
+          # Inject a failure only after the staged v3 directory has been installed.
+          # The deployment script must automatically put the original v2 state back.
+          if GAUDERE_AGENT_BIN="$wrapper" \
+              GAUDERE_TEST_REAL_AGENT="$agent_bin" \
+              GAUDERE_TEST_LIVE_DB="$state/state.db" \
+              GAUDERE_STATE_DIR="$state" GAUDERE_BACKUP_DIR="$backups" \
+              GAUDERE_SKIP_SERVICE_CHECK=1 \
+              sh "$GITHUB_WORKSPACE/agent/scripts/deploy-schema-v3.sh" ci-staged \
+              > "$workspace/injected-failure.out" 2>&1; then
+              echo "staged deployment unexpectedly survived injected post-swap failure" >&2
+              exit 1
+          fi
+
+          python3 - "$state/state.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+          PY
+          test -z "$(find "$data_home/gaudere" -maxdepth 1 -type d -name 'state.pre-v3-*' -print -quit)"
+          failed=$(find "$data_home/gaudere" -maxdepth 1 -type d -name 'state.failed-v3-*' -print -quit)
+          test -n "$failed"
+          python3 - "$failed/state.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+          PY
+          rm -rf "$failed"
+
+          GAUDERE_AGENT_BIN="$agent_bin" \
+              GAUDERE_STATE_DIR="$state" GAUDERE_BACKUP_DIR="$backups" \
+              GAUDERE_SKIP_SERVICE_CHECK=1 \
+              sh "$GITHUB_WORKSPACE/agent/scripts/deploy-schema-v3.sh" ci-staged \
+              > "$workspace/deployment.out"
+          cat "$workspace/deployment.out"
+          grep -q '^schema_before=2$' "$workspace/deployment.out"
+          grep -q '^staged_schema_before=2$' "$workspace/deployment.out"
+          grep -q '^staged_schema_after=3$' "$workspace/deployment.out"
+          grep -q '^budget_consumptions=0$' "$workspace/deployment.out"
+          grep -q '^schema_after=3$' "$workspace/deployment.out"
+          grep -q '^status=succeeded$' "$workspace/deployment.out"
+          grep -q '^result_output="durable staged result"$' "$workspace/deployment.out"
+          grep -q '^gaudere staged production schema deployment: READY$' "$workspace/deployment.out"
+
+          python3 - "$state/state.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+          PY
+          test -z "$(find "$state" -maxdepth 1 -name 'logical.*' -print -quit)"
+          rollback=$(sed -n 's/^rollback_directory=//p' "$workspace/deployment.out" | tail -n 1)
+          test -d "$rollback"
+          python3 - "$rollback/state.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+          PY
+          archive=$(sed -n 's/^backup=//p' "$workspace/deployment.out" | tail -n 1)
+          test -f "$archive"
+          test -f "$archive.sha256"
+          (cd "$backups" && sha256sum -c "$(basename "$archive.sha256")")
 
       - name: Validate stopped-state backup and restore
         run: |
