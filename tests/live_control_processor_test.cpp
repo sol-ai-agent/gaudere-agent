@@ -1,5 +1,7 @@
 #include "LiveControlProcessor.hpp"
+#include "OpenAIActivation.hpp"
 
+#include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/work/Runtime.hpp>
 
@@ -42,13 +44,16 @@ struct TemporaryDatabase {
 struct Harness {
     Harness(const std::filesystem::path& path, const bool openai_enabled)
         : store(path.string()),
+          budget_store(path.string()),
           runtime(store, [] { return std::chrono::system_clock::now(); }),
-          processor(runtime, store, openai_enabled)
+          processor(runtime, store, budget_store,
+                    OpenAIActivation::bootstrap_budget_policy(), openai_enabled)
     {
         runtime.recover();
     }
 
     gaudere::persistence::sqlite::TaskStore store;
+    gaudere::persistence::sqlite::BudgetStore budget_store;
     gaudere::work::Runtime runtime;
     LiveControlProcessor processor;
     LiveControlMailbox mailbox;
@@ -144,6 +149,45 @@ void test_inspect_reads_durable_task_without_submission()
            "inspect returns the durable Task report");
 }
 
+void test_budget_status_is_observational_and_live()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false);
+
+    auto empty_request = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::inspect_budget, "openai", {}});
+    const auto empty_processed = harness.processor.process(harness.mailbox);
+    const auto empty = empty_request->wait();
+
+    expect(empty_processed.processed == 1 && !empty_processed.work_may_be_pending,
+           "budget inspection never requests task dispatch");
+    expect(empty.ok
+               && empty.body.find("provider_enabled=false") != std::string::npos
+               && empty.body.find("max_total=12") != std::string::npos
+               && empty.body.find("total_used=0") != std::string::npos
+               && empty.body.find("next_new_call=available") != std::string::npos,
+           "empty live budget status reports bootstrap limits and availability");
+
+    const auto now = std::chrono::system_clock::now();
+    expect(harness.budget_store.consume(
+               std::string(OpenAIActivation::bootstrap_budget_scope()),
+               "test-permit", now, OpenAIActivation::bootstrap_budget_policy())
+               == gaudere::budget::ConsumeResult::accepted,
+           "budget status test consumes one synthetic durable permit");
+
+    auto used_request = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::inspect_budget, "openai", {}});
+    static_cast<void>(harness.processor.process(harness.mailbox));
+    const auto used = used_request->wait();
+
+    expect(used.ok
+               && used.body.find("total_used=1") != std::string::npos
+               && used.body.find("in_window_used=1") != std::string::npos
+               && used.body.find("remaining_total=11") != std::string::npos
+               && used.body.find("next_new_call=cooldown") != std::string::npos,
+           "live budget status observes durable consumption without spending another permit");
+}
+
 void test_duplicate_preserves_original_definition()
 {
     TemporaryDatabase database;
@@ -176,6 +220,7 @@ int main()
     test_openai_submission_requires_activated_provider();
     test_openai_submission_uses_bounded_task_factory();
     test_inspect_reads_durable_task_without_submission();
+    test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
 
     if (failures != 0) {
