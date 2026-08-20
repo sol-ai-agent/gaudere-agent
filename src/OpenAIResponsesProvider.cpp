@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -19,6 +20,14 @@ constexpr std::uint64_t max_openai_output_bytes = 256 * 1024;
 constexpr std::uint64_t max_openai_output_tokens = 1024;
 constexpr std::uint64_t max_openai_response_bytes = 1024 * 1024;
 constexpr std::uint64_t response_envelope_bytes = 64 * 1024;
+constexpr std::string_view usage_content_type =
+    "application/vnd.gaudere.provider-usage+json";
+
+struct NormalizedUsage {
+    bool present = false;
+    bool valid = true;
+    std::string metadata;
+};
 
 bool text_plain(const std::string_view content_type)
 {
@@ -56,6 +65,106 @@ std::optional<std::string> json_string(const Json& object, const char* key)
         return std::nullopt;
     }
     return found->get<std::string>();
+}
+
+bool nonnegative_integer(const Json& value, std::uint64_t& output)
+{
+    try {
+        if (value.is_number_unsigned()) {
+            output = value.get<std::uint64_t>();
+            return true;
+        }
+        if (value.is_number_integer()) {
+            const auto signed_value = value.get<std::int64_t>();
+            if (signed_value < 0) {
+                return false;
+            }
+            output = static_cast<std::uint64_t>(signed_value);
+            return true;
+        }
+    } catch (...) {
+        return false;
+    }
+    return false;
+}
+
+bool required_token_count(const Json& object,
+                          const char* key,
+                          std::uint64_t& output)
+{
+    if (!object.is_object()) {
+        return false;
+    }
+    const auto found = object.find(key);
+    return found != object.end() && nonnegative_integer(*found, output);
+}
+
+bool optional_detail_token_count(const Json& usage,
+                                 const char* details_key,
+                                 const char* token_key,
+                                 std::uint64_t& output)
+{
+    output = 0;
+    const auto details = usage.find(details_key);
+    if (details == usage.end() || details->is_null()) {
+        return true;
+    }
+    if (!details->is_object()) {
+        return false;
+    }
+    const auto found = details->find(token_key);
+    if (found == details->end() || found->is_null()) {
+        return true;
+    }
+    return nonnegative_integer(*found, output);
+}
+
+NormalizedUsage normalized_usage(const Json& document,
+                                 const std::string& configured_model)
+{
+    const auto usage = document.find("usage");
+    if (usage == document.end() || usage->is_null()) {
+        return NormalizedUsage{};
+    }
+    NormalizedUsage result;
+    result.present = true;
+    if (!usage->is_object()) {
+        result.valid = false;
+        return result;
+    }
+
+    std::uint64_t input_tokens = 0;
+    std::uint64_t output_tokens = 0;
+    std::uint64_t total_tokens = 0;
+    std::uint64_t cached_input_tokens = 0;
+    std::uint64_t cache_write_input_tokens = 0;
+    std::uint64_t reasoning_tokens = 0;
+    if (!required_token_count(*usage, "input_tokens", input_tokens)
+        || !required_token_count(*usage, "output_tokens", output_tokens)
+        || !required_token_count(*usage, "total_tokens", total_tokens)
+        || !optional_detail_token_count(*usage, "input_tokens_details",
+                                        "cached_tokens", cached_input_tokens)
+        || !optional_detail_token_count(*usage, "input_tokens_details",
+                                        "cache_write_tokens", cache_write_input_tokens)
+        || !optional_detail_token_count(*usage, "output_tokens_details",
+                                        "reasoning_tokens", reasoning_tokens)) {
+        result.valid = false;
+        return result;
+    }
+
+    const Json normalized = {
+        {"schema", "gaudere.provider_usage.v1"},
+        {"provider", "openai"},
+        {"model", configured_model},
+        {"input_tokens", input_tokens},
+        {"cached_input_tokens", cached_input_tokens},
+        {"cache_write_input_tokens", cache_write_input_tokens},
+        {"output_tokens", output_tokens},
+        {"reasoning_tokens", reasoning_tokens},
+        {"total_tokens", total_tokens}
+    };
+    result.metadata = normalized.dump();
+    return result;
 }
 
 std::string incomplete_reason(const Json& document)
@@ -114,11 +223,15 @@ OpenAIResponsesProvider::OpenAIResponsesProvider(
     }
 }
 
-ProviderResult OpenAIResponsesProvider::rejected(std::string code,
-                                                 std::string message)
+ProviderResult OpenAIResponsesProvider::rejected(
+    std::string code,
+    std::string message,
+    std::string metadata_content_type,
+    std::string metadata)
 {
     return ProviderResult{ProviderOutcome::rejected, {}, {},
-                          std::move(code), std::move(message)};
+                          std::move(code), std::move(message),
+                          std::move(metadata_content_type), std::move(metadata)};
 }
 
 ProviderResult OpenAIResponsesProvider::unknown(std::string code,
@@ -250,23 +363,46 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
         return rejected("openai_invalid_response",
                         "OpenAI response has no string status");
     }
+
+    const auto usage = normalized_usage(document, model_);
+    if (!usage.valid) {
+        return rejected("openai_invalid_usage",
+                        "OpenAI response contains malformed token usage");
+    }
+    const std::string metadata_content_type = usage.present
+        ? std::string(usage_content_type)
+        : std::string{};
+    const auto reject_with_usage = [&](std::string code, std::string message) {
+        return rejected(std::move(code), std::move(message),
+                        metadata_content_type, usage.metadata);
+    };
+
     if (*status == "incomplete") {
-        return rejected("openai_incomplete", incomplete_reason(document));
+        return reject_with_usage("openai_incomplete", incomplete_reason(document));
     }
     if (*status == "failed") {
         // As with non-2xx responses, do not durably retain provider-supplied error
         // messages. They are not part of Gaudere's trusted diagnostic vocabulary.
-        return rejected("openai_failed", "OpenAI response reported failed status");
+        return reject_with_usage("openai_failed",
+                                 "OpenAI response reported failed status");
     }
     if (*status != "completed") {
-        return rejected("openai_unexpected_status",
-                        "unexpected OpenAI response status: " + *status);
+        return reject_with_usage("openai_unexpected_status",
+                                 "unexpected OpenAI response status: " + *status);
+    }
+    if (!usage.present) {
+        // A successful model result without accounting cannot enter durable state as
+        // success. The external Action is still definite/confirmed and its call
+        // permit remains consumed, but the Task fails closed instead of silently
+        // losing cost observability.
+        return rejected("openai_usage_missing",
+                        "completed OpenAI response has no token usage");
     }
 
     const auto output = document.find("output");
     if (output == document.end() || !output->is_array()) {
-        return rejected("openai_invalid_response",
-                        "completed OpenAI response has no output array");
+        return reject_with_usage("openai_invalid_response",
+                                 "completed OpenAI response has no output array");
     }
 
     std::string text;
@@ -302,28 +438,29 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
             }
             const auto value = json_string(part, "text");
             if (!value) {
-                return rejected("openai_invalid_response",
-                                "OpenAI output_text part has no text");
+                return reject_with_usage("openai_invalid_response",
+                                         "OpenAI output_text part has no text");
             }
             if (value->size() > request.max_output_bytes - text.size()) {
-                return rejected("openai_output_too_large",
-                                "OpenAI text output exceeds the task byte limit");
+                return reject_with_usage("openai_output_too_large",
+                                         "OpenAI text output exceeds the task byte limit");
             }
             text += *value;
         }
     }
 
     if (refusal) {
-        return rejected("openai_refusal", *refusal);
+        return reject_with_usage("openai_refusal", *refusal);
     }
     if (text.empty()) {
-        return rejected("openai_no_text_output",
-                        "completed OpenAI response contains no output_text");
+        return reject_with_usage("openai_no_text_output",
+                                 "completed OpenAI response contains no output_text");
     }
 
     return ProviderResult{ProviderOutcome::succeeded,
                           "text/plain; charset=utf-8",
-                          std::move(text), {}, {}};
+                          std::move(text), {}, {},
+                          std::string(usage_content_type), usage.metadata};
 }
 
 } // namespace gaudere_agent
