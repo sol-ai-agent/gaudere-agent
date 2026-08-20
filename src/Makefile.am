@@ -19,6 +19,7 @@ gaudere_agent_SOURCES = \
 	LocalWaitHandler.hpp \
 	OpenAIActivation.cpp \
 	OpenAIActivation.hpp \
+	OpenAIBudget.hpp \
 	OpenAIOneShot.cpp \
 	OpenAIOneShot.hpp \
 	OpenAIResponsesProvider.cpp \
