@@ -89,6 +89,11 @@ void print_task_report(std::ostream& output, const gaudere::work::Task& task)
         if (!task.result->failure_message.empty()) {
             output << "failure_message=" << escaped_text(task.result->failure_message) << '\n';
         }
+        if (!task.result->metadata_content_type.empty()) {
+            output << "result_metadata_content_type="
+                   << escaped_text(task.result->metadata_content_type) << '\n'
+                   << "result_metadata=" << escaped_text(task.result->metadata) << '\n';
+        }
     }
 }
 
