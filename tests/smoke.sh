@@ -127,8 +127,9 @@ if grep -q '^gaudere-agent: running$' "$temporary_directory/bad-control-startup"
 fi
 grep -q '^keep me$' "$bad_control_path"
 
-# A second process can submit and inspect work through the owner's local Unix socket
-# without opening SQLite. The service is deliberately provider-disabled here.
+# A second process can submit, inspect work, and observe the provider budget through
+# the owner's local Unix socket without opening SQLite. The service is deliberately
+# provider-disabled here.
 control_socket="$temporary_directory/control.sock"
 "$agent" --state "$state" --control-socket "$control_socket" \
   >"$temporary_directory/live-control-service" 2>&1 &
@@ -167,6 +168,23 @@ while ! grep -q '^gaudere-agent: running$' "$temporary_directory/live-control-se
 done
 grep -q "^gaudere-agent: control socket=$control_socket$" \
   "$temporary_directory/live-control-service"
+
+# Budget inspection uses the same owner/worker boundary and is purely observational.
+# Provider preflight above did not consume a slot, so this fresh smoke state is empty.
+"$control" --socket "$control_socket" budget \
+  >"$temporary_directory/live-budget" 2>&1
+grep -q '^scope="provider.call:openai.responses"$' "$temporary_directory/live-budget"
+grep -q '^provider_enabled=false$' "$temporary_directory/live-budget"
+grep -q '^max_total=12$' "$temporary_directory/live-budget"
+grep -q '^total_used=0$' "$temporary_directory/live-budget"
+grep -q '^remaining_total=12$' "$temporary_directory/live-budget"
+grep -q '^max_window=4$' "$temporary_directory/live-budget"
+grep -q '^window_seconds=86400$' "$temporary_directory/live-budget"
+grep -q '^in_window_used=0$' "$temporary_directory/live-budget"
+grep -q '^remaining_window=4$' "$temporary_directory/live-budget"
+grep -q '^min_interval_seconds=900$' "$temporary_directory/live-budget"
+grep -q '^last_consumed_at_ms=none$' "$temporary_directory/live-budget"
+grep -q '^next_new_call=available$' "$temporary_directory/live-budget"
 
 "$control" --socket "$control_socket" echo live-echo "hello live control" \
   >"$temporary_directory/live-submit" 2>&1

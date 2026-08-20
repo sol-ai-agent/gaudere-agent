@@ -3,6 +3,7 @@
 
 #include "LiveControl.hpp"
 
+#include <gaudere/budget/Store.hpp>
 #include <gaudere/work/Runtime.hpp>
 #include <gaudere/work/TaskStore.hpp>
 
@@ -18,15 +19,17 @@ struct LiveControlProcessResult {
 /**
  * Worker-thread side of the live control boundary.
  *
- * This is the only live-control object that knows Runtime/TaskStore. Call process()
- * only from the same worker thread that owns normal Runtime/SQLite transitions.
- * The AF_UNIX listener has access only to LiveControlMailbox and the scheduler wake
- * callback, never to this processor or durable state.
+ * This is the only live-control object that knows Runtime/TaskStore/BudgetStore.
+ * Call process() only from the same worker thread that owns normal Runtime/SQLite
+ * transitions. The AF_UNIX listener has access only to LiveControlMailbox and the
+ * scheduler wake callback, never to this processor or durable state.
  */
 class LiveControlProcessor {
 public:
     LiveControlProcessor(gaudere::work::Runtime& runtime,
                          gaudere::work::TaskStore& store,
+                         gaudere::budget::Store& budget_store,
+                         gaudere::budget::Policy budget_policy,
                          bool openai_enabled);
 
     [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
@@ -37,6 +40,8 @@ private:
 
     gaudere::work::Runtime& runtime_;
     gaudere::work::TaskStore& store_;
+    gaudere::budget::Store& budget_store_;
+    gaudere::budget::Policy budget_policy_;
     bool openai_enabled_;
 };
 

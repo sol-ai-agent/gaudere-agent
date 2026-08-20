@@ -12,7 +12,7 @@ void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | task ID]\n";
+        << "[echo ID TEXT | openai ID TEXT | task ID | budget]\n";
 }
 
 } // namespace
@@ -39,6 +39,9 @@ int main(int argc, char* argv[])
         } else if (operation == "task" && argc == 5) {
             command.operation = gaudere_agent::LiveControlOperation::inspect_task;
             command.id = argv[4];
+        } else if (operation == "budget" && argc == 4) {
+            command.operation = gaudere_agent::LiveControlOperation::inspect_budget;
+            command.id = "openai";
         } else {
             usage(argv[0]);
             return 2;
