@@ -12,6 +12,7 @@
 #include <gaudere/scheduling/wake/Runtime.hpp>
 
 #include <string>
+#include <string_view>
 
 namespace gaudere_agent {
 
@@ -36,6 +37,17 @@ public:
     OpenAIActivation& operator=(const OpenAIActivation&) = delete;
     OpenAIActivation(OpenAIActivation&&) = delete;
     OpenAIActivation& operator=(OpenAIActivation&&) = delete;
+
+    // Compatibility accessors delegate to the lightweight policy boundary. Code
+    // that only needs budget metadata should include OpenAIBudget.hpp directly.
+    [[nodiscard]] static gaudere::budget::Policy bootstrap_budget_policy() noexcept
+    {
+        return openai_bootstrap_budget_policy();
+    }
+    [[nodiscard]] static std::string_view bootstrap_budget_scope() noexcept
+    {
+        return openai_budget_scope();
+    }
 
     [[nodiscard]] TaskHandler& handler() noexcept { return handler_; }
     [[nodiscard]] const std::string& model() const noexcept { return model_; }
