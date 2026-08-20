@@ -39,6 +39,22 @@ jobs:
         with:
           repository: sol-ai-agent/gaudere
           path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere dependency
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in
+            *[!0-9a-f]*|'')
+              echo "invalid agent/gaudere.ref" >&2
+              exit 1
+              ;;
+          esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+          echo "Using Gaudere ref: $gaudere_ref"
 
       - name: Validate deployment scripts
         run: |
