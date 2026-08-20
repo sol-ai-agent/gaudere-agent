@@ -50,6 +50,7 @@ jobs:
           sh -n agent/scripts/validate-host-runtime.sh
           sh -n agent/scripts/validate-state-backup.sh
           sh -n agent/scripts/validate-provider-secret.sh
+          sh -n agent/scripts/validate-provider-budget.sh
           sh -n agent/scripts/validate-openai-network.sh
           sh -n agent/scripts/validate-openai-authorized.sh
           sh -n agent/scripts/validate-live-control.sh
