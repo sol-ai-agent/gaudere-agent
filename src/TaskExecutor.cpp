@@ -58,6 +58,14 @@ ExecuteResult TaskExecutor::execute(const std::string& id,
         return ExecuteResult::completed;
     }
 
+    if (result.metadata_content_type.empty() != result.metadata.empty()) {
+        return runtime_.require_manual_review(
+                   id, "invalid_handler_result",
+                   "handler result metadata content type/payload pair is incomplete")
+            ? ExecuteResult::completed
+            : ExecuteResult::state_conflict;
+    }
+
     switch (result.outcome) {
     case HandlerOutcome::succeeded:
         if (result.content_type.empty()) {
@@ -68,7 +76,9 @@ ExecuteResult TaskExecutor::execute(const std::string& id,
                 : ExecuteResult::state_conflict;
         }
         return runtime_.succeed(id, std::move(result.output),
-                                std::move(result.content_type))
+                                std::move(result.content_type),
+                                std::move(result.metadata_content_type),
+                                std::move(result.metadata))
                        == gaudere::work::FinishResult::unavailable
             ? ExecuteResult::state_conflict
             : ExecuteResult::completed;
@@ -78,11 +88,20 @@ ExecuteResult TaskExecutor::execute(const std::string& id,
             result.failure_code = "handler_failed";
         }
         return runtime_.fail(id, std::move(result.failure_code),
-                             std::move(result.failure_message))
+                             std::move(result.failure_message),
+                             std::move(result.metadata_content_type),
+                             std::move(result.metadata))
             ? ExecuteResult::completed
             : ExecuteResult::state_conflict;
 
     case HandlerOutcome::cancelled:
+        if (!result.metadata.empty()) {
+            return runtime_.require_manual_review(
+                       id, "invalid_handler_result",
+                       "cancelled handler result unexpectedly carries metadata")
+                ? ExecuteResult::completed
+                : ExecuteResult::state_conflict;
+        }
         if (runtime_.mark_cancelled(id)) {
             return ExecuteResult::completed;
         }
@@ -106,7 +125,9 @@ ExecuteResult TaskExecutor::execute(const std::string& id,
         }
         return runtime_.require_manual_review(
                    id, std::move(result.failure_code),
-                   std::move(result.failure_message))
+                   std::move(result.failure_message),
+                   std::move(result.metadata_content_type),
+                   std::move(result.metadata))
             ? ExecuteResult::completed
             : ExecuteResult::state_conflict;
     }
