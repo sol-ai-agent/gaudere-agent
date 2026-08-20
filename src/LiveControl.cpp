@@ -31,6 +31,8 @@ std::string operation_name(const LiveControlOperation operation)
         return "submit_openai";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
+    case LiveControlOperation::inspect_budget:
+        return "inspect_budget";
     }
     throw std::invalid_argument("unknown live control operation");
 }
@@ -45,6 +47,9 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
+    }
+    if (value == "inspect_budget") {
+        return LiveControlOperation::inspect_budget;
     }
     throw std::invalid_argument("unsupported live control operation");
 }
@@ -86,6 +91,11 @@ void validate_command(const LiveControlCommand& command)
     case LiveControlOperation::inspect_task:
         if (!command.text.empty()) {
             throw std::invalid_argument("inspect_task does not accept text");
+        }
+        break;
+    case LiveControlOperation::inspect_budget:
+        if (command.id != "openai" || !command.text.empty()) {
+            throw std::invalid_argument("inspect_budget accepts only id 'openai' and no text");
         }
         break;
     }
