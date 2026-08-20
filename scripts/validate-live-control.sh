@@ -89,6 +89,23 @@ while ! "$podman_command" exec "$container" sh -c "test -S '$socket'" >/dev/null
     sleep 0.05
 done
 
+say "inspect empty durable provider budget through live control"
+"$podman_command" exec "$container" \
+    /usr/local/bin/gaudere-control --socket "$socket" budget \
+    >"$workspace/budget" 2>&1
+expect_file_line "$workspace/budget" '^scope="provider.call:openai.responses"$'
+expect_file_line "$workspace/budget" '^provider_enabled=false$'
+expect_file_line "$workspace/budget" '^max_total=12$'
+expect_file_line "$workspace/budget" '^total_used=0$'
+expect_file_line "$workspace/budget" '^remaining_total=12$'
+expect_file_line "$workspace/budget" '^max_window=4$'
+expect_file_line "$workspace/budget" '^window_seconds=86400$'
+expect_file_line "$workspace/budget" '^in_window_used=0$'
+expect_file_line "$workspace/budget" '^remaining_window=4$'
+expect_file_line "$workspace/budget" '^min_interval_seconds=900$'
+expect_file_line "$workspace/budget" '^last_consumed_at_ms=none$'
+expect_file_line "$workspace/budget" '^next_new_call=available$'
+
 say "submit local.echo through live control"
 "$podman_command" exec "$container" \
     /usr/local/bin/gaudere-control --socket "$socket" \
@@ -125,6 +142,14 @@ while :; do
 done
 expect_file_line "$workspace/report" '^attempts=1/1$'
 expect_file_line "$workspace/report" '^result_output="hello from live control"$'
+
+say "prove budget inspection did not consume a permit"
+"$podman_command" exec "$container" \
+    /usr/local/bin/gaudere-control --socket "$socket" budget \
+    >"$workspace/budget-after" 2>&1
+expect_file_line "$workspace/budget-after" '^total_used=0$'
+expect_file_line "$workspace/budget-after" '^in_window_used=0$'
+expect_file_line "$workspace/budget-after" '^next_new_call=available$'
 
 say "prove direct second Runtime owner is still rejected"
 if "$podman_command" exec "$container" \
