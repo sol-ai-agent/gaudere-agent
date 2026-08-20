@@ -105,7 +105,17 @@ public:
         return gaudere::budget::ConsumeResult::accepted;
     }
 
+    gaudere::budget::Snapshot snapshot(
+        const std::string&,
+        gaudere::budget::TimePoint,
+        const gaudere::budget::Policy&) override
+    {
+        ++snapshots;
+        return gaudere::budget::Snapshot{};
+    }
+
     int consumes = 0;
+    int snapshots = 0;
 };
 
 struct TemporaryDirectory {
@@ -157,8 +167,8 @@ void test_valid_activation_is_network_free()
            "activation exposes only configured secret name");
     expect(store.actions.empty(),
            "constructing activation creates no durable external Action");
-    expect(budget_store.consumes == 0,
-           "constructing activation consumes no provider call budget");
+    expect(budget_store.consumes == 0 && budget_store.snapshots == 0,
+           "constructing activation neither consumes nor inspects provider budget");
 
     const auto policy = activation.budget_policy();
     expect(policy.max_total == 12, "bootstrap budget allows twelve lifetime calls");
@@ -184,8 +194,8 @@ void test_missing_secret_fails_preflight()
         },
         "missing OpenAI secret rejects activation");
     expect(store.actions.empty(), "failed preflight creates no Action");
-    expect(budget_store.consumes == 0,
-           "failed preflight consumes no provider call budget");
+    expect(budget_store.consumes == 0 && budget_store.snapshots == 0,
+           "failed preflight does not touch provider call budget");
 }
 
 void test_newline_secret_fails_preflight()
@@ -205,8 +215,8 @@ void test_newline_secret_fails_preflight()
         },
         "newline-containing OpenAI secret rejects activation");
     expect(store.actions.empty(), "invalid credential creates no Action");
-    expect(budget_store.consumes == 0,
-           "invalid credential consumes no provider call budget");
+    expect(budget_store.consumes == 0 && budget_store.snapshots == 0,
+           "invalid credential does not touch provider call budget");
 }
 
 void test_invalid_secret_name_fails_preflight()
@@ -224,8 +234,8 @@ void test_invalid_secret_name_fails_preflight()
                                         directory.path.string());
         },
         "invalid secret name cannot escape configured secret directory");
-    expect(budget_store.consumes == 0,
-           "invalid secret name consumes no provider call budget");
+    expect(budget_store.consumes == 0 && budget_store.snapshots == 0,
+           "invalid secret name does not touch provider call budget");
 }
 
 } // namespace
