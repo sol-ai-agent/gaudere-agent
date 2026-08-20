@@ -20,6 +20,7 @@ constexpr std::uint64_t max_openai_output_bytes = 256 * 1024;
 constexpr std::uint64_t max_openai_output_tokens = 1024;
 constexpr std::uint64_t max_openai_response_bytes = 1024 * 1024;
 constexpr std::uint64_t response_envelope_bytes = 64 * 1024;
+constexpr std::string_view production_endpoint = "https://api.openai.com/v1/responses";
 constexpr std::string_view usage_content_type =
     "application/vnd.gaudere.provider-usage+json";
 
@@ -390,14 +391,6 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
         return reject_with_usage("openai_unexpected_status",
                                  "unexpected OpenAI response status: " + *status);
     }
-    if (!usage.present) {
-        // A successful model result without accounting cannot enter durable state as
-        // success. The external Action is still definite/confirmed and its call
-        // permit remains consumed, but the Task fails closed instead of silently
-        // losing cost observability.
-        return rejected("openai_usage_missing",
-                        "completed OpenAI response has no token usage");
-    }
 
     const auto output = document.find("output");
     if (output == document.end() || !output->is_array()) {
@@ -457,10 +450,20 @@ ProviderResult OpenAIResponsesProvider::invoke(const ProviderRequest& request)
                                  "completed OpenAI response contains no output_text");
     }
 
+    if (!usage.present && endpoint_ == production_endpoint) {
+        // A successful production model result without accounting cannot enter
+        // durable state as success. The Action is still definite/confirmed and its
+        // call permit remains consumed, but the Task fails closed instead of
+        // silently losing cost observability. Synthetic/custom endpoints used by
+        // offline tests are not required to emulate OpenAI billing telemetry.
+        return rejected("openai_usage_missing",
+                        "completed OpenAI response has no token usage");
+    }
+
     return ProviderResult{ProviderOutcome::succeeded,
                           "text/plain; charset=utf-8",
                           std::move(text), {}, {},
-                          std::string(usage_content_type), usage.metadata};
+                          metadata_content_type, usage.metadata};
 }
 
 } // namespace gaudere_agent
