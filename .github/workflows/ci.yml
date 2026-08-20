@@ -27,6 +27,7 @@ jobs:
           libtool
           make
           pkgconf-pkg-config
+          python3
           sqlite-devel
           tar
           util-linux
@@ -70,6 +71,7 @@ jobs:
           sh -n agent/scripts/validate-openai-network.sh
           sh -n agent/scripts/validate-openai-authorized.sh
           sh -n agent/scripts/validate-live-control.sh
+          sh -n agent/scripts/validate-schema-migration-copy.sh
 
       - name: Build and install Gaudere
         run: |
@@ -92,6 +94,81 @@ jobs:
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
           make --jobs=2 check
+
+      - name: Validate copied schema migration
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          agent_bin="$GITHUB_WORKSPACE/agent/build/src/gaudere-agent"
+          workspace=$(mktemp -d)
+          source_state="$workspace/source"
+          data_home="$workspace/data"
+          mkdir -p "$source_state" "$data_home"
+          trap 'rm -rf "$workspace"' EXIT
+
+          python3 - "$source_state/state.db" <<'PY'
+          import sqlite3
+          import sys
+
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.executescript("""
+              PRAGMA user_version=2;
+              CREATE TABLE tasks (
+                id TEXT PRIMARY KEY NOT NULL,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL,
+                input_content_type TEXT NOT NULL,
+                input TEXT NOT NULL,
+                max_input_bytes INTEGER NOT NULL,
+                max_output_bytes INTEGER NOT NULL,
+                max_runtime_ms INTEGER NOT NULL,
+                max_attempts INTEGER NOT NULL,
+                attempts_started INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at_ms INTEGER,
+                cancel_reason TEXT NOT NULL,
+                result_content_type TEXT,
+                result_output TEXT,
+                result_failure_code TEXT,
+                result_failure_message TEXT
+              );
+              INSERT INTO tasks VALUES (
+                'ci-migration-copy','local.echo:ci-migration-copy','local.echo',
+                'text/plain','durable v2 input',4096,4096,1000,1,1,3,
+                NULL,NULL,'','text/plain','durable v2 result','',''
+              );
+              CREATE TABLE actions (
+                id TEXT PRIMARY KEY NOT NULL,
+                idempotency_key TEXT NOT NULL UNIQUE,
+                critical INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                effect_result INTEGER NOT NULL,
+                lease_owner TEXT,
+                lease_expires_at_ms INTEGER
+              );
+              CREATE TABLE budget_consumptions (
+                scope TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                consumed_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(scope,idempotency_key)
+              );
+              """)
+          PY
+
+          archive="$workspace/gaudere-state-v2.tar.gz"
+          tar -czf "$archive" -C "$source_state" .
+          (cd "$workspace" && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
+
+          GAUDERE_AGENT_BIN="$agent_bin" XDG_DATA_HOME="$data_home" \
+            sh "$GITHUB_WORKSPACE/agent/scripts/validate-schema-migration-copy.sh" \
+            "$archive" ci-migration-copy > "$workspace/migration.out"
+          cat "$workspace/migration.out"
+          grep -q '^schema_before=2$' "$workspace/migration.out"
+          grep -q '^schema_after=3$' "$workspace/migration.out"
+          grep -q '^status=succeeded$' "$workspace/migration.out"
+          grep -q '^result_output="durable v2 result"$' "$workspace/migration.out"
+          grep -q '^gaudere schema migration copy validation: PASS$' "$workspace/migration.out"
 
       - name: Validate stopped-state backup and restore
         run: |
