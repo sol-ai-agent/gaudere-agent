@@ -29,6 +29,35 @@ A budget denial therefore occurs before any provider Action and before any netwo
 
 The budget record is persisted in the same SQLite state database as Tasks and Actions, in the additive `budget_consumptions` table. Normal stopped-state backups and restores therefore preserve consumed permits automatically.
 
+## Live observability
+
+The owner service can report the durable OpenAI budget without a second process opening SQLite:
+
+```sh
+sh scripts/control-service.sh budget
+```
+
+The request crosses the same mode-`0600` Unix socket as live Task commands. The socket thread only queues and wakes; the main worker performs a non-mutating `BudgetStore::snapshot()` against the already-owned state database.
+
+A report contains the fixed policy, lifetime/window usage, remaining slots, the latest durable consumption timestamp, whether the provider itself is enabled, and the admission result a **brand-new** call would receive at that instant. Example for an unused offline service:
+
+```text
+scope="provider.call:openai.responses"
+provider_enabled=false
+max_total=12
+total_used=0
+remaining_total=12
+max_window=4
+window_seconds=86400
+in_window_used=0
+remaining_window=4
+min_interval_seconds=900
+last_consumed_at_ms=none
+next_new_call=available
+```
+
+Possible `next_new_call` values are `available`, `cooldown`, `window_exhausted`, `total_exhausted`, and `clock_rollback`. Observation never consumes or reserves a permit.
+
 ## Crash semantics
 
 Budget consumption is conservative. Once a new permit is accepted, a later crash does not refund it.
@@ -40,6 +69,8 @@ Once an Action already exists, the existing provider no-replay rules take preced
 ## Clock behavior
 
 Rolling windows and cooldowns use wall-clock time because the state must survive process and machine restarts. If the observed clock moves backwards behind the most recently consumed permit, the budget fails closed and the task enters manual review instead of authorizing a call.
+
+The observational snapshot follows the same fail-closed interpretation and reports `next_new_call=clock_rollback` without mutating state.
 
 ## Operator-visible failures
 
