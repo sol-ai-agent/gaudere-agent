@@ -1,6 +1,6 @@
 #include "LiveControlProcessor.hpp"
 
-#include "OpenAIActivation.hpp"
+#include "OpenAIBudget.hpp"
 #include "OpenAITask.hpp"
 #include "TaskReport.hpp"
 
@@ -65,7 +65,7 @@ std::string budget_report(const gaudere::budget::Snapshot& snapshot,
         - std::min(policy.max_in_window, snapshot.in_window_used);
 
     std::ostringstream output;
-    output << "scope=\"" << OpenAIActivation::bootstrap_budget_scope() << "\"\n"
+    output << "scope=\"" << openai_budget_scope() << "\"\n"
            << "provider_enabled=" << (provider_enabled ? "true" : "false") << '\n'
            << "max_total=" << policy.max_total << '\n'
            << "total_used=" << snapshot.total_used << '\n'
@@ -148,7 +148,7 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
 
     if (command.operation == LiveControlOperation::inspect_budget) {
         const auto snapshot = budget_store_.snapshot(
-            std::string(OpenAIActivation::bootstrap_budget_scope()),
+            std::string(openai_budget_scope()),
             std::chrono::system_clock::now(), budget_policy_);
         return LiveControlReply{
             true, 0, budget_report(snapshot, budget_policy_, openai_enabled_)};
