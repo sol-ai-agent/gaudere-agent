@@ -1,7 +1,9 @@
 ARG BUILDER_IMAGE=registry.fedoraproject.org/fedora:44
 FROM ${BUILDER_IMAGE} AS builder
 
-ARG GAUDERE_REF=2123bf99417d28863dae5c964ac22f850482947f
+# Deliberately has no default. scripts/build-image.sh and CI must both provide
+# the same pinned commit from gaudere.ref so container and CI builds cannot drift.
+ARG GAUDERE_REF
 
 USER root
 
@@ -19,7 +21,8 @@ RUN dnf install -y \
         sqlite-devel \
     && dnf clean all
 
-RUN git clone https://github.com/sol-ai-agent/gaudere.git /src/gaudere \
+RUN test -n "${GAUDERE_REF}" \
+    && git clone https://github.com/sol-ai-agent/gaudere.git /src/gaudere \
     && git -C /src/gaudere checkout --detach "${GAUDERE_REF}"
 
 RUN cd /src/gaudere \
