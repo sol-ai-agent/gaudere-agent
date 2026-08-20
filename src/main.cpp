@@ -335,10 +335,16 @@ int main(int argc, char* argv[])
             throw std::runtime_error("cannot register local task handlers");
         }
 
-        if (options.openai_enabled) {
+        // Live control must be able to observe the durable OpenAI budget even while
+        // the provider itself remains disabled/offline. Creating BudgetStore only
+        // creates the additive budget table/index; it never consumes a permit.
+        if (options.openai_enabled || !options.control_socket.empty()) {
             provider_budget_store =
                 std::make_unique<gaudere::persistence::sqlite::BudgetStore>(
                     options.state_path);
+        }
+
+        if (options.openai_enabled) {
             openai_activation = std::make_unique<gaudere_agent::OpenAIActivation>(
                 action_runtime, action_store, *provider_budget_store,
                 options.openai_model, options.openai_secret,
@@ -399,9 +405,14 @@ int main(int argc, char* argv[])
             std::unique_ptr<gaudere_agent::LiveControlProcessor> control_processor;
             std::unique_ptr<gaudere_agent::LiveControlServer> control_server;
             if (!options.control_socket.empty()) {
+                if (!provider_budget_store) {
+                    throw std::runtime_error("live control provider budget store is unavailable");
+                }
                 control_mailbox = std::make_unique<gaudere_agent::LiveControlMailbox>();
                 control_processor = std::make_unique<gaudere_agent::LiveControlProcessor>(
-                    work_runtime, task_store, options.openai_enabled);
+                    work_runtime, task_store, *provider_budget_store,
+                    gaudere_agent::OpenAIActivation::bootstrap_budget_policy(),
+                    options.openai_enabled);
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.notify_work(); });
