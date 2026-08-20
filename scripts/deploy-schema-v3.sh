@@ -172,7 +172,9 @@ service_must_be_stopped
 state_lock_must_be_free
 
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-staging=$(mktemp -d "$state_parent/.${state_name}.v3-staging.XXXXXX")
+workspace=$(mktemp -d "$state_parent/.${state_name}.v3-work.XXXXXX")
+staging="$workspace/state"
+mkdir -p "$staging"
 rollback="$state_parent/${state_name}.pre-v3-$stamp"
 failed_state="$state_parent/${state_name}.failed-v3-$stamp"
 [ ! -e "$rollback" ] || fail "rollback path already exists: $rollback"
@@ -182,13 +184,18 @@ swap_started=0
 swap_complete=0
 cleanup()
 {
-    if [ "$swap_started" = "1" ] && [ "$swap_complete" != "1" ]; then
-        if [ ! -e "$state_directory" ] && [ -d "$rollback" ]; then
+    if [ "$swap_started" = "1" ] && [ "$swap_complete" != "1" ] && [ -d "$rollback" ]; then
+        # A post-swap validation failure must put the original state path back. Keep
+        # the failed v3 state separately for diagnosis instead of deleting it.
+        if [ -e "$state_directory" ] && [ ! -e "$failed_state" ]; then
+            mv "$state_directory" "$failed_state" 2>/dev/null || true
+        fi
+        if [ ! -e "$state_directory" ]; then
             mv "$rollback" "$state_directory" 2>/dev/null || true
         fi
     fi
-    if [ -d "$staging" ]; then
-        rm -rf "$staging"
+    if [ -d "$workspace" ]; then
+        rm -rf "$workspace"
     fi
 }
 trap cleanup EXIT HUP INT TERM
@@ -203,7 +210,7 @@ staged_before=$(schema_version "$staging/state.db")
 printf 'staged_schema_before=%s\n' "$staged_before"
 [ "$staged_before" = "$expected_before" ] \
     || fail "fresh backup restored with unexpected schema $staged_before"
-logical_snapshot "$staging/state.db" "$staging/logical.before.json"
+logical_snapshot "$staging/state.db" "$workspace/logical.before.json"
 
 printf '\n==> migrate and validate staging state with networking disabled\n'
 check_output=$(run_agent_on "$staging" --check)
@@ -217,8 +224,8 @@ staged_after=$(schema_version "$staging/state.db")
 printf 'staged_schema_after=%s\n' "$staged_after"
 [ "$staged_after" = "$expected_after" ] \
     || fail "staging migration expected schema $expected_after, found $staged_after"
-logical_snapshot "$staging/state.db" "$staging/logical.after.json"
-cmp -s "$staging/logical.before.json" "$staging/logical.after.json" \
+logical_snapshot "$staging/state.db" "$workspace/logical.after.json"
+cmp -s "$workspace/logical.before.json" "$workspace/logical.after.json" \
     || fail "logical durable rows changed during staging migration"
 
 metadata_rows=$(python3 - "$staging/state.db" <<'PY'
@@ -248,12 +255,17 @@ if [ -n "$task_id" ]; then
     run_agent_on "$staging" --task "$task_id"
 fi
 
-# Final guard immediately before the path swap.
+# Final guard immediately before the path swap: the service must still be stopped and
+# the original v2 state must still have exactly the logical rows captured in the fresh
+# backup. If anything changed after backup creation, refuse to replace it.
 service_must_be_stopped
 state_lock_must_be_free
 current_version=$(schema_version "$state_database")
 [ "$current_version" = "$expected_before" ] \
     || fail "production state changed before swap (schema=$current_version)"
+logical_snapshot "$state_database" "$workspace/logical.current.json"
+cmp -s "$workspace/logical.before.json" "$workspace/logical.current.json" \
+    || fail "production logical state changed after fresh backup; refusing swap"
 
 printf '\n==> atomically stage rollback and install migrated state\n'
 mv "$state_directory" "$rollback"
@@ -263,7 +275,6 @@ if ! mv "$staging" "$state_directory"; then
     swap_started=0
     fail "cannot install migrated state; original state restored"
 fi
-swap_complete=1
 
 installed_version=$(schema_version "$state_directory/state.db")
 printf 'schema_after=%s\n' "$installed_version"
@@ -275,7 +286,9 @@ if [ -n "$task_id" ]; then
     run_agent_on "$state_directory" --task "$task_id"
 fi
 
+swap_complete=1
 trap - EXIT HUP INT TERM
+rm -rf "$workspace"
 
 printf '\n==> staged production schema deployment complete\n'
 printf 'backup=%s\n' "$archive"
