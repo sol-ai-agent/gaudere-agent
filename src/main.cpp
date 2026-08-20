@@ -11,6 +11,7 @@
 #include "WorkController.hpp"
 
 #include <gaudere/persistence/sqlite/ActionStore.hpp>
+#include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/scheduling/wake/Runtime.hpp>
 #include <gaudere/scheduling/wake/Scheduler.hpp>
@@ -326,6 +327,7 @@ int main(int argc, char* argv[])
         gaudere_agent::LocalWaitHandler wait_handler;
         gaudere_agent::WorkController work_controller(
             work_scheduler, work_runtime, task_dispatcher, "main-worker");
+        std::unique_ptr<gaudere::persistence::sqlite::BudgetStore> provider_budget_store;
         std::unique_ptr<gaudere_agent::OpenAIActivation> openai_activation;
 
         if (!task_dispatcher.register_handler("local.echo", echo_handler)
@@ -334,9 +336,13 @@ int main(int argc, char* argv[])
         }
 
         if (options.openai_enabled) {
+            provider_budget_store =
+                std::make_unique<gaudere::persistence::sqlite::BudgetStore>(
+                    options.state_path);
             openai_activation = std::make_unique<gaudere_agent::OpenAIActivation>(
-                action_runtime, action_store, options.openai_model,
-                options.openai_secret, options.secret_directory);
+                action_runtime, action_store, *provider_budget_store,
+                options.openai_model, options.openai_secret,
+                options.secret_directory);
             if (!task_dispatcher.register_handler(
                     gaudere_agent::openai_task_kind, openai_activation->handler())) {
                 throw std::runtime_error("cannot register OpenAI provider handler");
@@ -344,6 +350,16 @@ int main(int argc, char* argv[])
             std::cout << "gaudere-agent: OpenAI provider enabled model="
                       << options.openai_model << " secret="
                       << options.openai_secret << '\n';
+            const auto& budget = openai_activation->budget_policy();
+            std::cout << "gaudere-agent: OpenAI budget max_total="
+                      << budget.max_total << " max_window="
+                      << budget.max_in_window << " window_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(
+                             budget.window).count()
+                      << " min_interval_seconds="
+                      << std::chrono::duration_cast<std::chrono::seconds>(
+                             budget.min_interval).count()
+                      << '\n';
         }
 
         action_runtime.recover();
