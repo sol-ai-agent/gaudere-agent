@@ -53,8 +53,11 @@ public:
     [[nodiscard]] static std::string client_request_id(std::string_view key);
 
 private:
-    [[nodiscard]] static ProviderResult rejected(std::string code,
-                                                 std::string message);
+    [[nodiscard]] static ProviderResult rejected(
+        std::string code,
+        std::string message,
+        std::string metadata_content_type = {},
+        std::string metadata = {});
     [[nodiscard]] static ProviderResult unknown(std::string code,
                                                 std::string message);
     [[nodiscard]] static std::uint64_t response_body_limit(

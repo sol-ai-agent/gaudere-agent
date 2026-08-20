@@ -11,6 +11,7 @@ check_PROGRAMS = \
 	openai_responses_hardening_test \
 	openai_responses_provider_test \
 	provider_task_handler_test \
+	provider_usage_durability_test \
 	state_lock_test \
 	task_dispatcher_test \
 	task_executor_test \
@@ -117,6 +118,15 @@ provider_task_handler_test_SOURCES = \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
 provider_task_handler_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+provider_usage_durability_test_SOURCES = \
+	provider_usage_durability_test.cpp \
+	../src/Provider.hpp \
+	../src/ProviderTaskHandler.cpp \
+	../src/ProviderTaskHandler.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp
+provider_usage_durability_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 state_lock_test_SOURCES = \
 	state_lock_test.cpp \

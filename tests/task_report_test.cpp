@@ -16,7 +16,9 @@ int main()
     task.limits.max_attempts = 2;
     task.cancel_reason = "stop\tplease";
     task.result = gaudere::work::TaskResult{
-        "text/plain", "quoted \"result\"", "failed", "bad\nnews"};
+        "text/plain", "quoted \"result\"", "failed", "bad\nnews",
+        "application/vnd.gaudere.provider-usage+json",
+        R"({"input_tokens":3,"output_tokens":2})"};
 
     std::ostringstream output;
     gaudere_agent::print_task_report(output, task);
@@ -27,7 +29,11 @@ int main()
         && report.find("attempts=1/2") != std::string::npos
         && report.find("cancel_reason=\"stop\\tplease\"") != std::string::npos
         && report.find("result_output=\"quoted \\\"result\\\"\"") != std::string::npos
-        && report.find("failure_message=\"bad\\nnews\"") != std::string::npos;
+        && report.find("failure_message=\"bad\\nnews\"") != std::string::npos
+        && report.find("result_metadata_content_type=\"application/vnd.gaudere.provider-usage+json\"")
+               != std::string::npos
+        && report.find("result_metadata=\"{\\\"input_tokens\\\":3,\\\"output_tokens\\\":2}\"")
+               != std::string::npos;
 
     if (!ok) {
         std::cerr << "Unexpected task report:\n" << report;

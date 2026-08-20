@@ -51,7 +51,7 @@ public:
     HttpRequest last_request;
     HttpTransportResult result{
         HttpTransportOutcome::response,
-        HttpResponse{200, {}, R"({"id":"resp","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]})"},
+        HttpResponse{200, {}, R"({"id":"resp","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":0},"output_tokens":2,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":5}})"},
         {}, {}};
 };
 
@@ -112,6 +112,21 @@ void test_provider_sets_explicit_output_token_cap()
                && body.at("max_output_tokens").is_number_unsigned()
                && body.at("max_output_tokens").get<std::uint64_t>() == 1024,
            "every OpenAI Responses request has an explicit 1024-token generation cap");
+
+    expect(result.metadata_content_type
+               == "application/vnd.gaudere.provider-usage+json",
+           "successful production response exposes normalized usage metadata");
+    const auto usage = Json::parse(result.metadata);
+    expect(usage.at("schema") == "gaudere.provider_usage.v1"
+               && usage.at("provider") == "openai"
+               && usage.at("model") == "gpt-test"
+               && usage.at("input_tokens") == 3
+               && usage.at("cached_input_tokens") == 1
+               && usage.at("cache_write_input_tokens") == 0
+               && usage.at("output_tokens") == 2
+               && usage.at("reasoning_tokens") == 1
+               && usage.at("total_tokens") == 5,
+           "OpenAI usage is reduced to trusted token counters only");
 }
 
 void test_non_json_http_error_preserves_status()
@@ -144,6 +159,8 @@ void test_provider_http_error_message_is_not_persisted()
            "provider HTTP error body is replaced by trusted status-only diagnostic");
     expect(result.failure_message.find("synthetic-api-key") == std::string::npos,
            "credential-like provider text is absent from durable failure message");
+    expect(result.metadata.empty(),
+           "raw HTTP error body cannot become durable usage metadata");
 }
 
 void test_failed_status_error_message_is_not_persisted()
@@ -164,6 +181,31 @@ void test_failed_status_error_message_is_not_persisted()
            "provider failed-status error text is not durably retained");
 }
 
+void test_missing_or_malformed_usage_fails_closed_for_production_success()
+{
+    Secret secret;
+
+    Transport missing_transport;
+    missing_transport.result.response = HttpResponse{
+        200, {},
+        R"({"id":"resp","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]})"};
+    OpenAIResponsesProvider missing_provider(missing_transport, secret, "gpt-test");
+    const auto missing = missing_provider.invoke(request());
+    expect(missing.outcome == ProviderOutcome::rejected
+               && missing.failure_code == "openai_usage_missing",
+           "production success without usage cannot silently lose accounting");
+
+    Transport malformed_transport;
+    malformed_transport.result.response = HttpResponse{
+        200, {},
+        R"({"id":"resp","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":-1,"output_tokens":2,"total_tokens":1}})"};
+    OpenAIResponsesProvider malformed_provider(malformed_transport, secret, "gpt-test");
+    const auto malformed = malformed_provider.invoke(request());
+    expect(malformed.outcome == ProviderOutcome::rejected
+               && malformed.failure_code == "openai_invalid_usage",
+           "malformed production usage is rejected instead of persisted");
+}
+
 } // namespace
 
 int main()
@@ -174,6 +216,7 @@ int main()
     test_non_json_http_error_preserves_status();
     test_provider_http_error_message_is_not_persisted();
     test_failed_status_error_message_is_not_persisted();
+    test_missing_or_malformed_usage_fails_closed_for_production_success();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";

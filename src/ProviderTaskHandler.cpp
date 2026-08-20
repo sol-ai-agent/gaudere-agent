@@ -12,6 +12,11 @@ using gaudere::scheduling::wake::ActionStatus;
 using gaudere::scheduling::wake::EffectResult;
 using gaudere::scheduling::wake::SubmitResult;
 
+bool valid_metadata_pair(const ProviderResult& result) noexcept
+{
+    return result.metadata_content_type.empty() == result.metadata.empty();
+}
+
 } // namespace
 
 ProviderTaskHandler::ProviderTaskHandler(
@@ -213,31 +218,42 @@ HandlerResult ProviderTaskHandler::execute(const TaskContext& context)
             return manual_review("provider_confirmation_persistence_failed",
                                  "provider succeeded but confirmation could not be persisted");
         }
-        if (provider_result.content_type.empty()) {
+        if (provider_result.content_type.empty() || !valid_metadata_pair(provider_result)) {
             return manual_review("invalid_provider_result",
-                                 "successful provider result has no content type");
+                                 "successful provider result is structurally invalid");
         }
         return HandlerResult{HandlerOutcome::succeeded,
                              std::move(provider_result.content_type),
-                             std::move(provider_result.output), {}, {}};
+                             std::move(provider_result.output), {}, {},
+                             std::move(provider_result.metadata_content_type),
+                             std::move(provider_result.metadata)};
 
     case ProviderOutcome::rejected:
         if (!action_runtime_.record_confirmed_result(action.id)) {
             return manual_review("provider_confirmation_persistence_failed",
                                  "provider rejection was definite but confirmation could not be persisted");
         }
+        if (!valid_metadata_pair(provider_result)) {
+            return manual_review("invalid_provider_result",
+                                 "provider rejection metadata is structurally invalid");
+        }
         if (provider_result.failure_code.empty()) {
             provider_result.failure_code = "provider_rejected";
         }
         return HandlerResult{HandlerOutcome::failed, {}, {},
                              std::move(provider_result.failure_code),
-                             std::move(provider_result.failure_message)};
+                             std::move(provider_result.failure_message),
+                             std::move(provider_result.metadata_content_type),
+                             std::move(provider_result.metadata)};
 
     case ProviderOutcome::effect_unknown:
         if (!action_runtime_.record_unknown_result(action.id)) {
             return manual_review("provider_unknown_persistence_failed",
                                  "provider result is ambiguous and the action could not be moved to manual review");
         }
+        // Ambiguous transport outcomes deliberately carry no trusted accounting
+        // metadata. A later external bill may exist, so the durable call budget has
+        // already been consumed and automatic replay remains forbidden.
         return manual_review(
             provider_result.failure_code.empty()
                 ? "provider_effect_unknown"
