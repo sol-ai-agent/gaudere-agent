@@ -25,9 +25,12 @@ Use the repository helper from the host:
 ```sh
 sh scripts/control-service.sh echo demo-001 "Bonjour Gaudere"
 sh scripts/control-service.sh task demo-001
+sh scripts/control-service.sh budget
 ```
 
 The helper executes `/usr/local/bin/gaudere-control` inside the already-running `gaudere-agent` container. The client process talks only to the Unix socket. It never opens `state.db`.
+
+The `budget` command is observational. The worker reads the durable OpenAI budget through the existing owner process and reports lifetime/window use, remaining slots, cooldown state and whether the provider is enabled. It does not consume a permit and remains available while OpenAI itself is disabled.
 
 `openai` is intentionally unavailable in the ordinary service until a later deployment change explicitly mounts the restricted provider secret, selects `gpt-5.6-sol`, and widens outbound networking. Until then this command must fail:
 
@@ -35,6 +38,6 @@ The helper executes `/usr/local/bin/gaudere-control` inside the already-running 
 sh scripts/control-service.sh openai demo-ai "test"
 ```
 
-The socket thread itself never mutates the Runtime or SQLite. It validates and queues a bounded command in memory and wakes the existing event-driven scheduler. The main worker thread drains that mailbox and performs the durable Runtime transition, preserving the one-owner/single-worker invariant.
+The socket thread itself never mutates the Runtime or SQLite. It validates and queues a bounded command in memory and wakes the existing event-driven scheduler. The main worker thread drains that mailbox and performs durable Task transitions or budget snapshots, preserving the one-owner/single-worker invariant.
 
 Offline maintenance commands (`gaudere-agent --task`, `--cancel`, stopped-state backup, etc.) still require stopping the service first because they open the durable state database directly.
