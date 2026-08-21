@@ -4,9 +4,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace gaudere_agent {
 namespace {
@@ -107,11 +109,33 @@ bool unsigned_integer(const Json& value, std::uint64_t& output) noexcept
 HandlerResult normalize_decision(HandlerResult result)
 {
     Json decision;
+    bool duplicate_key = false;
+    std::vector<std::set<std::string>> object_keys;
+    const auto reject_duplicate_keys =
+        [&](int, const Json::parse_event_t event, Json& parsed) {
+            if (event == Json::parse_event_t::object_start) {
+                object_keys.emplace_back();
+            } else if (event == Json::parse_event_t::key
+                       && !object_keys.empty()) {
+                const auto inserted = object_keys.back().insert(
+                    parsed.get<std::string>());
+                duplicate_key = duplicate_key || !inserted.second;
+            } else if (event == Json::parse_event_t::object_end
+                       && !object_keys.empty()) {
+                object_keys.pop_back();
+            }
+            return true;
+        };
     try {
-        decision = Json::parse(result.output);
+        decision = Json::parse(result.output, reject_duplicate_keys);
     } catch (...) {
         return invalid_decision(
             std::move(result), "reflection output is not valid JSON");
+    }
+
+    if (duplicate_key) {
+        return invalid_decision(
+            std::move(result), "reflection output contains a duplicate JSON key");
     }
 
     if (!decision.is_object() || !only_known_keys(decision)
