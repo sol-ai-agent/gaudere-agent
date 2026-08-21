@@ -197,6 +197,20 @@ if "$control" --socket "$control_socket" openai live-ai "must stay offline" \
 fi
 grep -q 'OpenAI provider is not enabled' "$temporary_directory/live-openai"
 
+if "$control" --socket "$control_socket" reflect live-reflection \
+    "must stay an inert offline reflection" \
+    >"$temporary_directory/live-reflection" 2>&1; then
+    echo "bounded reflection unexpectedly succeeded while provider disabled" >&2
+    exit 1
+fi
+grep -q 'OpenAI provider is not enabled' "$temporary_directory/live-reflection"
+if "$control" --socket "$control_socket" task live-reflection \
+    >"$temporary_directory/live-reflection-task" 2>&1; then
+    echo "disabled bounded reflection unexpectedly created a durable task" >&2
+    exit 1
+fi
+grep -q 'task not found' "$temporary_directory/live-reflection-task"
+
 live_done=0
 i=0
 while [ "$i" -lt 100 ]; do
