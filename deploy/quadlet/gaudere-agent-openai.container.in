@@ -1,0 +1,32 @@
+[Unit]
+Description=Gaudere Agent with explicit OpenAI provider capability
+Documentation=https://github.com/sol-ai-agent/gaudere-agent
+
+[Container]
+Image=localhost/gaudere-agent:dev
+Pull=never
+ContainerName=gaudere-agent
+Exec=--state /var/lib/gaudere/state.db --control-socket /tmp/gaudere-control.sock --openai-model gpt-5.6-sol --openai-secret gaudere-openai-api-key
+
+# No Network=none here: this opt-in profile permits normal rootless outbound
+# networking. No PublishPort is declared, so no inbound host port is exposed.
+Secret=gaudere-openai-api-key,target=gaudere-openai-api-key,uid=1000,gid=1000,mode=400
+UserNS=keep-id
+Volume=%h/.local/share/gaudere/state:/var/lib/gaudere:Z
+
+ReadOnly=true
+ReadOnlyTmpfs=true
+NoNewPrivileges=true
+DropCapability=all
+LogDriver=journald
+PidsLimit=64
+Memory=256m
+StopSignal=SIGTERM
+StopTimeout=30
+
+[Service]
+Restart=on-failure
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target
