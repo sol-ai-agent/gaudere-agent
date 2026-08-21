@@ -1,0 +1,25 @@
+name: First production reflection validator
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/validate-first-production-reflection.sh'
+      - 'tests/first_production_reflection_validator_test.sh'
+      - '.github/workflows/first-production-reflection-validator.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          sh -n scripts/validate-first-production-reflection.sh
+          sh -n tests/first_production_reflection_validator_test.sh
+
+      - name: Exercise fixed one-call proof offline
+        run: sh tests/first_production_reflection_validator_test.sh

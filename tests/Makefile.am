@@ -19,7 +19,7 @@ check_PROGRAMS = \
 	task_report_test \
 	work_controller_test
 TESTS = smoke.sh $(check_PROGRAMS)
-EXTRA_DIST = smoke.sh
+EXTRA_DIST = smoke.sh first_production_reflection_validator_test.sh
 
 bounded_reflection_test_SOURCES = \
 	bounded_reflection_test.cpp \

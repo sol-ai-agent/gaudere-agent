@@ -55,6 +55,12 @@ limited to one explicitly submitted provider reflection whose JSON decision is
 strictly validated and persisted. A proposed wake is observable data only in v0; it
 cannot create work or schedule itself.
 
+The separately gated first-production proof is documented in
+[`docs/first-production-reflection.md`](docs/first-production-reflection.md). Its
+validator is inert until an operator explicitly runs it, fixes the task identity and
+objective, requires budget transition `1 -> 2`, and refuses any replay. Preparing or
+deploying that script does not authorize the second provider call.
+
 Normal service mode:
 
 ```sh
