@@ -69,7 +69,7 @@ report="$workspace/task.report"
 printf '%s\n' "$submission" > "$report"
 
 elapsed=0
-for (;;) do
+while :; do
     status=$(sed -n 's/^status=//p' "$report" | tail -n 1)
     case "$status" in
         succeeded)
