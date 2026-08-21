@@ -30,8 +30,9 @@ The OpenAI profile:
 Provider startup validates the configured secret and registers the handler but does not
 submit a Task. To prevent the first capability transition from reviving forgotten work,
 the installer requires the service stopped, holds the production state lock, requires
-schema v3, and refuses installation if any pre-existing `provider.openai.responses`
-Task is nonterminal or any leased Task remains active.
+schema v3, and refuses installation if any pre-existing
+`provider.openai.responses` or `cognition.reflect.v1` Task is nonterminal, or if any
+leased Task remains active.
 
 ## Initial capability-only proof
 
