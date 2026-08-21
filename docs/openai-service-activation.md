@@ -32,7 +32,9 @@ submit a Task. To prevent the first capability transition from reviving forgotte
 the installer requires the service stopped, holds the production state lock, requires
 schema v3, and refuses installation if any pre-existing
 `provider.openai.responses` or `cognition.reflect.v1` Task is nonterminal, or if any
-leased Task remains active.
+leased Task remains active. It also runs the image's control binary with networking
+disabled and no state or secret mounted, and refuses an image that predates the explicit
+`reflect` command.
 
 ## Initial capability-only proof
 
