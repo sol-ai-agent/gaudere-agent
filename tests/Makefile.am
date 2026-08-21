@@ -1,6 +1,7 @@
 AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
 check_PROGRAMS = \
+	bounded_reflection_test \
 	curl_http_transport_test \
 	file_secret_source_test \
 	live_control_test \
@@ -19,6 +20,14 @@ check_PROGRAMS = \
 	work_controller_test
 TESTS = smoke.sh $(check_PROGRAMS)
 EXTRA_DIST = smoke.sh
+
+bounded_reflection_test_SOURCES = \
+	bounded_reflection_test.cpp \
+	../src/BoundedReflection.cpp \
+	../src/BoundedReflection.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp
+bounded_reflection_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 curl_http_transport_test_SOURCES = \
 	curl_http_transport_test.cpp \
@@ -42,6 +51,8 @@ live_control_test_LDADD = $(JSON_LIBS)
 
 live_control_processor_test_SOURCES = \
 	live_control_processor_test.cpp \
+	../src/BoundedReflection.cpp \
+	../src/BoundedReflection.hpp \
 	../src/LiveControl.cpp \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \

@@ -25,6 +25,8 @@ chmod 0400 "$secret_directory/smoke-openai-key"
   >"$temporary_directory/provider-check" 2>&1
 grep -q 'gaudere-agent: OpenAI provider enabled model=gpt-test secret=smoke-openai-key' \
   "$temporary_directory/provider-check"
+grep -q 'gaudere-agent: bounded reflection enabled kind=cognition.reflect.v1 automatic_scheduling=false' \
+  "$temporary_directory/provider-check"
 grep -q 'gaudere-agent: safe' "$temporary_directory/provider-check"
 
 # An OpenAI task can be queued offline. Without explicit provider activation the
@@ -196,6 +198,20 @@ if "$control" --socket "$control_socket" openai live-ai "must stay offline" \
     exit 1
 fi
 grep -q 'OpenAI provider is not enabled' "$temporary_directory/live-openai"
+
+if "$control" --socket "$control_socket" reflect live-reflection \
+    "must stay an inert offline reflection" \
+    >"$temporary_directory/live-reflection" 2>&1; then
+    echo "bounded reflection unexpectedly succeeded while provider disabled" >&2
+    exit 1
+fi
+grep -q 'OpenAI provider is not enabled' "$temporary_directory/live-reflection"
+if "$control" --socket "$control_socket" task live-reflection \
+    >"$temporary_directory/live-reflection-task" 2>&1; then
+    echo "disabled bounded reflection unexpectedly created a durable task" >&2
+    exit 1
+fi
+grep -q 'task not found' "$temporary_directory/live-reflection-task"
 
 live_done=0
 i=0

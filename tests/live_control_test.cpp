@@ -128,6 +128,20 @@ void test_invalid_id_is_rejected_before_connect()
            "invalid task id produces explicit diagnostic");
 }
 
+void test_oversized_reflection_is_rejected_before_connect()
+{
+    std::ostringstream output;
+    std::ostringstream error;
+    const int result = run_live_control_client(
+        "/tmp/does-not-matter.sock",
+        LiveControlCommand{LiveControlOperation::submit_reflection,
+                           "reflect-test", std::string(4097, 'x')},
+        output, error);
+    expect(result != 0, "oversized reflection objective is rejected");
+    expect(error.str().find("1..4096") != std::string::npos,
+           "oversized reflection produces explicit bounded diagnostic");
+}
+
 void test_existing_regular_file_is_never_unlinked()
 {
     const auto directory = temporary_directory();
@@ -176,6 +190,7 @@ int main()
     test_round_trip_and_socket_permissions();
     test_mailbox_stop_releases_pending_request();
     test_invalid_id_is_rejected_before_connect();
+    test_oversized_reflection_is_rejected_before_connect();
     test_existing_regular_file_is_never_unlinked();
     test_idle_server_stops_without_polling_timeout();
 

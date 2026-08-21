@@ -18,6 +18,7 @@ namespace gaudere_agent {
 enum class LiveControlOperation {
     submit_echo,
     submit_openai,
+    submit_reflection,
     inspect_task,
     inspect_budget
 };

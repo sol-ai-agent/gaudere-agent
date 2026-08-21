@@ -4,6 +4,8 @@ bin_PROGRAMS = gaudere-agent gaudere-control
 
 gaudere_agent_SOURCES = \
 	main.cpp \
+	BoundedReflection.cpp \
+	BoundedReflection.hpp \
 	CurlHttpTransport.cpp \
 	CurlHttpTransport.hpp \
 	FileSecretSource.cpp \

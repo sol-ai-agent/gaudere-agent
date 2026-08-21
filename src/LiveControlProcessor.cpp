@@ -1,5 +1,6 @@
 #include "LiveControlProcessor.hpp"
 
+#include "BoundedReflection.hpp"
 #include "OpenAIBudget.hpp"
 #include "OpenAITask.hpp"
 #include "TaskReport.hpp"
@@ -169,6 +170,15 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
         }
         task = make_openai_task(command.id, command.text);
         description = "OpenAI Responses";
+        break;
+    case LiveControlOperation::submit_reflection:
+        if (!openai_enabled_) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: OpenAI provider is not enabled in this service\n"};
+        }
+        task = make_bounded_reflection_task(command.id, command.text);
+        description = "bounded reflection";
         break;
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
