@@ -45,6 +45,12 @@ checks the cancellation probe between increments. It performs no external action
 exists to exercise graceful interruption, hard-crash lease recovery, and bounded
 attempt semantics before any provider or network capability is introduced.
 
+The next cognition boundary is specified in
+[`docs/bounded-reflection-v0.md`](docs/bounded-reflection-v0.md). It is deliberately
+limited to one explicitly submitted provider reflection whose JSON decision is
+strictly validated and persisted. A proposed wake is observable data only in v0; it
+cannot create work or schedule itself.
+
 Normal service mode:
 
 ```sh
