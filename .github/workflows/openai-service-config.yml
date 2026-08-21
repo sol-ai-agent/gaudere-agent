@@ -35,6 +35,14 @@ jobs:
           cat > "$fakebin/podman" <<'SH'
           #!/bin/sh
           if [ "$1" = "image" ] && [ "$2" = "exists" ]; then exit 0; fi
+          if [ "$1" = "run" ]; then
+              if [ "${GAUDERE_FAKE_OLD_IMAGE:-0}" = "1" ]; then
+                  printf 'Usage: gaudere-control --socket PATH [echo ID TEXT | openai ID TEXT | task ID | budget]\n' >&2
+              else
+                  printf 'Usage: gaudere-control --socket PATH [echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | task ID | budget]\n' >&2
+              fi
+              exit 2
+          fi
           if [ "$1" = "secret" ] && [ "$2" = "exists" ]; then exit 0; fi
           exit 99
           SH
@@ -68,6 +76,17 @@ jobs:
               "$config_home/containers/systemd/gaudere-agent.container"
           grep -q 'no provider task was submitted and the service remains stopped' \
               "$workspace/install.out"
+
+          if GAUDERE_FAKE_OLD_IMAGE=1 PATH="$fakebin:$PATH" \
+              XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
+              sh scripts/install-openai-user-service.sh \
+              > "$workspace/old-image.out" 2> "$workspace/old-image.err"; then
+              echo 'installer unexpectedly accepted a pre-reflection image' >&2
+              exit 1
+          fi
+          cat "$workspace/old-image.err"
+          grep -q 'runtime image predates bounded reflection' \
+              "$workspace/old-image.err"
 
           python3 - "$state/state.db" <<'PY'
           import sqlite3, sys
