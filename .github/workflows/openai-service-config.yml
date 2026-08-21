@@ -86,5 +86,27 @@ jobs:
               exit 1
           fi
           cat "$workspace/blocked.err"
-          grep -q 'pre-existing nonterminal OpenAI task requires review' \
+          grep -q 'pre-existing nonterminal provider task requires review' \
               "$workspace/blocked.err"
+
+          python3 - "$state/state.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.execute("DELETE FROM tasks WHERE id='old-provider'")
+              db.execute(
+                  "INSERT INTO tasks(id,kind,status) VALUES(?,?,?)",
+                  ("old-reflection", "cognition.reflect.v1", 0),
+              )
+          PY
+
+          if PATH="$fakebin:$PATH" \
+              XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
+              sh scripts/install-openai-user-service.sh \
+              > "$workspace/reflection-blocked.out" \
+              2> "$workspace/reflection-blocked.err"; then
+              echo 'installer unexpectedly accepted inherited reflection work' >&2
+              exit 1
+          fi
+          cat "$workspace/reflection-blocked.err"
+          grep -q 'pre-existing nonterminal provider task requires review: old-reflection:0' \
+              "$workspace/reflection-blocked.err"
