@@ -48,17 +48,19 @@ PY
 )
 [ "$schema" = "3" ] || fail "provider capability requires production schema v3 (found $schema)"
 
-# Initial capability activation must never turn inherited provider work into an
-# external call merely because a handler became available. Refuse any old provider
-# task that could still execute. Also refuse any active task of another kind: a clean
-# stopped-state transition should have no leased work at all.
+# Capability activation must never turn inherited provider work into an external
+# call merely because its handler became available. Refuse every nonterminal task
+# kind that uses the OpenAI provider, including bounded reflection. Also refuse any
+# active task of another kind: a clean stopped-state transition should have no leased
+# work at all.
 provider_blocker=$(python3 - "$state_database" <<'PY'
 import sqlite3
 import sys
 with sqlite3.connect(sys.argv[1]) as db:
     row = db.execute(
         "SELECT id,status FROM tasks "
-        "WHERE kind='provider.openai.responses' AND status IN (0,1,2) "
+        "WHERE kind IN ('provider.openai.responses','cognition.reflect.v1') "
+        "AND status IN (0,1,2) "
         "ORDER BY rowid LIMIT 1"
     ).fetchone()
     if row:
@@ -66,7 +68,7 @@ with sqlite3.connect(sys.argv[1]) as db:
 PY
 )
 [ -z "$provider_blocker" ] \
-    || fail "pre-existing nonterminal OpenAI task requires review before activation: $provider_blocker"
+    || fail "pre-existing nonterminal provider task requires review before activation: $provider_blocker"
 
 active_blocker=$(python3 - "$state_database" <<'PY'
 import sqlite3
