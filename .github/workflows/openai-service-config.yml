@@ -1,0 +1,90 @@
+name: OpenAI service config
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate static service boundaries
+        run: |
+          set -eu
+          sh scripts/validate-openai-service-config.sh
+          sh -n scripts/install-openai-user-service.sh
+          sh -n scripts/validate-openai-service-capability.sh
+
+      - name: Exercise stopped-state activation fence
+        run: |
+          set -eu
+          workspace=$(mktemp -d)
+          trap 'rm -rf "$workspace"' EXIT
+          fakebin="$workspace/bin"
+          config_home="$workspace/config"
+          data_home="$workspace/data"
+          state="$data_home/gaudere/state"
+          mkdir -p "$fakebin" "$state"
+
+          cat > "$fakebin/podman" <<'SH'
+          #!/bin/sh
+          if [ "$1" = "image" ] && [ "$2" = "exists" ]; then exit 0; fi
+          if [ "$1" = "secret" ] && [ "$2" = "exists" ]; then exit 0; fi
+          exit 99
+          SH
+          chmod +x "$fakebin/podman"
+
+          cat > "$fakebin/systemctl" <<'SH'
+          #!/bin/sh
+          if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+              printf 'inactive\n'
+              exit 3
+          fi
+          if [ "$1" = "--user" ] && [ "$2" = "daemon-reload" ]; then exit 0; fi
+          exit 99
+          SH
+          chmod +x "$fakebin/systemctl"
+
+          python3 - "$state/state.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.executescript("""
+              PRAGMA user_version=3;
+              CREATE TABLE tasks (id TEXT, kind TEXT, status INTEGER);
+              """)
+          PY
+
+          PATH="$fakebin:$PATH" \
+          XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
+          sh scripts/install-openai-user-service.sh > "$workspace/install.out"
+          cat "$workspace/install.out"
+          cmp deploy/quadlet/gaudere-agent-openai.container.in \
+              "$config_home/containers/systemd/gaudere-agent.container"
+          grep -q 'no provider task was submitted and the service remains stopped' \
+              "$workspace/install.out"
+
+          python3 - "$state/state.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.execute(
+                  "INSERT INTO tasks(id,kind,status) VALUES(?,?,?)",
+                  ("old-provider", "provider.openai.responses", 0),
+              )
+          PY
+
+          if PATH="$fakebin:$PATH" \
+              XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
+              sh scripts/install-openai-user-service.sh \
+              > "$workspace/blocked.out" 2> "$workspace/blocked.err"; then
+              echo 'installer unexpectedly accepted inherited provider work' >&2
+              exit 1
+          fi
+          cat "$workspace/blocked.err"
+          grep -q 'pre-existing nonterminal OpenAI task requires review' \
+              "$workspace/blocked.err"
