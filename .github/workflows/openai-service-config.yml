@@ -127,5 +127,5 @@ jobs:
               exit 1
           fi
           cat "$workspace/reflection-blocked.err"
-          grep -q 'pre-existing nonterminal provider task requires review: old-reflection:0' \
+          grep -q 'pre-existing nonterminal provider task requires review before activation: old-reflection:0' \
               "$workspace/reflection-blocked.err"
