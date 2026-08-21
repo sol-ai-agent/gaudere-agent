@@ -364,6 +364,9 @@ int main(int argc, char* argv[])
             std::cout << "gaudere-agent: OpenAI provider enabled model="
                       << options.openai_model << " secret="
                       << options.openai_secret << '\n';
+            std::cout << "gaudere-agent: bounded reflection enabled kind="
+                      << gaudere_agent::bounded_reflection_task_kind
+                      << " automatic_scheduling=false\n";
             const auto& budget = openai_activation->budget_policy();
             std::cout << "gaudere-agent: OpenAI budget max_total="
                       << budget.max_total << " max_window="
