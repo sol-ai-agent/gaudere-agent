@@ -148,6 +148,7 @@ void test_invalid_decisions_fail_definitely()
         "{\"schema\":\"gaudere.cognition.decision.v1\",\"decision\":\"stop\",\"reason\":\""
             + long_reason + "\"}",
         "{\"schema\":\"gaudere.cognition.decision.v1\",\"decision\":\"stop\",\"reason\":\"x\",\"extra\":true}",
+        "{\"schema\":\"gaudere.cognition.decision.v1\",\"decision\":\"stop\",\"decision\":\"stop\",\"reason\":\"x\"}",
         "{\"schema\":\"gaudere.cognition.decision.v1\",\"decision\":\"stop\",\"reason\":\"x\",\"wake_after_seconds\":900}",
         "{\"schema\":\"gaudere.cognition.decision.v1\",\"decision\":\"propose_wake\",\"reason\":\"x\"}",
         "{\"schema\":\"gaudere.cognition.decision.v1\",\"decision\":\"propose_wake\",\"reason\":\"x\",\"wake_after_seconds\":899}",
