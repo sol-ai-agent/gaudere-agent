@@ -27,8 +27,6 @@ Use the repository helper from the host:
 
 ```sh
 sh scripts/control-service.sh echo demo-001 "Bonjour Gaudere"
-sh scripts/control-service.sh openai demo-ai "Réponds brièvement"
-sh scripts/control-service.sh reflect demo-reflect "Détermine si un autre réveil serait utile"
 sh scripts/control-service.sh task demo-001
 sh scripts/control-service.sh budget
 ```
@@ -39,7 +37,15 @@ The `budget` command is observational. The worker reads the durable OpenAI budge
 
 `openai` and `reflect` are available only when the selected service profile explicitly
 mounts the restricted provider secret, fixes `gpt-5.6-sol`, and permits outbound
-networking. In the offline profile both commands fail before creating a task:
+networking. Every new ID can consume one durable provider permit. Run either command
+only as a separately authorized provider action:
+
+```sh
+sh scripts/control-service.sh openai AUTHORIZED_ID "AUTHORIZED_TEXT"
+sh scripts/control-service.sh reflect AUTHORIZED_ID "AUTHORIZED_OBJECTIVE"
+```
+
+In the offline profile both commands fail before creating a task:
 
 ```sh
 sh scripts/control-service.sh openai demo-ai "test"
