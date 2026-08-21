@@ -25,6 +25,8 @@ chmod 0400 "$secret_directory/smoke-openai-key"
   >"$temporary_directory/provider-check" 2>&1
 grep -q 'gaudere-agent: OpenAI provider enabled model=gpt-test secret=smoke-openai-key' \
   "$temporary_directory/provider-check"
+grep -q 'gaudere-agent: bounded reflection enabled kind=cognition.reflect.v1 automatic_scheduling=false' \
+  "$temporary_directory/provider-check"
 grep -q 'gaudere-agent: safe' "$temporary_directory/provider-check"
 
 # An OpenAI task can be queued offline. Without explicit provider activation the
