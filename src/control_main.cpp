@@ -12,7 +12,7 @@ void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | task ID | budget]\n";
+        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | task ID | budget]\n";
 }
 
 } // namespace
@@ -34,6 +34,10 @@ int main(int argc, char* argv[])
             command.text = argv[5];
         } else if (operation == "openai" && argc == 6) {
             command.operation = gaudere_agent::LiveControlOperation::submit_openai;
+            command.id = argv[4];
+            command.text = argv[5];
+        } else if (operation == "reflect" && argc == 6) {
+            command.operation = gaudere_agent::LiveControlOperation::submit_reflection;
             command.id = argv[4];
             command.text = argv[5];
         } else if (operation == "task" && argc == 5) {

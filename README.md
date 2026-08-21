@@ -20,7 +20,11 @@ The executable is deliberately small. It:
 - lets a cooperative running handler observe worker stop through an atomic probe, while the worker thread itself persists any resulting cancellation;
 - stops future work wakes before entering draining and exits only after both runtimes reach the safe state;
 - exposes offline task submission/inspection/cancellation commands;
-- registers two effect-free local production task kinds: `local.echo` and `local.wait`.
+- registers two effect-free local production task kinds: `local.echo` and `local.wait`;
+- can explicitly activate the bounded OpenAI provider stack and local Unix-socket
+  control without publishing an inbound TCP port;
+- when that provider is active, registers `cognition.reflect.v1` as a one-call,
+  strictly validated decision task that cannot schedule work.
 
 The application source defines three provider-agnostic work boundaries:
 

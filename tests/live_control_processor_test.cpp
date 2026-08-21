@@ -1,3 +1,4 @@
+#include "BoundedReflection.hpp"
 #include "LiveControlProcessor.hpp"
 #include "OpenAIActivation.hpp"
 
@@ -125,6 +126,54 @@ void test_openai_submission_uses_bounded_task_factory()
            "live OpenAI command reuses bounded OpenAI Task factory");
 }
 
+void test_reflection_submission_requires_activated_provider()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false);
+    auto pending = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::submit_reflection,
+                           "reflect-disabled", "Consider one next step."});
+
+    const auto processed = harness.processor.process(harness.mailbox);
+    const auto reply = pending->wait();
+
+    expect(processed.processed == 1 && !processed.work_may_be_pending,
+           "disabled provider does not create reflection work");
+    expect(!reply.ok && reply.code == 4
+               && reply.body.find("not enabled") != std::string::npos,
+           "reflection is rejected when provider capability is disabled");
+    expect(!harness.store.find("reflect-disabled"),
+           "disabled reflection creates no durable Task");
+}
+
+void test_reflection_submission_is_bounded_and_explicit()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, true);
+    auto pending = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::submit_reflection,
+                           "reflect-live", "Consider one next step."});
+
+    const auto processed = harness.processor.process(harness.mailbox);
+    const auto reply = pending->wait();
+    const auto task = harness.store.find("reflect-live");
+
+    expect(processed.work_may_be_pending && reply.ok,
+           "explicit reflection command creates pending work");
+    expect(task && task->kind == bounded_reflection_task_kind
+               && task->idempotency_key
+                    == "cognition.reflect.v1:reflect-live",
+           "reflection command uses distinct deterministic task identity");
+    expect(task && task->input.find("Consider one next step.")
+                       != std::string::npos
+               && task->input.find("proposal only") != std::string::npos,
+           "reflection persists fixed prompt and bounded objective");
+    expect(task && task->limits.max_input_bytes == 16 * 1024
+               && task->limits.max_output_bytes == 4096
+               && task->limits.max_attempts == 2,
+           "reflection live control applies hard task limits");
+}
+
 void test_inspect_reads_durable_task_without_submission()
 {
     TemporaryDatabase database;
@@ -219,6 +268,8 @@ int main()
     test_echo_submission_is_durable();
     test_openai_submission_requires_activated_provider();
     test_openai_submission_uses_bounded_task_factory();
+    test_reflection_submission_requires_activated_provider();
+    test_reflection_submission_is_bounded_and_explicit();
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();

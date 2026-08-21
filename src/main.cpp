@@ -1,3 +1,4 @@
+#include "BoundedReflection.hpp"
 #include "LiveControl.hpp"
 #include "LiveControlProcessor.hpp"
 #include "LocalEchoHandler.hpp"
@@ -329,6 +330,7 @@ int main(int argc, char* argv[])
             work_scheduler, work_runtime, task_dispatcher, "main-worker");
         std::unique_ptr<gaudere::persistence::sqlite::BudgetStore> provider_budget_store;
         std::unique_ptr<gaudere_agent::OpenAIActivation> openai_activation;
+        std::unique_ptr<gaudere_agent::BoundedReflectionHandler> reflection_handler;
 
         if (!task_dispatcher.register_handler("local.echo", echo_handler)
             || !task_dispatcher.register_handler("local.wait", wait_handler)) {
@@ -349,8 +351,14 @@ int main(int argc, char* argv[])
                 action_runtime, action_store, *provider_budget_store,
                 options.openai_model, options.openai_secret,
                 options.secret_directory);
+            reflection_handler =
+                std::make_unique<gaudere_agent::BoundedReflectionHandler>(
+                    openai_activation->handler());
             if (!task_dispatcher.register_handler(
-                    gaudere_agent::openai_task_kind, openai_activation->handler())) {
+                    gaudere_agent::openai_task_kind, openai_activation->handler())
+                || !task_dispatcher.register_handler(
+                    gaudere_agent::bounded_reflection_task_kind,
+                    *reflection_handler)) {
                 throw std::runtime_error("cannot register OpenAI provider handler");
             }
             std::cout << "gaudere-agent: OpenAI provider enabled model="
