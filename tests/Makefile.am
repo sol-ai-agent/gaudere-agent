@@ -25,6 +25,7 @@ bounded_reflection_test_SOURCES = \
 	bounded_reflection_test.cpp \
 	../src/BoundedReflection.cpp \
 	../src/BoundedReflection.hpp \
+	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
 bounded_reflection_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
