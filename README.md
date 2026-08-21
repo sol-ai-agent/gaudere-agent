@@ -61,6 +61,13 @@ validator is inert until an operator explicitly runs it, fixes the task identity
 objective, requires budget transition `1 -> 2`, and refuses any replay. Preparing or
 deploying that script does not authorize the second provider call.
 
+The next provider-free boundary is specified in
+[`docs/explicit-exact-wake-v0.md`](docs/explicit-exact-wake-v0.md). It accepts at
+most one already-normalized `propose_wake` result through an explicit operator
+command, persists one exact deadline, and records that deadline becoming due. It
+does not submit a successor task or call a provider. The first permanent reflection
+returned `stop`, so it is not an eligible source for this capability.
+
 Normal service mode:
 
 ```sh
