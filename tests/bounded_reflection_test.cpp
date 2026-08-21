@@ -2,7 +2,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <iostream>
+#include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -38,6 +41,73 @@ public:
 
 private:
     HandlerResult value_;
+};
+
+class MemoryTaskStore final : public gaudere::work::TaskStore {
+public:
+    std::optional<gaudere::work::Task> find(
+        const std::string& id) const override
+    {
+        const auto found = tasks.find(id);
+        return found == tasks.end()
+            ? std::nullopt
+            : std::optional<gaudere::work::Task>{found->second};
+    }
+
+    std::optional<gaudere::work::Task> find_by_idempotency_key(
+        const std::string& key) const override
+    {
+        for (const auto& entry : tasks) {
+            if (entry.second.idempotency_key == key) {
+                return entry.second;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<gaudere::work::Task> find_pending_for(
+        const std::vector<std::string>& accepted_kinds) const override
+    {
+        for (const auto& entry : tasks) {
+            const auto& task = entry.second;
+            if (task.status == gaudere::work::TaskStatus::pending
+                && std::find(accepted_kinds.begin(), accepted_kinds.end(), task.kind)
+                    != accepted_kinds.end()) {
+                return task;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::vector<gaudere::work::Task> leased_with_expired_lease(
+        gaudere::work::TimePoint) const override
+    {
+        return {};
+    }
+
+    std::optional<gaudere::work::TimePoint> next_lease_expiry() const override
+    {
+        return std::nullopt;
+    }
+
+    bool has_active() const override
+    {
+        for (const auto& entry : tasks) {
+            if (entry.second.status == gaudere::work::TaskStatus::running
+                || entry.second.status
+                    == gaudere::work::TaskStatus::cancel_requested) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void save(const gaudere::work::Task& task) override
+    {
+        tasks[task.id] = task;
+    }
+
+    std::map<std::string, gaudere::work::Task> tasks;
 };
 
 HandlerResult provider_success(std::string output)
@@ -183,6 +253,47 @@ void test_non_success_provider_result_passes_through()
            "ambiguous provider result passes through without reinterpretation");
 }
 
+void test_normalized_decision_is_durable_and_duplicate_is_inert()
+{
+    MemoryTaskStore store;
+    gaudere::work::Runtime runtime(store, [] {
+        return gaudere::work::TimePoint{};
+    });
+    runtime.recover();
+
+    const auto task = make_bounded_reflection_task(
+        "durable-reflection", "Make one bounded decision.");
+    FakeHandler provider(provider_success(
+        "{\"schema\":\"gaudere.cognition.decision.v1\","
+        "\"decision\":\"stop\",\"reason\":\"Done.\"}"));
+    BoundedReflectionHandler reflection(provider);
+    TaskExecutor executor(runtime, store);
+
+    expect(runtime.submit(task) == gaudere::work::SubmitResult::accepted,
+           "bounded reflection task enters durable runtime");
+    expect(executor.execute(task.id, "reflection-worker", reflection)
+               == ExecuteResult::completed,
+           "bounded reflection completes through normal TaskExecutor");
+
+    const auto done = store.find(task.id);
+    expect(done && done->status == gaudere::work::TaskStatus::succeeded
+               && done->result
+               && done->result->content_type
+                    == bounded_reflection_decision_content_type
+               && done->result->metadata == "{\"total_tokens\":7}",
+           "normalized decision and provider usage become durable Task result");
+    expect(store.tasks.size() == 1,
+           "reflection result creates no successor task");
+
+    expect(runtime.submit(task) == gaudere::work::SubmitResult::duplicate,
+           "reusing reflection identity is durably idempotent");
+    expect(executor.execute(task.id, "reflection-worker", reflection)
+               == ExecuteResult::not_startable,
+           "terminal duplicate cannot start another reflection");
+    expect(provider.calls == 1 && store.tasks.size() == 1,
+           "duplicate submission invokes no second provider and creates no work");
+}
+
 } // namespace
 
 int main()
@@ -192,6 +303,7 @@ int main()
     test_valid_wake_proposals();
     test_invalid_decisions_fail_definitely();
     test_non_success_provider_result_passes_through();
+    test_normalized_decision_is_durable_and_duplicate_is_inert();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
