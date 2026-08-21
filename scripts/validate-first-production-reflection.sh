@@ -5,7 +5,7 @@ script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 control_script=${GAUDERE_CONTROL_SCRIPT:-"$script_directory/control-service.sh"}
 systemctl_command=${SYSTEMCTL:-systemctl}
 service_name=${GAUDERE_SERVICE_NAME:-gaudere-agent.service}
-expected_model=${GAUDERE_OPENAI_MODEL:-gpt-5.6-sol}
+expected_model=gpt-5.6-sol
 task_id=production-reflection-first
 objective='Assess this first permanent bounded-reflection proof. Choose stop or propose one inert future wake only if useful; do not claim authority to act.'
 max_checks=${GAUDERE_VALIDATION_MAX_CHECKS:-75}
@@ -74,6 +74,10 @@ printf '%s\n' "$before"
     || fail "first-reflection validator requires remaining_total=11"
 [ "$(budget_value max_window "$before")" = "4" ] \
     || fail "unexpected rolling-window provider budget"
+[ "$(budget_value window_seconds "$before")" = "86400" ] \
+    || fail "unexpected rolling-window duration"
+[ "$(budget_value min_interval_seconds "$before")" = "900" ] \
+    || fail "unexpected provider minimum interval"
 [ "$(budget_value next_new_call "$before")" = "available" ] \
     || fail "new provider call is not currently admissible"
 
