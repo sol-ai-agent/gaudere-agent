@@ -9,7 +9,8 @@ This checklist is deliberately split from the first real provider call.
 3. Run `scripts/install-openai-user-service.sh`.
    - It requires schema v3.
    - It holds the production state lock.
-   - It refuses inherited nonterminal OpenAI Tasks and any active leased Task.
+   - It refuses inherited nonterminal OpenAI or bounded-reflection Tasks and any
+     active leased Task.
    - It requires the local runtime image and named Podman secret to exist.
    - It installs the OpenAI profile but does not start the service.
 4. Start `gaudere-agent.service` explicitly.
