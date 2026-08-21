@@ -1,0 +1,133 @@
+name: First production OpenAI validator
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/validate-first-production-openai.sh'
+      - '.github/workflows/first-production-openai-validator.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: sh -n scripts/validate-first-production-openai.sh
+
+      - name: Exercise exactly-one-call proof offline
+        run: |
+          set -eu
+          workspace=$(mktemp -d)
+          trap 'rm -rf "$workspace"' EXIT
+          state="$workspace/state"
+          calls="$workspace/calls"
+          printf '0\n' > "$state"
+          printf '0\n' > "$calls"
+
+          cat > "$workspace/systemctl" <<'SH'
+          #!/bin/sh
+          if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+              echo active
+              exit 0
+          fi
+          exit 2
+          SH
+          chmod +x "$workspace/systemctl"
+
+          cat > "$workspace/control.sh" <<'SH'
+          #!/bin/sh
+          set -eu
+          phase=$(cat "$FAKE_STATE")
+          case "$1" in
+            budget)
+              if [ "$phase" = "0" ]; then
+                  cat <<'EOF'
+          scope="provider.call:openai.responses"
+          provider_enabled=true
+          max_total=12
+          total_used=0
+          remaining_total=12
+          max_window=4
+          window_seconds=86400
+          in_window_used=0
+          remaining_window=4
+          min_interval_seconds=900
+          last_consumed_at_ms=none
+          next_new_call=available
+          EOF
+              else
+                  cat <<'EOF'
+          scope="provider.call:openai.responses"
+          provider_enabled=true
+          max_total=12
+          total_used=1
+          remaining_total=11
+          max_window=4
+          window_seconds=86400
+          in_window_used=1
+          remaining_window=3
+          min_interval_seconds=900
+          last_consumed_at_ms=1770000000000
+          next_new_call=cooldown
+          EOF
+              fi
+              ;;
+            openai)
+              count=$(cat "$FAKE_CALLS")
+              count=$((count + 1))
+              printf '%s\n' "$count" > "$FAKE_CALLS"
+              [ "$count" -eq 1 ] || exit 91
+              printf '1\n' > "$FAKE_STATE"
+              cat <<'EOF'
+          id="production-openai-first"
+          kind="provider.openai.responses"
+          status=pending
+          attempts=0/2
+          EOF
+              ;;
+            task)
+              cat <<'EOF'
+          id="production-openai-first"
+          kind="provider.openai.responses"
+          status=succeeded
+          attempts=1/2
+          result_content_type="text/plain; charset=utf-8"
+          result_output="Gaudere permanent."
+          result_metadata_content_type="application/vnd.gaudere.provider-usage+json"
+          result_metadata="{\"schema\":\"gaudere.provider_usage.v1\",\"provider\":\"openai\",\"model\":\"gpt-5.6-sol\",\"input_tokens\":8,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,\"output_tokens\":12,\"reasoning_tokens\":4,\"total_tokens\":20}"
+          EOF
+              ;;
+            *) exit 2 ;;
+          esac
+          SH
+          chmod +x "$workspace/control.sh"
+
+          FAKE_STATE="$state" FAKE_CALLS="$calls" \
+          SYSTEMCTL="$workspace/systemctl" \
+          GAUDERE_CONTROL_SCRIPT="$workspace/control.sh" \
+          GAUDERE_VALIDATION_POLL_SECONDS=0 \
+          sh scripts/validate-first-production-openai.sh \
+            > "$workspace/first.out"
+          cat "$workspace/first.out"
+          grep -q '^normalized_usage=PASS$' "$workspace/first.out"
+          grep -q '^total_tokens=20$' "$workspace/first.out"
+          grep -q '^gaudere first production OpenAI validation: PASS$' "$workspace/first.out"
+          test "$(cat "$calls")" = "1"
+
+          # A rerun after the first durable permit is consumed must fail before
+          # submitting another provider Task.
+          if FAKE_STATE="$state" FAKE_CALLS="$calls" \
+              SYSTEMCTL="$workspace/systemctl" \
+              GAUDERE_CONTROL_SCRIPT="$workspace/control.sh" \
+              GAUDERE_VALIDATION_POLL_SECONDS=0 \
+              sh scripts/validate-first-production-openai.sh \
+              > "$workspace/second.out" 2>&1; then
+              echo 'validator unexpectedly accepted a second first-call run' >&2
+              exit 1
+          fi
+          grep -q 'requires total_used=0' "$workspace/second.out"
+          test "$(cat "$calls")" = "1"
