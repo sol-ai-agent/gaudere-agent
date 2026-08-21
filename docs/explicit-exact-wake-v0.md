@@ -38,6 +38,7 @@ The reusable Gaudere library should add a provider-agnostic `WakeIntent`, store,
 runtime. The SQLite implementation introduces additive schema v4. A wake intent
 contains only bounded, auditable data:
 
+- a capability scope selected by application code, never by the model;
 - a deterministic identity equal to the immutable source Task identity in the
   separate wake-intent namespace;
 - the source identity;
@@ -60,10 +61,12 @@ the wake table.
 
 ## Hard v0 bound and idempotency
 
-V0 permits at most **one accepted wake for the lifetime of a database**. Revoking
-that wake does not restore the slot. This intentionally hard bootstrap bound is
-enforced in the same SQLite transaction that inserts the first wake, not by a
-process-local counter.
+The generic core acceptance API takes a policy with a maximum total per capability
+scope. Agent v0 hard-codes one private scope and permits at most **one accepted wake
+for that scope for the lifetime of a database**. Neither the model nor the operator
+can select the scope or raise the limit. Revoking that wake does not restore the
+slot. This intentionally hard bootstrap bound is enforced in the same SQLite
+transaction that inserts the first wake, not by a process-local counter.
 
 The source identity is unique. Repeating acceptance for the same source returns the
 existing record without changing its deadline. A different source is rejected once
@@ -100,8 +103,9 @@ notified. The command reports the complete stored identity, source, status, and
 timestamps.
 
 No offline command may bypass the live owner while the service owns the database.
-No command accepts raw decision JSON. Offline tests may construct fixture records in
-a disposable database through test-only code; they do not need a provider call.
+No command accepts raw decision JSON. Tests may use an effect-free synthetic handler
+to produce canonical succeeded Tasks in a disposable database; they do not need a
+provider call.
 
 ## Firing and scheduler semantics
 
@@ -185,8 +189,9 @@ new provider, or general network capability is introduced.
 
 This capability is delivered in deliberately separate gates:
 
-1. **Core implementation:** `WakeIntent`, runtime, SQLite schema v4, fake-clock unit
-   tests, idempotency, lifetime bound, and reopen/recovery tests.
+1. **Core implementation:** `WakeIntent`, scoped policy, runtime, SQLite schema v4,
+   fake-clock unit tests, idempotency, lifetime bound, and reopen/recovery tests. All
+   SQLite stores must recognize schema v4 regardless of construction order.
 2. **Agent integration:** strict source validation, accept/revoke/inspect live
    control, shared exact scheduler integration, and disposable end-to-end tests.
 3. **Migration proof:** stopped-service backup, disposable v3 to v4 migration,
@@ -205,6 +210,7 @@ Before any production deployment, tests must prove:
 - every accepted and rejected source shape;
 - checked deadline arithmetic and both delay bounds;
 - one lifetime acceptance, duplicate idempotency, and no slot refund on revoke;
+- policy isolation between core scopes while Agent exposes only its fixed v0 scope;
 - exact earliest-deadline selection alongside Task lease recovery;
 - no periodic wake while no deadline or command exists;
 - acceptance commit followed by simulated crash and reopen;
@@ -214,4 +220,5 @@ Before any production deployment, tests must prove:
 - clock-forward behavior and fail-closed detected rollback;
 - clean shutdown with a future scheduled wake and exact re-arm on restart;
 - zero successor Tasks, zero provider invocations, and unchanged provider budget;
-- v3 to v4 migration, v4 reopen, backup validation, and human rollback procedure.
+- v3 to v4 migration through every SQLite-store construction order, v4 reopen,
+  backup validation, and human rollback procedure.
