@@ -90,6 +90,11 @@ That flag opens the schema-v4 wake store. It is intentionally not an offline pat
 for accepting a wake and must not be added to a production service before the
 separate backup, migration, rollback, and activation gates pass.
 
+The provider-free stopped-state copy proof for the next gate is documented in
+[`docs/schema-v4-migration-proof.md`](docs/schema-v4-migration-proof.md). Its
+validator migrates only a verified disposable backup copy, proves an independent
+schema-v3 rollback restore, and never replaces or opens the production state path.
+
 Offline operator commands:
 
 ```sh
