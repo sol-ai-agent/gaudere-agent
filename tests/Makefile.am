@@ -3,6 +3,8 @@ AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS
 check_PROGRAMS = \
 	bounded_reflection_test \
 	curl_http_transport_test \
+	explicit_wake_integration_test \
+	explicit_wake_test \
 	file_secret_source_test \
 	live_control_test \
 	live_control_processor_test \
@@ -36,6 +38,34 @@ curl_http_transport_test_SOURCES = \
 	../src/HttpTransport.hpp
 curl_http_transport_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
 
+explicit_wake_test_SOURCES = \
+	explicit_wake_test.cpp \
+	../src/ExplicitWake.cpp \
+	../src/ExplicitWake.hpp
+explicit_wake_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+explicit_wake_integration_test_SOURCES = \
+	explicit_wake_integration_test.cpp \
+	../src/BoundedReflection.cpp \
+	../src/BoundedReflection.hpp \
+	../src/ExplicitWake.cpp \
+	../src/ExplicitWake.hpp \
+	../src/LiveControl.cpp \
+	../src/LiveControl.hpp \
+	../src/LiveControlProcessor.cpp \
+	../src/LiveControlProcessor.hpp \
+	../src/OpenAITask.cpp \
+	../src/OpenAITask.hpp \
+	../src/TaskDispatcher.cpp \
+	../src/TaskDispatcher.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp \
+	../src/TaskReport.cpp \
+	../src/TaskReport.hpp \
+	../src/WorkController.cpp \
+	../src/WorkController.hpp
+explicit_wake_integration_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
 file_secret_source_test_SOURCES = \
 	file_secret_source_test.cpp \
 	../src/FileSecretSource.cpp \
@@ -53,6 +83,8 @@ live_control_processor_test_SOURCES = \
 	live_control_processor_test.cpp \
 	../src/BoundedReflection.cpp \
 	../src/BoundedReflection.hpp \
+	../src/ExplicitWake.cpp \
+	../src/ExplicitWake.hpp \
 	../src/LiveControl.cpp \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \

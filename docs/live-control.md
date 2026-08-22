@@ -55,7 +55,28 @@ sh scripts/control-service.sh reflect demo-reflect "test"
 `reflect` creates one `cognition.reflect.v1` task. Its provider output must match the
 strict decision schema documented in
 [`bounded-reflection-v0.md`](bounded-reflection-v0.md). A `propose_wake` decision is
-persisted for inspection but cannot create a successor task or scheduler deadline.
+persisted for inspection and cannot create a successor task or scheduler deadline
+by itself.
+
+The provider-free exact-wake operations are available only if the owning Agent was
+started with the separate `--wake-intents` capability flag:
+
+```sh
+sh scripts/control-service.sh accept-wake SOURCE_TASK_ID
+sh scripts/control-service.sh wake WAKE_ID
+sh scripts/control-service.sh revoke-wake WAKE_ID "OPERATOR_REASON"
+```
+
+Acceptance takes an immutable succeeded reflection Task identity, never raw JSON,
+an absolute timestamp, or an operator-selected delay. The main worker validates its
+canonical `propose_wake` result and persists at most one wake for the fixed lifetime
+scope. Inspection is observational. Revocation is permanent. Firing creates no
+Task, provider call, or external effect.
+
+Current offline and OpenAI service installers do not pass `--wake-intents`, so all
+three operations are disabled in deployed profiles and production remains schema
+v3. The existing permanent reflection returned `stop` and is ineligible. Adding the
+flag to a real service is reserved for the separate migration and production gates.
 
 The socket thread itself never mutates the Runtime or SQLite. It validates and queues a bounded command in memory and wakes the existing event-driven scheduler. The main worker thread drains that mailbox and performs durable Task transitions or budget snapshots, preserving the one-owner/single-worker invariant.
 

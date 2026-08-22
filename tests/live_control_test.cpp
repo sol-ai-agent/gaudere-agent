@@ -142,6 +142,70 @@ void test_oversized_reflection_is_rejected_before_connect()
            "oversized reflection produces explicit bounded diagnostic");
 }
 
+void test_wake_operation_round_trip()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "wake protocol server starts");
+
+    std::ostringstream output;
+    std::ostringstream error;
+    int client_result = -1;
+    std::thread client([&] {
+        client_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{LiveControlOperation::accept_wake,
+                               "reflection-source", {}},
+            output, error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "wake command wakes the sole worker callback");
+    }
+    const auto pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "wake command crosses the bounded mailbox exactly once");
+    if (pending.size() == 1) {
+        expect(pending.front()->command().operation
+                   == LiveControlOperation::accept_wake
+                   && pending.front()->command().id == "reflection-source"
+                   && pending.front()->command().text.empty(),
+               "wake operation and source identity survive socket decoding");
+        pending.front()->complete(LiveControlReply{true, 0, "accepted\n"});
+    }
+    client.join();
+    expect(client_result == 0 && output.str() == "accepted\n"
+               && error.str().empty(),
+           "wake client receives only the worker's completed reply");
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
+void test_invalid_wake_revocation_reason_is_rejected_before_connect()
+{
+    std::ostringstream output;
+    std::ostringstream error;
+    const int result = run_live_control_client(
+        "/tmp/does-not-matter.sock",
+        LiveControlCommand{LiveControlOperation::revoke_wake,
+                           "wake", "bad\nreason"},
+        output, error);
+    expect(result != 0, "wake reason control byte is rejected");
+    expect(error.str().find("1..1024") != std::string::npos,
+           "invalid wake reason produces an explicit bounded diagnostic");
+}
+
 void test_existing_regular_file_is_never_unlinked()
 {
     const auto directory = temporary_directory();
@@ -191,6 +255,8 @@ int main()
     test_mailbox_stop_releases_pending_request();
     test_invalid_id_is_rejected_before_connect();
     test_oversized_reflection_is_rejected_before_connect();
+    test_wake_operation_round_trip();
+    test_invalid_wake_revocation_reason_is_rejected_before_connect();
     test_existing_regular_file_is_never_unlinked();
     test_idle_server_stops_without_polling_timeout();
 

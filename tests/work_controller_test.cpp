@@ -1,13 +1,16 @@
 #include "WorkController.hpp"
 
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
+#include <gaudere/persistence/sqlite/WakeIntentStore.hpp>
 #include <gaudere/scheduling/wake/Scheduler.hpp>
+#include <gaudere/scheduling/wake/WakeIntentRuntime.hpp>
 #include <gaudere/work/Runtime.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -19,6 +22,8 @@ using gaudere::work::SubmitResult;
 using gaudere::work::Task;
 using gaudere::work::TaskStatus;
 using SqliteStore = gaudere::persistence::sqlite::TaskStore;
+using WakeSqliteStore = gaudere::persistence::sqlite::WakeIntentStore;
+using WakeRuntime = gaudere::scheduling::wake::WakeIntentRuntime;
 using Scheduler = gaudere::scheduling::wake::Scheduler;
 using namespace std::chrono_literals;
 using namespace gaudere_agent;
@@ -93,10 +98,13 @@ public:
 struct Harness {
     explicit Harness(const std::filesystem::path& path)
         : store(path.string()),
+          wake_store(path.string()),
           runtime(store, [] { return std::chrono::system_clock::now(); }),
+          wake_runtime(wake_store, [] { return std::chrono::system_clock::now(); },
+                       "test.wake", {3}),
           executor(runtime, store),
           dispatcher(store, executor),
-          controller(scheduler, runtime, dispatcher, "local-worker")
+          controller(scheduler, runtime, dispatcher, "local-worker", &wake_runtime)
     {
         runtime.recover();
         expect(dispatcher.register_handler("local.echo", echo),
@@ -106,7 +114,9 @@ struct Harness {
     }
 
     SqliteStore store;
+    WakeSqliteStore wake_store;
     Runtime runtime;
+    WakeRuntime wake_runtime;
     TaskExecutor executor;
     TaskDispatcher dispatcher;
     Scheduler scheduler;
@@ -203,6 +213,141 @@ void test_unknown_kind_remains_pending()
            "unsupported pending work does not create a polling wake");
 }
 
+void test_exact_wake_fires_once_without_successor_work()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path);
+    expect(harness.wake_runtime.accept("wake", "source", 40ms)
+               == gaudere::scheduling::wake::WakeIntentAcceptResult::accepted,
+           "future durable wake is accepted before controller start");
+    const auto durable = harness.wake_runtime.find("wake");
+    expect(durable.has_value(), "future wake is durable before controller start");
+    expect(harness.controller.start(), "controller starts with future wake");
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "initial worker event leaves future wake scheduled");
+    expect(durable && harness.scheduler.next() == durable->due_at,
+           "controller arms the exact durable wake deadline");
+
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "wake deadline causes one inert worker event");
+    const auto fired = harness.wake_runtime.find("wake");
+    expect(fired
+               && fired->status
+                    == gaudere::scheduling::wake::WakeIntentStatus::fired
+               && fired->terminal_at && *fired->terminal_at >= fired->due_at,
+           "sole worker records fired at the first safe due observation");
+    expect(!harness.scheduler.next(),
+           "fired wake creates no periodic or successor deadline");
+}
+
+void test_earliest_wake_precedes_task_lease_recovery()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path);
+    auto interrupted = make_task("lease-after-wake", "local.echo", "recovered");
+    interrupted.status = TaskStatus::running;
+    interrupted.attempts_started = 1;
+    interrupted.lease = gaudere::work::Lease{
+        "dead-worker", std::chrono::system_clock::now() + 100ms};
+    harness.store.save(interrupted);
+    expect(harness.wake_runtime.accept("wake-first", "source-first", 40ms)
+               == gaudere::scheduling::wake::WakeIntentAcceptResult::accepted,
+           "earlier wake is accepted beside a future task lease");
+    const auto wake = harness.wake_runtime.find("wake-first");
+
+    expect(harness.controller.start(), "combined-deadline controller starts");
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "initial event preserves both future durable deadlines");
+    expect(wake && harness.scheduler.next() == wake->due_at,
+           "scheduler selects the earlier WakeIntent deadline");
+
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "earlier wake fires without prematurely recovering the lease");
+    const auto still_running = harness.store.find("lease-after-wake");
+    expect(still_running && still_running->status == TaskStatus::running
+               && still_running->lease
+               && harness.scheduler.next() == still_running->lease->expires_at,
+           "worker re-arms the remaining exact lease deadline after firing");
+
+    expect(harness.controller.wait_and_run() == WorkCycleResult::worked,
+           "remaining lease deadline later recovers normal work");
+    expect(harness.store.find("lease-after-wake")->status
+               == TaskStatus::succeeded,
+           "wake observation creates no successor and does not block task recovery");
+}
+
+void test_clean_shutdown_rearms_future_wake_after_restart()
+{
+    TemporaryDatabase database;
+    std::optional<gaudere::scheduling::wake::WakeIntentTimePoint> due_at;
+    {
+        Harness first(database.path);
+        expect(first.wake_runtime.accept("restart", "restart-source", 2s)
+                   == gaudere::scheduling::wake::WakeIntentAcceptResult::accepted,
+               "restart fixture wake is durably accepted");
+        const auto durable = first.wake_runtime.find("restart");
+        expect(durable.has_value(), "restart fixture is present in durable state");
+        if (durable) {
+            due_at = durable->due_at;
+        }
+        expect(first.controller.start(), "first controller starts");
+        expect(first.controller.wait_and_run() == WorkCycleResult::idle,
+               "first controller arms future wake without polling");
+        expect(first.scheduler.next() == due_at,
+               "first process owns the exact future deadline");
+        first.controller.stop();
+        expect(first.controller.wait_and_run() == WorkCycleResult::stopped,
+               "clean shutdown stops the in-memory scheduler");
+        expect(first.runtime.try_mark_safe(),
+               "future inert wake does not make work runtime unsafe");
+    }
+
+    {
+        Harness replacement(database.path);
+        expect(replacement.controller.start(), "replacement controller starts");
+        expect(replacement.controller.wait_and_run() == WorkCycleResult::idle,
+               "replacement performs one startup reconciliation event");
+        expect(replacement.scheduler.next() == due_at,
+               "replacement re-arms the immutable durable deadline exactly");
+        replacement.controller.stop();
+        expect(replacement.controller.wait_and_run() == WorkCycleResult::stopped,
+               "replacement can shut down with the future wake still durable");
+    }
+}
+
+void test_revoked_armed_deadline_causes_at_most_one_inert_event()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path);
+    expect(harness.wake_runtime.accept("revoked", "revoked-source", 40ms)
+               == gaudere::scheduling::wake::WakeIntentAcceptResult::accepted,
+           "revocation fixture wake is accepted");
+    const auto durable = harness.wake_runtime.find("revoked");
+    expect(durable.has_value(), "revocation fixture is durable");
+    const auto due_at = durable
+        ? durable->due_at
+        : gaudere::scheduling::wake::WakeIntentTimePoint{};
+    expect(harness.controller.start(), "revocation controller starts");
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "future revocation fixture is armed");
+    expect(harness.wake_runtime.revoke("revoked", "operator")
+               == gaudere::scheduling::wake::WakeIntentRevokeResult::revoked,
+           "wake is durably revoked before due");
+    harness.controller.refresh_deadlines();
+    expect(durable && harness.scheduler.next() == due_at,
+           "already-armed stale notification remains bounded to its deadline");
+
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "stale deadline causes one inert worker event");
+    expect(!harness.scheduler.next(),
+           "revoked record is never re-armed after the stale event");
+    const auto revoked = harness.wake_runtime.find("revoked");
+    expect(revoked
+               && revoked->status
+                    == gaudere::scheduling::wake::WakeIntentStatus::revoked,
+           "stale event cannot change terminal revocation");
+}
+
 void test_stop_prevents_new_dispatch()
 {
     TemporaryDatabase database;
@@ -268,6 +413,10 @@ int main()
     test_notification_advances_idle_controller();
     test_future_lease_wakes_recovery_without_polling();
     test_unknown_kind_remains_pending();
+    test_exact_wake_fires_once_without_successor_work();
+    test_earliest_wake_precedes_task_lease_recovery();
+    test_clean_shutdown_rearms_future_wake_after_restart();
+    test_revoked_armed_deadline_causes_at_most_one_inert_event();
     test_stop_prevents_new_dispatch();
     test_stop_cancels_cooperative_running_handler();
     if (failures != 0) {

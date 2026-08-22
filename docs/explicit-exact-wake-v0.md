@@ -1,5 +1,18 @@
 # Explicit exact wake v0
 
+## Implementation status
+
+Gate 1 is merged in Gaudere Core as PR #10, commit
+`c24c40b84a12e51515cee4611e3dc79e9fd83892`: it provides the generic scoped
+`WakeIntent` runtime and additive SQLite schema v4.
+
+This Agent source implements gate 2 behind the explicit `--wake-intents` process
+flag. The default process path does not construct the wake store and therefore
+retains schema v3 behavior. No current service installer passes the flag. This
+source state is not a deployment, migration, wake acceptance, provider call, or
+authorization for any of those actions. Production remains schema v3 until the
+separate migration proof and production decision gates are completed.
+
 ## Decision
 
 The next slice is a provider-free proof of one durable exact wake. An operator may
@@ -14,7 +27,7 @@ authority to continue a cognition loop.
 The first permanent reflection, `production-reflection-first`, returned `stop`.
 It has no wake proposal and is therefore permanently ineligible for acceptance.
 Design, implementation, tests, migration preparation, and deployment do not
-authorize a third production provider call or the fabrication of a replacement
+authorize another production provider call or the fabrication of a replacement
 proposal.
 
 ## Why acceptance is explicit

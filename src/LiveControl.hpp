@@ -20,7 +20,10 @@ enum class LiveControlOperation {
     submit_openai,
     submit_reflection,
     inspect_task,
-    inspect_budget
+    inspect_budget,
+    accept_wake,
+    revoke_wake,
+    inspect_wake
 };
 
 struct LiveControlCommand {

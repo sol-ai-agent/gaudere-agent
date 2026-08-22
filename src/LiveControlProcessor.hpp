@@ -1,6 +1,7 @@
 #ifndef GAUDERE_AGENT_LIVE_CONTROL_PROCESSOR_HPP
 #define GAUDERE_AGENT_LIVE_CONTROL_PROCESSOR_HPP
 
+#include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
 
 #include <gaudere/budget/Store.hpp>
@@ -14,6 +15,7 @@ namespace gaudere_agent {
 struct LiveControlProcessResult {
     std::size_t processed = 0;
     bool work_may_be_pending = false;
+    bool wake_deadline_may_have_changed = false;
 };
 
 /**
@@ -30,19 +32,22 @@ public:
                          gaudere::work::TaskStore& store,
                          gaudere::budget::Store& budget_store,
                          gaudere::budget::Policy budget_policy,
-                         bool openai_enabled);
+                         bool openai_enabled,
+                         ExplicitWake* explicit_wake = nullptr);
 
     [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
 
 private:
     [[nodiscard]] LiveControlReply process_one(const LiveControlCommand& command,
-                                               bool& work_may_be_pending);
+                                               bool& work_may_be_pending,
+                                               bool& wake_deadline_may_have_changed);
 
     gaudere::work::Runtime& runtime_;
     gaudere::work::TaskStore& store_;
     gaudere::budget::Store& budget_store_;
     gaudere::budget::Policy budget_policy_;
     bool openai_enabled_;
+    ExplicitWake* explicit_wake_;
 };
 
 } // namespace gaudere_agent

@@ -12,7 +12,9 @@ void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | task ID | budget]\n";
+        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | task ID | "
+        << "budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | "
+        << "wake WAKE_ID]\n";
 }
 
 } // namespace
@@ -46,6 +48,16 @@ int main(int argc, char* argv[])
         } else if (operation == "budget" && argc == 4) {
             command.operation = gaudere_agent::LiveControlOperation::inspect_budget;
             command.id = "openai";
+        } else if (operation == "accept-wake" && argc == 5) {
+            command.operation = gaudere_agent::LiveControlOperation::accept_wake;
+            command.id = argv[4];
+        } else if (operation == "revoke-wake" && argc == 6) {
+            command.operation = gaudere_agent::LiveControlOperation::revoke_wake;
+            command.id = argv[4];
+            command.text = argv[5];
+        } else if (operation == "wake" && argc == 5) {
+            command.operation = gaudere_agent::LiveControlOperation::inspect_wake;
+            command.id = argv[4];
         } else {
             usage(argv[0]);
             return 2;
