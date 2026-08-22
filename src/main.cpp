@@ -1,4 +1,5 @@
 #include "BoundedReflection.hpp"
+#include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
 #include "LiveControlProcessor.hpp"
 #include "LocalEchoHandler.hpp"
@@ -14,8 +15,10 @@
 #include <gaudere/persistence/sqlite/ActionStore.hpp>
 #include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
+#include <gaudere/persistence/sqlite/WakeIntentStore.hpp>
 #include <gaudere/scheduling/wake/Runtime.hpp>
 #include <gaudere/scheduling/wake/Scheduler.hpp>
+#include <gaudere/scheduling/wake/WakeIntentRuntime.hpp>
 #include <gaudere/work/Runtime.hpp>
 
 #include <atomic>
@@ -41,6 +44,7 @@ struct Options {
     bool inspect_task = false;
     bool cancel_task = false;
     bool openai_enabled = false;
+    bool wake_intents_enabled = false;
     bool openai_secret_explicit = false;
     bool secret_directory_explicit = false;
     std::string task_id;
@@ -59,6 +63,7 @@ void usage(const char* program)
         << "--enqueue-openai ID TEXT | --openai-once ID TEXT | --task ID | "
         << "--cancel ID REASON] "
         << "[--control-socket PATH] "
+        << "[--wake-intents] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -96,6 +101,8 @@ Options parse_options(const int argc, char* argv[])
             options.text = argv[++index];
         } else if (argument == "--control-socket" && index + 1 < argc) {
             options.control_socket = argv[++index];
+        } else if (argument == "--wake-intents") {
+            options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
             options.openai_enabled = true;
             options.openai_model = argv[++index];
@@ -130,6 +137,10 @@ Options parse_options(const int argc, char* argv[])
     }
     if (!options.control_socket.empty() && modes != 0) {
         throw std::invalid_argument("--control-socket is only valid in service mode");
+    }
+    if (options.wake_intents_enabled && modes != 0 && !options.check_only) {
+        throw std::invalid_argument(
+            "--wake-intents is only valid in service mode or with --check");
     }
 
     if ((options.echo || options.enqueue_wait || options.enqueue_openai
@@ -303,6 +314,23 @@ int main(int argc, char* argv[])
         gaudere::persistence::sqlite::TaskStore task_store(options.state_path);
         gaudere::scheduling::wake::Runtime action_runtime(action_store, now);
         gaudere::work::Runtime work_runtime(task_store, now);
+        std::unique_ptr<gaudere::persistence::sqlite::WakeIntentStore>
+            wake_intent_store;
+        std::unique_ptr<gaudere::scheduling::wake::WakeIntentRuntime>
+            wake_intent_runtime;
+        std::unique_ptr<gaudere_agent::ExplicitWake> explicit_wake;
+        if (options.wake_intents_enabled) {
+            wake_intent_store =
+                std::make_unique<gaudere::persistence::sqlite::WakeIntentStore>(
+                    options.state_path);
+            wake_intent_runtime =
+                std::make_unique<gaudere::scheduling::wake::WakeIntentRuntime>(
+                    *wake_intent_store, now, gaudere_agent::explicit_wake_scope,
+                    gaudere::scheduling::wake::WakeIntentPolicy{
+                        gaudere_agent::explicit_wake_max_total});
+            explicit_wake = std::make_unique<gaudere_agent::ExplicitWake>(
+                task_store, *wake_intent_runtime);
+        }
 
         if (options.inspect_task) {
             return inspect_task(task_store, options.task_id);
@@ -327,7 +355,8 @@ int main(int argc, char* argv[])
         gaudere_agent::LocalEchoHandler echo_handler;
         gaudere_agent::LocalWaitHandler wait_handler;
         gaudere_agent::WorkController work_controller(
-            work_scheduler, work_runtime, task_dispatcher, "main-worker");
+            work_scheduler, work_runtime, task_dispatcher, "main-worker",
+            wake_intent_runtime.get());
         std::unique_ptr<gaudere::persistence::sqlite::BudgetStore> provider_budget_store;
         std::unique_ptr<gaudere_agent::OpenAIActivation> openai_activation;
         std::unique_ptr<gaudere_agent::BoundedReflectionHandler> reflection_handler;
@@ -379,6 +408,13 @@ int main(int argc, char* argv[])
                       << '\n';
         }
 
+        if (options.wake_intents_enabled) {
+            std::cout << "gaudere-agent: explicit wake enabled scope="
+                      << gaudere_agent::explicit_wake_scope
+                      << " max_total=" << gaudere_agent::explicit_wake_max_total
+                      << " automatic_successor=false\n";
+        }
+
         action_runtime.recover();
         work_runtime.recover();
         if (!work_controller.start()) {
@@ -423,7 +459,7 @@ int main(int argc, char* argv[])
                 control_processor = std::make_unique<gaudere_agent::LiveControlProcessor>(
                     work_runtime, task_store, *provider_budget_store,
                     gaudere_agent::OpenAIActivation::bootstrap_budget_policy(),
-                    options.openai_enabled);
+                    options.openai_enabled, explicit_wake.get());
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.notify_work(); });
@@ -466,6 +502,9 @@ int main(int argc, char* argv[])
                     const auto control = control_processor->process(*control_mailbox);
                     if (control.work_may_be_pending) {
                         work_controller.notify_work();
+                    }
+                    if (control.wake_deadline_may_have_changed) {
+                        work_controller.refresh_deadlines();
                     }
                 }
 

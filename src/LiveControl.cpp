@@ -35,6 +35,12 @@ std::string operation_name(const LiveControlOperation operation)
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
         return "inspect_budget";
+    case LiveControlOperation::accept_wake:
+        return "accept_wake";
+    case LiveControlOperation::revoke_wake:
+        return "revoke_wake";
+    case LiveControlOperation::inspect_wake:
+        return "inspect_wake";
     }
     throw std::invalid_argument("unknown live control operation");
 }
@@ -56,6 +62,15 @@ LiveControlOperation parse_operation(const std::string& value)
     if (value == "inspect_budget") {
         return LiveControlOperation::inspect_budget;
     }
+    if (value == "accept_wake") {
+        return LiveControlOperation::accept_wake;
+    }
+    if (value == "revoke_wake") {
+        return LiveControlOperation::revoke_wake;
+    }
+    if (value == "inspect_wake") {
+        return LiveControlOperation::inspect_wake;
+    }
     throw std::invalid_argument("unsupported live control operation");
 }
 
@@ -76,11 +91,24 @@ bool safe_id(const std::string& id) noexcept
     return true;
 }
 
+bool safe_reason(const std::string& reason) noexcept
+{
+    if (reason.empty() || reason.size() > 1024) {
+        return false;
+    }
+    for (const unsigned char character : reason) {
+        if (character < 0x20 || character == 0x7f) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void validate_command(const LiveControlCommand& command)
 {
     if (!safe_id(command.id)) {
         throw std::invalid_argument(
-            "task id must be 1..128 characters using letters, digits, '.', '_', ':', or '-'");
+            "task id or wake id must be 1..128 characters using letters, digits, '.', '_', ':', or '-'");
     }
     switch (command.operation) {
     case LiveControlOperation::submit_echo:
@@ -107,6 +135,22 @@ void validate_command(const LiveControlCommand& command)
     case LiveControlOperation::inspect_budget:
         if (command.id != "openai" || !command.text.empty()) {
             throw std::invalid_argument("inspect_budget accepts only id 'openai' and no text");
+        }
+        break;
+    case LiveControlOperation::accept_wake:
+        if (!command.text.empty()) {
+            throw std::invalid_argument("accept_wake accepts only a source task id");
+        }
+        break;
+    case LiveControlOperation::revoke_wake:
+        if (!safe_reason(command.text)) {
+            throw std::invalid_argument(
+                "wake revocation reason must be 1..1024 bytes without control characters");
+        }
+        break;
+    case LiveControlOperation::inspect_wake:
+        if (!command.text.empty()) {
+            throw std::invalid_argument("inspect_wake does not accept text");
         }
         break;
     }
@@ -395,7 +439,8 @@ void LiveControlServer::stop()
     mailbox_.stop();
     if (stop_pipe_write_ >= 0) {
         const char byte = 1;
-        static_cast<void>(::write(stop_pipe_write_, &byte, 1));
+        const auto written = ::write(stop_pipe_write_, &byte, 1);
+        static_cast<void>(written);
     }
 }
 

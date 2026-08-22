@@ -8,6 +8,8 @@ gaudere_agent_SOURCES = \
 	BoundedReflection.hpp \
 	CurlHttpTransport.cpp \
 	CurlHttpTransport.hpp \
+	ExplicitWake.cpp \
+	ExplicitWake.hpp \
 	FileSecretSource.cpp \
 	FileSecretSource.hpp \
 	HttpTransport.hpp \

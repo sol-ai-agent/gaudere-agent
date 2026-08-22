@@ -87,13 +87,19 @@ Malformed JSON or an invalid decision is a definite task failure after a confirm
 provider call. It is not retried. An ambiguous provider effect still enters
 `manual_review` through the existing provider boundary.
 
-## Why a proposed wake is not executed yet
+## Why a proposed wake is not automatic
 
-A model-selected delay is data, not authority. In v0, `propose_wake` is observable
-durable output only. No scheduler deadline or successor task is created from it.
+A model-selected delay is data, not authority. A `propose_wake` result remains
+observable durable Task output until a human explicitly accepts that exact source
+through the separately gated capability in
+[`explicit-exact-wake-v0.md`](explicit-exact-wake-v0.md). Without that capability,
+no scheduler deadline is created. Even after explicit acceptance, the deadline can
+only become an observable fired wake: it cannot create a successor Task or invoke a
+provider.
 
-Automatic application requires a later durable continuation slice with all of these
 properties proven together:
+Automatic continuation requires a later durable slice with all of these properties
+proven together:
 
 - a separate explicit cognition capability gate and permanent operator revoke;
 - at most one active run;
@@ -104,8 +110,8 @@ properties proven together:
   a successor wake;
 - no model control over task kind, prompt envelope, provider, endpoint, or effects.
 
-The later slice may accept the normalized `propose_wake` decision as input, but it
-must not reinterpret arbitrary model text as a schedule.
+The explicit wake slice accepts only the canonical normalized `propose_wake`
+decision as input and never reinterprets arbitrary model text as a schedule.
 
 ## Event and thread model
 

@@ -97,18 +97,74 @@ LiveControlReply not_found()
     return LiveControlReply{false, 3, "gaudere-agent: task not found\n"};
 }
 
+LiveControlReply wake_disabled()
+{
+    return LiveControlReply{
+        false, 4,
+        "gaudere-agent: explicit wake capability is not enabled in this service\n"};
+}
+
+LiveControlReply wake_not_found()
+{
+    return LiveControlReply{false, 3, "gaudere-agent: wake not found\n"};
+}
+
+std::string wake_acceptance_name(const ExplicitWakeAcceptResult result)
+{
+    switch (result) {
+    case ExplicitWakeAcceptResult::accepted:
+        return "accepted";
+    case ExplicitWakeAcceptResult::duplicate:
+        return "duplicate";
+    case ExplicitWakeAcceptResult::source_not_found:
+        return "source_not_found";
+    case ExplicitWakeAcceptResult::source_ineligible:
+        return "source_ineligible";
+    case ExplicitWakeAcceptResult::total_exhausted:
+        return "total_exhausted";
+    case ExplicitWakeAcceptResult::conflict:
+        return "conflict";
+    case ExplicitWakeAcceptResult::invalid:
+        return "invalid";
+    }
+    throw std::invalid_argument("unknown explicit wake acceptance result");
+}
+
+std::string wake_revoke_name(
+    const gaudere::scheduling::wake::WakeIntentRevokeResult result)
+{
+    using Result = gaudere::scheduling::wake::WakeIntentRevokeResult;
+    switch (result) {
+    case Result::revoked:
+        return "revoked";
+    case Result::fired:
+        return "fired";
+    case Result::manual_review:
+        return "manual_review";
+    case Result::not_found:
+        return "not_found";
+    case Result::terminal:
+        return "terminal";
+    case Result::invalid:
+        return "invalid";
+    }
+    throw std::invalid_argument("unknown wake-intent revoke result");
+}
+
 } // namespace
 
 LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            gaudere::work::TaskStore& store,
                                            gaudere::budget::Store& budget_store,
                                            gaudere::budget::Policy budget_policy,
-                                           const bool openai_enabled)
+                                           const bool openai_enabled,
+                                           ExplicitWake* explicit_wake)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
       budget_policy_(std::move(budget_policy)),
-      openai_enabled_(openai_enabled)
+      openai_enabled_(openai_enabled),
+      explicit_wake_(explicit_wake)
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -121,24 +177,49 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
     for (const auto& pending : mailbox.take_all()) {
         ++result.processed;
         bool work_may_be_pending = false;
+        bool wake_deadline_may_have_changed = false;
+        const auto operation = pending->command().operation;
+        const bool task_submission_may_have_committed =
+            operation == LiveControlOperation::submit_echo
+            || operation == LiveControlOperation::submit_openai
+            || operation == LiveControlOperation::submit_reflection;
+        const bool wake_transition_may_have_committed =
+            operation == LiveControlOperation::accept_wake
+            || operation == LiveControlOperation::revoke_wake;
         try {
-            pending->complete(process_one(pending->command(), work_may_be_pending));
+            pending->complete(process_one(
+                pending->command(), work_may_be_pending,
+                wake_deadline_may_have_changed));
         } catch (const std::exception& error) {
+            // Fail safe across the narrow boundary after a durable commit but
+            // before its reply/notification: one immediate reconciliation event
+            // is harmless when no transition committed and prevents stranded
+            // Task or WakeIntent state when one did.
+            work_may_be_pending = task_submission_may_have_committed;
+            wake_deadline_may_have_changed =
+                wake_transition_may_have_committed;
             pending->complete(LiveControlReply{
                 false, 1, std::string("gaudere-agent: live control command failed: ")
                               + error.what() + "\n"});
         } catch (...) {
+            work_may_be_pending = task_submission_may_have_committed;
+            wake_deadline_may_have_changed =
+                wake_transition_may_have_committed;
             pending->complete(LiveControlReply{
                 false, 1,
                 "gaudere-agent: live control command failed with non-standard exception\n"});
         }
         result.work_may_be_pending = result.work_may_be_pending || work_may_be_pending;
+        result.wake_deadline_may_have_changed =
+            result.wake_deadline_may_have_changed
+            || wake_deadline_may_have_changed;
     }
     return result;
 }
 
 LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& command,
-                                                   bool& work_may_be_pending)
+                                                   bool& work_may_be_pending,
+                                                   bool& wake_deadline_may_have_changed)
 {
     if (command.operation == LiveControlOperation::inspect_task) {
         const auto task = store_.find(command.id);
@@ -153,6 +234,70 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
             std::chrono::system_clock::now(), budget_policy_);
         return LiveControlReply{
             true, 0, budget_report(snapshot, budget_policy_, openai_enabled_)};
+    }
+
+    if (command.operation == LiveControlOperation::inspect_wake) {
+        if (!explicit_wake_) {
+            return wake_disabled();
+        }
+        const auto wake = explicit_wake_->find(command.id);
+        return wake
+            ? LiveControlReply{true, 0, wake_intent_report(*wake)}
+            : wake_not_found();
+    }
+
+    if (command.operation == LiveControlOperation::accept_wake) {
+        if (!explicit_wake_) {
+            return wake_disabled();
+        }
+        const auto acceptance = explicit_wake_->accept(command.id);
+        if ((acceptance.result == ExplicitWakeAcceptResult::accepted
+             || acceptance.result == ExplicitWakeAcceptResult::duplicate)
+            && acceptance.intent) {
+            wake_deadline_may_have_changed = true;
+            return LiveControlReply{
+                true, 0,
+                "acceptance=" + wake_acceptance_name(acceptance.result) + "\n"
+                    + wake_intent_report(*acceptance.intent)};
+        }
+        const int code =
+            acceptance.result == ExplicitWakeAcceptResult::source_not_found
+            ? 3 : 4;
+        return LiveControlReply{
+            false, code,
+            "gaudere-agent: explicit wake acceptance="
+                + wake_acceptance_name(acceptance.result) + ": "
+                + acceptance.detail + "\n"};
+    }
+
+    if (command.operation == LiveControlOperation::revoke_wake) {
+        if (!explicit_wake_) {
+            return wake_disabled();
+        }
+        using Result = gaudere::scheduling::wake::WakeIntentRevokeResult;
+        const auto result = explicit_wake_->revoke(command.id, command.text);
+        if (result == Result::not_found) {
+            return wake_not_found();
+        }
+        const auto wake = explicit_wake_->find(command.id);
+        if (result == Result::revoked || result == Result::fired
+            || result == Result::manual_review) {
+            if (!wake) {
+                throw std::runtime_error(
+                    "terminal explicit wake is missing from durable state");
+            }
+            wake_deadline_may_have_changed = true;
+            return LiveControlReply{
+                true, 0,
+                "revocation=" + wake_revoke_name(result) + "\n"
+                    + wake_intent_report(*wake)};
+        }
+        std::string body = "gaudere-agent: wake revocation="
+            + wake_revoke_name(result) + "\n";
+        if (wake) {
+            body += wake_intent_report(*wake);
+        }
+        return LiveControlReply{false, 4, std::move(body)};
     }
 
     gaudere::work::Task task;
@@ -182,7 +327,11 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
         break;
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
-        throw std::logic_error("inspect operation unexpectedly reached submit path");
+    case LiveControlOperation::accept_wake:
+    case LiveControlOperation::revoke_wake:
+    case LiveControlOperation::inspect_wake:
+        throw std::logic_error(
+            "non-submit operation unexpectedly reached submit path");
     }
 
     const auto id = task.id;

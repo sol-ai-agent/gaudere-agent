@@ -4,6 +4,7 @@
 #include "TaskDispatcher.hpp"
 
 #include <gaudere/scheduling/wake/Scheduler.hpp>
+#include <gaudere/scheduling/wake/WakeIntentRuntime.hpp>
 #include <gaudere/work/Runtime.hpp>
 
 #include <atomic>
@@ -24,8 +25,10 @@ enum class WorkCycleResult {
  * The controller owns no thread and performs no polling. start() requests an
  * immediate first wake. notify_work() advances the scheduler to an immediate
  * wake after accepted in-process work. wait_and_run() blocks in Scheduler,
- * recovers expired leases, drains eligible pending work through TaskDispatcher,
- * then schedules the exact next lease recovery deadline.
+ * reconciles optional durable wake intents, recovers expired leases, drains
+ * eligible pending work through TaskDispatcher, then schedules the exact minimum
+ * of the next lease-recovery and wake-intent deadlines. refresh_deadlines() is a
+ * worker-only hook used after a durable live-control wake transition commits.
  *
  * stop() is safe to call from another thread: it only publishes the stop request
  * and wakes/stops Scheduler. The worker thread that is inside wait_and_run()
@@ -37,21 +40,25 @@ public:
     WorkController(gaudere::scheduling::wake::Scheduler& scheduler,
                    gaudere::work::Runtime& runtime,
                    TaskDispatcher& dispatcher,
-                   std::string worker);
+                   std::string worker,
+                   gaudere::scheduling::wake::WakeIntentRuntime* wake_runtime = nullptr);
 
     [[nodiscard]] bool start();
     void notify_work();
+    void refresh_deadlines();
     [[nodiscard]] WorkCycleResult wait_and_run();
     void stop();
 
 private:
     [[nodiscard]] WorkCycleResult enter_draining();
-    void schedule_recovery_deadline();
+    void reconcile_wakes();
+    void schedule_next_deadline();
 
     gaudere::scheduling::wake::Scheduler& scheduler_;
     gaudere::work::Runtime& runtime_;
     TaskDispatcher& dispatcher_;
     std::string worker_;
+    gaudere::scheduling::wake::WakeIntentRuntime* wake_runtime_;
     std::atomic_bool started_{false};
     std::atomic_bool stopping_{false};
 };

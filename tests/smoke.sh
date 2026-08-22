@@ -12,6 +12,39 @@ control="../src/gaudere-control"
 test -f "$state"
 test -f "$state.lock"
 
+# WakeIntent remains an explicit undeployed capability gate. The default binary
+# path must keep current schema-v3 behavior, while an explicitly enabled disposable
+# database advances to v4 without submitting work or calling a provider.
+python3 - "$state" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(sys.argv[1]) as db:
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert db.execute(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type='table' AND name='wake_intents'"
+    ).fetchone()[0] == 0
+PY
+
+wake_state="$temporary_directory/wake-state.db"
+"$agent" --state "$wake_state" --check --wake-intents \
+  >"$temporary_directory/wake-check" 2>&1
+grep -q '^gaudere-agent: explicit wake enabled scope=cognition.reflect.wake.v0 max_total=1 automatic_successor=false$' \
+  "$temporary_directory/wake-check"
+grep -q '^gaudere-agent: safe$' "$temporary_directory/wake-check"
+python3 - "$wake_state" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(sys.argv[1]) as db:
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert db.execute(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type='table' AND name='wake_intents'"
+    ).fetchone()[0] == 1
+PY
+
 # Provider configuration can be preflighted without sending a network request.
 # The secret value stays in a protected synthetic file; only its name is printed.
 secret_directory="$temporary_directory/secrets"
@@ -212,6 +245,14 @@ if "$control" --socket "$control_socket" task live-reflection \
     exit 1
 fi
 grep -q 'task not found' "$temporary_directory/live-reflection-task"
+
+if "$control" --socket "$control_socket" accept-wake unavailable-source \
+    >"$temporary_directory/live-wake-disabled" 2>&1; then
+    echo "explicit wake unexpectedly succeeded without capability activation" >&2
+    exit 1
+fi
+grep -q 'explicit wake capability is not enabled' \
+  "$temporary_directory/live-wake-disabled"
 
 live_done=0
 i=0

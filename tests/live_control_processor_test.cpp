@@ -1,9 +1,12 @@
 #include "BoundedReflection.hpp"
+#include "ExplicitWake.hpp"
 #include "LiveControlProcessor.hpp"
 #include "OpenAIActivation.hpp"
 
 #include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
+#include <gaudere/persistence/sqlite/WakeIntentStore.hpp>
+#include <gaudere/scheduling/wake/WakeIntentRuntime.hpp>
 #include <gaudere/work/Runtime.hpp>
 
 #include <chrono>
@@ -43,22 +46,51 @@ struct TemporaryDatabase {
 };
 
 struct Harness {
-    Harness(const std::filesystem::path& path, const bool openai_enabled)
+    Harness(const std::filesystem::path& path,
+            const bool openai_enabled,
+            const bool wake_enabled = false)
         : store(path.string()),
           budget_store(path.string()),
+          wake_store(path.string()),
           runtime(store, [] { return std::chrono::system_clock::now(); }),
+          wake_runtime(wake_store, [] { return std::chrono::system_clock::now(); },
+                       explicit_wake_scope, {explicit_wake_max_total}),
+          explicit_wake(store, wake_runtime),
           processor(runtime, store, budget_store,
-                    OpenAIActivation::bootstrap_budget_policy(), openai_enabled)
+                    OpenAIActivation::bootstrap_budget_policy(), openai_enabled,
+                    wake_enabled ? &explicit_wake : nullptr)
     {
         runtime.recover();
     }
 
     gaudere::persistence::sqlite::TaskStore store;
     gaudere::persistence::sqlite::BudgetStore budget_store;
+    gaudere::persistence::sqlite::WakeIntentStore wake_store;
     gaudere::work::Runtime runtime;
+    gaudere::scheduling::wake::WakeIntentRuntime wake_runtime;
+    ExplicitWake explicit_wake;
     LiveControlProcessor processor;
     LiveControlMailbox mailbox;
 };
+
+gaudere::work::Task reflection_source(std::string id, std::string decision)
+{
+    gaudere::work::Task task;
+    task.id = std::move(id);
+    task.idempotency_key = "cognition.reflect.v1:" + task.id;
+    task.kind = bounded_reflection_task_kind;
+    task.input_content_type = "text/plain; charset=utf-8";
+    task.input = "live control source fixture";
+    task.limits.max_input_bytes = 4096;
+    task.limits.max_output_bytes = 4096;
+    task.limits.max_runtime = std::chrono::seconds{1};
+    task.limits.max_attempts = 2;
+    task.attempts_started = 1;
+    task.status = gaudere::work::TaskStatus::succeeded;
+    task.result = gaudere::work::TaskResult{
+        bounded_reflection_decision_content_type, std::move(decision), {}, {}};
+    return task;
+}
 
 void test_echo_submission_is_durable()
 {
@@ -261,6 +293,105 @@ void test_duplicate_preserves_original_definition()
            "durable idempotency preserves original task definition");
 }
 
+void test_wake_commands_require_explicit_capability_activation()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false);
+    auto pending = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::accept_wake,
+                           "source-disabled", {}});
+    const auto processed = harness.processor.process(harness.mailbox);
+    const auto reply = pending->wait();
+
+    expect(processed.processed == 1
+               && !processed.work_may_be_pending
+               && !processed.wake_deadline_may_have_changed,
+           "disabled wake command changes no worker scheduling state");
+    expect(!reply.ok && reply.code == 4
+               && reply.body.find("not enabled") != std::string::npos,
+           "wake command is explicitly rejected while capability flag is absent");
+}
+
+void test_stop_source_is_permanently_ineligible()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false, true);
+    harness.store.save(reflection_source(
+        "stop-source",
+        "{\"decision\":\"stop\",\"reason\":\"Complete.\","
+        "\"schema\":\"gaudere.cognition.decision.v1\"}"));
+    auto pending = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::accept_wake,
+                           "stop-source", {}});
+    const auto processed = harness.processor.process(harness.mailbox);
+    const auto reply = pending->wait();
+
+    expect(!reply.ok && reply.code == 4
+               && reply.body.find("source_ineligible") != std::string::npos,
+           "durable stop decision cannot be accepted as a wake source");
+    expect(!processed.wake_deadline_may_have_changed
+               && !harness.explicit_wake.find("stop-source"),
+           "ineligible stop result creates no deadline or wake row");
+}
+
+void test_accept_inspect_revoke_wake_lifecycle()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false, true);
+    harness.store.save(reflection_source(
+        "wake-source",
+        "{\"decision\":\"propose_wake\","
+        "\"reason\":\"Revisit once.\","
+        "\"schema\":\"gaudere.cognition.decision.v1\","
+        "\"wake_after_seconds\":900}"));
+
+    auto accept = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::accept_wake,
+                           "wake-source", {}});
+    const auto accepted = harness.processor.process(harness.mailbox);
+    const auto accepted_reply = accept->wait();
+    expect(accepted.wake_deadline_may_have_changed
+               && !accepted.work_may_be_pending
+               && accepted_reply.ok
+               && accepted_reply.body.find("acceptance=accepted")
+                    != std::string::npos
+               && accepted_reply.body.find("status=scheduled")
+                    != std::string::npos,
+           "explicit acceptance returns complete durable scheduled report");
+
+    auto duplicate = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::accept_wake,
+                           "wake-source", {}});
+    static_cast<void>(harness.processor.process(harness.mailbox));
+    expect(duplicate->wait().body.find("acceptance=duplicate")
+               != std::string::npos,
+           "duplicate live acceptance is observable and idempotent");
+
+    auto inspect = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::inspect_wake,
+                           "wake-source", {}});
+    const auto inspected = harness.processor.process(harness.mailbox);
+    const auto inspected_reply = inspect->wait();
+    expect(!inspected.wake_deadline_may_have_changed
+               && inspected_reply.ok
+               && inspected_reply.body.find("source_id=\"wake-source\"")
+                    != std::string::npos,
+           "wake inspection is observational through the sole worker");
+
+    auto revoke = harness.mailbox.submit(
+        LiveControlCommand{LiveControlOperation::revoke_wake,
+                           "wake-source", "operator request"});
+    const auto revoked = harness.processor.process(harness.mailbox);
+    const auto revoked_reply = revoke->wait();
+    expect(revoked.wake_deadline_may_have_changed
+               && revoked_reply.ok
+               && revoked_reply.body.find("revocation=revoked")
+                    != std::string::npos
+               && revoked_reply.body.find("terminal_reason=\"operator request\"")
+                    != std::string::npos,
+           "pre-due live revocation is terminal and completely reported");
+}
+
 } // namespace
 
 int main()
@@ -273,6 +404,9 @@ int main()
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
+    test_wake_commands_require_explicit_capability_activation();
+    test_stop_source_is_permanently_ineligible();
+    test_accept_inspect_revoke_wake_lifecycle();
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";

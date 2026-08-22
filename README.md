@@ -41,7 +41,9 @@ The application source defines three provider-agnostic work boundaries:
 - `WorkController` composes the wake Scheduler, bounded-work Runtime, and dispatcher.
   It owns no thread and performs no periodic polling. New in-process work can request
   an immediate wake, while interrupted active work schedules its exact durable lease
-  recovery deadline.
+  recovery deadline. When the separately gated wake-intent capability is enabled,
+  the same scheduler waits for the exact minimum of task recovery and durable wake
+  deadlines; a due wake only becomes observable terminal state.
 
 `local.echo` returns bounded text input as a durable result. `local.wait` accepts an
 integer duration from 1 to 5000 milliseconds, waits locally in short increments, and
@@ -61,18 +63,32 @@ validator is inert until an operator explicitly runs it, fixes the task identity
 objective, requires budget transition `1 -> 2`, and refuses any replay. Preparing or
 deploying that script does not authorize the second provider call.
 
-The next provider-free boundary is specified in
+The provider-free exact-wake boundary is specified in
 [`docs/explicit-exact-wake-v0.md`](docs/explicit-exact-wake-v0.md). It accepts at
 most one already-normalized `propose_wake` result through an explicit operator
 command, persists one exact deadline, and records that deadline becoming due. It
 does not submit a successor task or call a provider. The first permanent reflection
-returned `stop`, so it is not an eligible source for this capability.
+returned `stop`, so it is not an eligible source for this capability. The Agent
+integration is disabled by default and can only be constructed with
+`--wake-intents`; current service installers do not pass that flag. Consequently,
+normal service startup retains schema v3 and cannot accept, arm, or inspect these
+wakes. Schema v4 migration and production activation remain separate later gates.
 
 Normal service mode:
 
 ```sh
 gaudere-agent --state /path/to/state.db
 ```
+
+Capability-only validation on a disposable database may opt in explicitly:
+
+```sh
+gaudere-agent --state /path/to/disposable.db --check --wake-intents
+```
+
+That flag opens the schema-v4 wake store. It is intentionally not an offline path
+for accepting a wake and must not be added to a production service before the
+separate backup, migration, rollback, and activation gates pass.
 
 Offline operator commands:
 
