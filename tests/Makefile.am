@@ -19,6 +19,7 @@ check_PROGRAMS = \
 	task_dispatcher_test \
 	task_executor_test \
 	task_report_test \
+	wake_intent_adversarial_test \
 	work_controller_test
 TESTS = smoke.sh image_provenance_validator_test.sh schema_v4_provenance_integration_test.sh schema_v4_staged_deployment_test.sh $(check_PROGRAMS)
 EXTRA_DIST = \
@@ -203,6 +204,29 @@ task_report_test_SOURCES = \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
 task_report_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+wake_intent_adversarial_test_SOURCES = \
+	wake_intent_adversarial_test.cpp \
+	../src/BoundedReflection.cpp \
+	../src/BoundedReflection.hpp \
+	../src/ExplicitWake.cpp \
+	../src/ExplicitWake.hpp \
+	../src/LiveControl.cpp \
+	../src/LiveControl.hpp \
+	../src/LiveControlProcessor.cpp \
+	../src/LiveControlProcessor.hpp \
+	../src/OpenAITask.cpp \
+	../src/OpenAITask.hpp \
+	../src/TaskDispatcher.cpp \
+	../src/TaskDispatcher.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp \
+	../src/TaskReport.cpp \
+	../src/TaskReport.hpp \
+	../src/WorkController.cpp \
+	../src/WorkController.hpp
+wake_intent_adversarial_test_LDADD = \
+	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 work_controller_test_SOURCES = \
 	work_controller_test.cpp \
