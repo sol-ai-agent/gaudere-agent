@@ -16,6 +16,17 @@ request_id=${GAUDERE_PROOF_ID:-$(date -u +%Y%m%dT%H%M%SZ)}
 candidate_image=${GAUDERE_CANDIDATE_IMAGE:-"localhost/gaudere-agent:schema-v4-proof-$request_id"}
 rollback_image=${GAUDERE_ROLLBACK_IMAGE:-"localhost/gaudere-agent:rollback-pre-v4-$request_id"}
 rollback_manifest=${GAUDERE_ROLLBACK_MANIFEST:-"$backup_dir/image-rollback-$request_id.manifest"}
+test_mode=${GAUDERE_TEST_MODE:-0}
+default_control_script="$script_directory/control-service.sh"
+default_capture_script="$script_directory/capture-schema-v4-image-rollback.sh"
+default_build_script="$script_directory/build-image.sh"
+default_backup_script="$script_directory/backup-state.sh"
+default_image_proof_script="$script_directory/validate-schema-v4-image-provenance.sh"
+control_script=${GAUDERE_CONTROL_SCRIPT:-$default_control_script}
+capture_script=${GAUDERE_CAPTURE_ROLLBACK_SCRIPT:-$default_capture_script}
+build_script=${GAUDERE_BUILD_IMAGE_SCRIPT:-$default_build_script}
+backup_script=${GAUDERE_BACKUP_SCRIPT:-$default_backup_script}
+image_proof_script=${GAUDERE_IMAGE_PROOF_SCRIPT:-$default_image_proof_script}
 
 fail()
 {
@@ -26,6 +37,11 @@ fail()
 need_command()
 {
     command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+}
+
+need_file()
+{
+    [ -f "$1" ] && [ ! -L "$1" ] || fail "required helper is missing or unsafe: $1"
 }
 
 snapshot_state()
@@ -65,6 +81,23 @@ cleanup()
 trap cleanup EXIT HUP INT TERM
 
 [ "$#" -eq 0 ] || fail "usage: $0"
+case "$test_mode" in
+    0|1) ;;
+    *) fail "GAUDERE_TEST_MODE must be 0 or 1" ;;
+esac
+if [ "$test_mode" != "1" ]; then
+    [ "$control_script" = "$default_control_script" ] \
+        || fail "GAUDERE_CONTROL_SCRIPT override is restricted to synthetic test mode"
+    [ "$capture_script" = "$default_capture_script" ] \
+        || fail "GAUDERE_CAPTURE_ROLLBACK_SCRIPT override is restricted to synthetic test mode"
+    [ "$build_script" = "$default_build_script" ] \
+        || fail "GAUDERE_BUILD_IMAGE_SCRIPT override is restricted to synthetic test mode"
+    [ "$backup_script" = "$default_backup_script" ] \
+        || fail "GAUDERE_BACKUP_SCRIPT override is restricted to synthetic test mode"
+    [ "$image_proof_script" = "$default_image_proof_script" ] \
+        || fail "GAUDERE_IMAGE_PROOF_SCRIPT override is restricted to synthetic test mode"
+fi
+
 need_command git
 need_command "$podman_command"
 need_command "$systemctl_command"
@@ -72,6 +105,17 @@ need_command python3
 need_command mktemp
 need_command cmp
 need_command sha256sum
+need_command grep
+need_command sed
+need_command cat
+need_file "$control_script"
+need_file "$capture_script"
+need_file "$build_script"
+need_file "$backup_script"
+need_file "$image_proof_script"
+[ -d "$state_dir" ] || fail "production state directory not found: $state_dir"
+[ -f "$state_dir/state.db" ] || fail "production state database not found"
+mkdir -p "$backup_dir"
 
 [ -n "$expected_agent_ref" ] || fail "GAUDERE_EXPECTED_AGENT_REF is required"
 [ -n "$expected_core_ref" ] || fail "GAUDERE_EXPECTED_CORE_REF is required"
@@ -94,7 +138,7 @@ printf 'CORE_REF=%s\n' "$core"
 printf '\n==> live preflight\n'
 [ "$("$systemctl_command" --user is-active "$service_name" 2>/dev/null || true)" = "active" ] \
     || fail "$service_name must be active before the proof"
-before_budget=$(sh "$script_directory/control-service.sh" budget)
+before_budget=$(sh "$control_script" budget)
 printf '%s\n' "$before_budget"
 printf '%s\n' "$before_budget" | grep -qx 'provider_enabled=true' \
     || fail "provider capability is not enabled"
@@ -104,13 +148,13 @@ printf '%s\n' "$before_budget" | grep -qx "total_used=$expected_budget_rows" \
 printf '\n==> capture immutable rollback image before candidate build\n'
 GAUDERE_ROLLBACK_IMAGE="$rollback_image" \
 GAUDERE_ROLLBACK_MANIFEST="$rollback_manifest" \
-    sh "$script_directory/capture-schema-v4-image-rollback.sh"
+    sh "$capture_script"
 rollback_id=$(sed -n 's/^rollback_image_id=//p' "$rollback_manifest")
 [ -n "$rollback_id" ] || fail "rollback manifest did not contain an image ID"
 printf 'ROLLBACK_ID=%s\n' "$rollback_id"
 
 printf '\n==> build distinct exact candidate image\n'
-GAUDERE_IMAGE_TAG="$candidate_image" sh "$script_directory/build-image.sh"
+GAUDERE_IMAGE_TAG="$candidate_image" sh "$build_script"
 candidate_id=$("$podman_command" image inspect --format '{{.Id}}' "$candidate_image") \
     || fail "cannot inspect candidate image"
 [ -n "$candidate_id" ] || fail "candidate image ID is empty"
@@ -130,7 +174,7 @@ printf 'REAL_STATE_SNAPSHOT_BEFORE:\n'
 cat "$before_snapshot"
 
 backup=$(GAUDERE_STATE_DIR="$state_dir" GAUDERE_BACKUP_DIR="$backup_dir" \
-    sh "$script_directory/backup-state.sh")
+    sh "$backup_script")
 printf 'BACKUP=%s\n' "$backup"
 (
     cd "$(dirname "$backup")"
@@ -145,8 +189,7 @@ GAUDERE_EXPECTED_CANDIDATE_ID="$candidate_id" \
 GAUDERE_ROLLBACK_IMAGE="$rollback_image" \
 GAUDERE_EXPECTED_ROLLBACK_ID="$rollback_id" \
 GAUDERE_EXPECT_PROVIDER_BUDGET_ROWS="$expected_budget_rows" \
-    sh "$script_directory/validate-schema-v4-image-provenance.sh" \
-        "$backup" "$representative_task"
+    sh "$image_proof_script" "$backup" "$representative_task"
 
 snapshot_state "$after_snapshot"
 printf 'REAL_STATE_SNAPSHOT_AFTER:\n'
@@ -180,18 +223,18 @@ PY
 
 printf '\n==> restart unchanged production service\n'
 "$systemctl_command" --user start "$service_name"
-service_was_stopped=0
 sleep 1
 [ "$("$systemctl_command" --user is-active "$service_name" 2>/dev/null || true)" = "active" ] \
     || fail "$service_name is not active after proof"
+service_was_stopped=0
 printf 'REAL_SERVICE_AFTER_PROOF=active\n'
 
-after_budget=$(sh "$script_directory/control-service.sh" budget)
+after_budget=$(sh "$control_script" budget)
 printf '%s\n' "$after_budget"
 printf '%s\n' "$after_budget" | grep -qx "total_used=$expected_budget_rows" \
     || fail "durable provider total changed during provider-free proof"
 
 printf '\nREPRESENTATIVE_TASK_AFTER_PROOF:\n'
-sh "$script_directory/control-service.sh" task "$representative_task"
+sh "$control_script" task "$representative_task"
 
 printf '\ngaudere production schema-v4 copy proof: PASS\n'
