@@ -1,0 +1,174 @@
+name: Image provenance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - Containerfile
+      - gaudere.ref
+      - scripts/build-image.sh
+      - scripts/verify-image-provenance.sh
+      - scripts/capture-schema-v4-image-rollback.sh
+      - scripts/validate-schema-v4-image-provenance.sh
+      - scripts/validate-schema-v4-migration-copy.sh
+      - tests/image_provenance_validator_test.sh
+      - .github/workflows/image-provenance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Podman
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Build and prove exact disposable candidate
+        run: |
+          set -eu
+
+          candidate="localhost/gaudere-agent:image-provenance-${GITHUB_SHA}"
+          rollback="localhost/gaudere-agent:rollback-image-provenance-${GITHUB_SHA}"
+          agent_ref=$(git rev-parse HEAD)
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+
+          GAUDERE_IMAGE_TAG="$candidate" sh scripts/build-image.sh \
+              > "$RUNNER_TEMP/image-build.out"
+          cat "$RUNNER_TEMP/image-build.out"
+          candidate_id=$(podman image inspect --format '{{.Id}}' "$candidate")
+          candidate_id="sha256:${candidate_id#sha256:}"
+
+          podman pull registry.fedoraproject.org/fedora:44
+          rollback_id=$(podman image inspect --format '{{.Id}}' \
+              registry.fedoraproject.org/fedora:44)
+          rollback_id="sha256:${rollback_id#sha256:}"
+          podman tag "$rollback_id" "$rollback"
+
+          workspace=$(mktemp -d "$RUNNER_TEMP/gaudere-image-proof.XXXXXX")
+          trap 'rm -rf "$workspace"' EXIT
+          state="$workspace/state"
+          validation="$workspace/validation"
+          archive="$workspace/gaudere-state-v3.tar.gz"
+          mkdir -p "$state" "$validation"
+
+          real_podman=$(command -v podman)
+          podman_wrapper="$workspace/podman-keep-id"
+          cat > "$podman_wrapper" <<'SH'
+          #!/bin/bash
+          set -eu
+          real_podman=${GAUDERE_REAL_PODMAN:?}
+          if [ "$1" = "run" ]; then
+              shift
+              arguments=(run)
+              while [ "$#" -gt 0 ]; do
+                  if [ "$1" = "--userns" ] && [ "${2:-}" = "keep-id" ]; then
+                      arguments+=(--userns "keep-id:uid=1000,gid=1000")
+                      shift 2
+                  else
+                      arguments+=("$1")
+                      shift
+                  fi
+              done
+              exec "$real_podman" "${arguments[@]}"
+          fi
+          exec "$real_podman" "$@"
+          SH
+          chmod +x "$podman_wrapper"
+          export GAUDERE_REAL_PODMAN="$real_podman"
+
+          "$podman_wrapper" run --rm \
+              --network none \
+              --userns keep-id \
+              --read-only \
+              --read-only-tmpfs=true \
+              --cap-drop=all \
+              --security-opt=no-new-privileges \
+              --pids-limit 64 \
+              --memory 256m \
+              -v "$state:/var/lib/gaudere:Z" \
+              "$candidate" \
+              --state /var/lib/gaudere/state.db \
+              --echo image-provenance-ci "disposable provenance proof" \
+              > "$workspace/fixture.out"
+          grep -q '^gaudere-agent: safe$' "$workspace/fixture.out"
+          rm -f "$state/state.db.lock"
+
+          tar -czf "$archive" -C "$state" .
+          (
+              cd "$workspace"
+              sha256sum "$(basename "$archive")" \
+                  > "$(basename "$archive").sha256"
+          )
+
+          PODMAN="$podman_wrapper" \
+          GAUDERE_VALIDATION_ROOT="$validation" \
+          GAUDERE_CANDIDATE_IMAGE="$candidate" \
+          GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
+          GAUDERE_EXPECTED_CORE_REF="$core_ref" \
+          GAUDERE_EXPECTED_CANDIDATE_ID="$candidate_id" \
+          GAUDERE_ROLLBACK_IMAGE="$rollback" \
+          GAUDERE_EXPECTED_ROLLBACK_ID="$rollback_id" \
+              sh scripts/validate-schema-v4-image-provenance.sh \
+                 "$archive" image-provenance-ci \
+                 > "$workspace/proof.out"
+          cat "$workspace/proof.out"
+          grep -q '^gaudere schema v4 image provenance validation: PASS$' \
+              "$workspace/proof.out"
+          grep -q '^provider_effects=0$' "$workspace/proof.out"
+          grep -q '^wake_effects=0$' "$workspace/proof.out"
+
+          if PODMAN="$podman_wrapper" sh scripts/verify-image-provenance.sh \
+                  "$candidate" \
+                  ffffffffffffffffffffffffffffffffffffffff \
+                  "$core_ref" "$candidate_id" \
+                  > "$workspace/false-provenance.out" \
+                  2> "$workspace/false-provenance.err"; then
+              echo 'false Agent provenance was accepted' >&2
+              exit 1
+          fi
+          grep -q 'Agent revision mismatch' "$workspace/false-provenance.err"
+
+          podman tag "$rollback_id" "$candidate"
+          if PODMAN="$podman_wrapper" sh scripts/verify-image-provenance.sh \
+                  "$candidate" "$agent_ref" "$core_ref" "$candidate_id" \
+                  > "$workspace/candidate-drift.out" \
+                  2> "$workspace/candidate-drift.err"; then
+              echo 'candidate tag drift was accepted' >&2
+              exit 1
+          fi
+          grep -q 'image ID mismatch' "$workspace/candidate-drift.err"
+          podman tag "$candidate_id" "$candidate"
+
+          podman tag "$candidate_id" "$rollback"
+          if PODMAN="$podman_wrapper" \
+                  GAUDERE_VALIDATION_ROOT="$validation" \
+                  GAUDERE_CANDIDATE_IMAGE="$candidate" \
+                  GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
+                  GAUDERE_EXPECTED_CORE_REF="$core_ref" \
+                  GAUDERE_EXPECTED_CANDIDATE_ID="$candidate_id" \
+                  GAUDERE_ROLLBACK_IMAGE="$rollback" \
+                  GAUDERE_EXPECTED_ROLLBACK_ID="$rollback_id" \
+                  sh scripts/validate-schema-v4-image-provenance.sh \
+                     "$archive" image-provenance-ci \
+                     > "$workspace/rollback-drift.out" \
+                     2> "$workspace/rollback-drift.err"; then
+              echo 'rollback tag drift was accepted' >&2
+              exit 1
+          fi
+          grep -q 'rollback image ID mismatch' "$workspace/rollback-drift.err"
+
+      - name: Exercise synthetic provenance and tag-drift failures
+        run: |
+          set -eu
+          sh tests/image_provenance_validator_test.sh

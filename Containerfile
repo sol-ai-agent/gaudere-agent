@@ -1,8 +1,11 @@
 ARG BUILDER_IMAGE=registry.fedoraproject.org/fedora:44
+ARG GAUDERE_AGENT_REF
+ARG GAUDERE_REF
 FROM ${BUILDER_IMAGE} AS builder
 
 # Deliberately has no default. scripts/build-image.sh and CI must both provide
 # the same pinned commit from gaudere.ref so container and CI builds cannot drift.
+ARG GAUDERE_AGENT_REF
 ARG GAUDERE_REF
 
 USER root
@@ -21,7 +24,12 @@ RUN dnf install -y \
         sqlite-devel \
     && dnf clean all
 
-RUN test -n "${GAUDERE_REF}" \
+RUN test -n "${GAUDERE_AGENT_REF}" \
+    && test "${#GAUDERE_AGENT_REF}" -eq 40 \
+    && test -z "$(printf '%s' "${GAUDERE_AGENT_REF}" | tr -d '0-9a-f')" \
+    && test -n "${GAUDERE_REF}" \
+    && test "${#GAUDERE_REF}" -eq 40 \
+    && test -z "$(printf '%s' "${GAUDERE_REF}" | tr -d '0-9a-f')" \
     && git clone https://github.com/sol-ai-agent/gaudere.git /src/gaudere \
     && git -C /src/gaudere checkout --detach "${GAUDERE_REF}"
 
@@ -56,6 +64,14 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-control /opt/runtime/bin/
 
 FROM registry.fedoraproject.org/fedora:44
+
+ARG GAUDERE_AGENT_REF
+ARG GAUDERE_REF
+
+LABEL org.opencontainers.image.source="https://github.com/sol-ai-agent/gaudere-agent" \
+      org.opencontainers.image.revision="${GAUDERE_AGENT_REF}" \
+      io.gaudere.agent.revision="${GAUDERE_AGENT_REF}" \
+      io.gaudere.core.revision="${GAUDERE_REF}"
 
 RUN dnf install -y libcurl libstdc++ sqlite-libs \
     && dnf clean all \

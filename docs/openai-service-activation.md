@@ -30,11 +30,20 @@ The OpenAI profile:
 Provider startup validates the configured secret and registers the handler but does not
 submit a Task. To prevent the first capability transition from reviving forgotten work,
 the installer requires the service stopped, holds the production state lock, requires
-schema v3, and refuses installation if any pre-existing
+exactly schema v3 or v4, and refuses installation if any pre-existing
 `provider.openai.responses` or `cognition.reflect.v1` Task is nonterminal, or if any
 leased Task remains active. It also runs the image's control binary with networking
 disabled and no state or secret mounted, and refuses an image that predates the explicit
 `reflect` command.
+
+On schema v4, the installer additionally creates a consistent disposable SQLite
+backup while holding the production lock and requires the selected image to reopen
+that copy through its default `--check` path. The probe has networking disabled,
+mounts no secret, passes no provider configuration, and deliberately omits
+`--wake-intents`. The installed OpenAI Quadlet remains byte-for-byte the same for
+schemas v3 and v4. Accepting schema v4 for recovery therefore does not enable,
+accept, arm, or fire a WakeIntent; an image that cannot safely perform this inert
+default reopen is rejected before the installed profile is replaced.
 
 ## Initial capability-only proof
 
