@@ -95,6 +95,13 @@ The provider-free stopped-state copy proof for the next gate is documented in
 validator migrates only a verified disposable backup copy, proves an independent
 schema-v3 rollback restore, and never replaces or opens the production state path.
 
+The runtime-image provenance gate is documented in
+[`docs/image-provenance-v4.md`](docs/image-provenance-v4.md). It records Agent and
+Core revisions as OCI labels, verifies candidates by full image ID, captures the
+pre-v4 rollback image before any candidate build can move `:dev`, and composes those
+identity checks with the disposable v3/v4 reopen proof. It remains provider-free
+and does not install an image or modify production.
+
 Offline operator commands:
 
 ```sh
