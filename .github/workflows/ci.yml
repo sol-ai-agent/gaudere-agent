@@ -61,6 +61,9 @@ jobs:
       - name: Validate deployment scripts
         run: |
           sh -n agent/scripts/build-image.sh
+          sh -n agent/scripts/verify-image-provenance.sh
+          sh -n agent/scripts/capture-schema-v4-image-rollback.sh
+          sh -n agent/scripts/validate-schema-v4-image-provenance.sh
           sh -n agent/scripts/install-user-service.sh
           sh -n agent/scripts/install-openai-secret.sh
           sh -n agent/scripts/backup-state.sh
@@ -75,6 +78,7 @@ jobs:
           sh -n agent/scripts/validate-schema-migration-copy.sh
           sh -n agent/scripts/validate-schema-v4-migration-copy.sh
           sh -n agent/scripts/deploy-schema-v3.sh
+          sh -n agent/tests/image_provenance_validator_test.sh
           sh -n agent/tests/schema_v4_migration_copy_validator_test.sh
 
       - name: Build and install Gaudere

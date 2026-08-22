@@ -20,9 +20,10 @@ check_PROGRAMS = \
 	task_executor_test \
 	task_report_test \
 	work_controller_test
-TESTS = smoke.sh $(check_PROGRAMS)
+TESTS = smoke.sh image_provenance_validator_test.sh $(check_PROGRAMS)
 EXTRA_DIST = \
 	first_production_reflection_validator_test.sh \
+	image_provenance_validator_test.sh \
 	schema_v4_migration_copy_validator_test.sh \
 	smoke.sh
 
