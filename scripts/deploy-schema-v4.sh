@@ -16,6 +16,7 @@ provenance_validator=${GAUDERE_SCHEMA_V4_IMAGE_PROVENANCE_VALIDATOR:-$default_pr
 stage_script=${GAUDERE_SCHEMA_V4_STAGE_SCRIPT:-$default_stage_script}
 systemctl_command=${SYSTEMCTL:-systemctl}
 test_mode=${GAUDERE_TEST_MODE:-0}
+agent_bin=${GAUDERE_AGENT_BIN:-}
 state_directory=${GAUDERE_STATE_DIR:-}
 backup_directory=${GAUDERE_BACKUP_DIR:-}
 service_name=${GAUDERE_SERVICE_NAME:-}
@@ -68,11 +69,19 @@ if [ "$test_mode" = "0" ]; then
     [ -n "$expected_rollback_id" ] \
         || fail "GAUDERE_EXPECTED_ROLLBACK_ID must be set"
 else
-    # The large staged-state test predates issue #50 and deliberately exercises the
-    # lower-level state engine with GAUDERE_AGENT_BIN. Keep that test provider-free
-    # without requiring synthetic Podman identities. A dedicated integration test
-    # below exercises the provenance handoff itself through explicit overrides.
+    # The pre-existing staged-state failure-injection test uses a direct synthetic
+    # Agent binary and fake systemctl. Its legacy path may skip Podman provenance
+    # only inside its dedicated mktemp tree; GAUDERE_TEST_MODE=1 alone is never a
+    # provenance bypass for an arbitrary state path.
     if [ -z "${GAUDERE_SCHEMA_V4_IMAGE_PROVENANCE_VALIDATOR:-}" ]; then
+        [ -n "$agent_bin" ] \
+            || fail "test-mode provenance bypass requires GAUDERE_AGENT_BIN"
+        [ "$systemctl_command" != "systemctl" ] \
+            || fail "test-mode provenance bypass requires synthetic systemctl"
+        case "$state_directory" in
+            "${TMPDIR:-/tmp}"/gaudere-schema-v4-deploy.*/*) ;;
+            *) fail "test-mode provenance bypass is restricted to the staged-deployment fixture" ;;
+        esac
         provenance_validator=
         candidate_image=${candidate_image:-synthetic-candidate}
         expected_agent_ref=${expected_agent_ref:-1111111111111111111111111111111111111111}
