@@ -22,17 +22,18 @@ valid_image_ref()
     esac
 }
 
-valid_image_id()
+normalize_image_id()
 {
     value=$1
     case "$value" in
         sha256:*) digest=${value#sha256:} ;;
-        *) return 1 ;;
+        *) digest=$value ;;
     esac
     case "$digest" in
         *[!0-9a-f]*|'') return 1 ;;
     esac
-    [ "${#digest}" -eq 64 ]
+    [ "${#digest}" -eq 64 ] || return 1
+    printf 'sha256:%s\n' "$digest"
 }
 
 cleanup()
@@ -54,7 +55,7 @@ valid_image_ref "$rollback_image" \
 
 command -v "$podman_command" >/dev/null 2>&1 \
     || fail "required command not found: $podman_command"
-for command in date dirname ln mkdir mktemp rm; do
+for command in chmod date dirname ln mkdir mktemp rm; do
     command -v "$command" >/dev/null 2>&1 \
         || fail "required command not found: $command"
 done
@@ -65,17 +66,19 @@ if "$podman_command" image exists "$rollback_image" >/dev/null 2>&1; then
     fail "rollback tag already exists and will not be overwritten: $rollback_image"
 fi
 
-current_image_id=$("$podman_command" image inspect --format '{{.Id}}' "$current_image") \
+observed_current_image_id=$("$podman_command" image inspect --format '{{.Id}}' "$current_image") \
     || fail "cannot resolve current image ID"
-valid_image_id "$current_image_id" \
+current_image_id=$(normalize_image_id "$observed_current_image_id") \
     || fail "current image did not resolve to one full sha256 ID"
 
 # Tag the captured immutable ID, never the mutable name. This operation must happen
 # before any candidate build that could move localhost/gaudere-agent:dev.
 "$podman_command" tag "$current_image_id" "$rollback_image" \
     || fail "cannot create rollback tag"
-rollback_image_id=$("$podman_command" image inspect --format '{{.Id}}' "$rollback_image") \
+observed_rollback_image_id=$("$podman_command" image inspect --format '{{.Id}}' "$rollback_image") \
     || fail "cannot resolve rollback image ID"
+rollback_image_id=$(normalize_image_id "$observed_rollback_image_id") \
+    || fail "rollback image did not resolve to one full sha256 ID"
 [ "$rollback_image_id" = "$current_image_id" ] \
     || fail "rollback tag does not resolve to the captured image ID"
 

@@ -47,10 +47,12 @@ jobs:
               > "$RUNNER_TEMP/image-build.out"
           cat "$RUNNER_TEMP/image-build.out"
           candidate_id=$(podman image inspect --format '{{.Id}}' "$candidate")
+          candidate_id="sha256:${candidate_id#sha256:}"
 
           podman pull registry.fedoraproject.org/fedora:44
           rollback_id=$(podman image inspect --format '{{.Id}}' \
               registry.fedoraproject.org/fedora:44)
+          rollback_id="sha256:${rollback_id#sha256:}"
           podman tag "$rollback_id" "$rollback"
 
           workspace=$(mktemp -d "$RUNNER_TEMP/gaudere-image-proof.XXXXXX")

@@ -27,10 +27,13 @@ wrong_ref=ffffffffffffffffffffffffffffffffffffffff
 candidate_id=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 rollback_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 drift_id=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+candidate_observed=${candidate_id#sha256:}
+rollback_observed=${rollback_id#sha256:}
+drift_observed=${drift_id#sha256:}
 
-printf '%s\n' "$candidate_id" > "$fake_state/candidate.id"
-printf '%s\n' "$rollback_id" > "$fake_state/rollback.id"
-printf '%s\n' "$candidate_id" > "$fake_state/current.id"
+printf '%s\n' "$candidate_observed" > "$fake_state/candidate.id"
+printf '%s\n' "$rollback_observed" > "$fake_state/rollback.id"
+printf '%s\n' "$candidate_observed" > "$fake_state/current.id"
 printf '%s\n' "$agent_ref" > "$fake_state/agent.ref"
 printf '%s\n' "$core_ref" > "$fake_state/core.ref"
 
@@ -120,7 +123,7 @@ export GAUDERE_FAKE_CANDIDATE="$candidate"
 export GAUDERE_FAKE_ROLLBACK="$rollback"
 export GAUDERE_FAKE_CURRENT="$current"
 export GAUDERE_FAKE_COPY_LOG="$copy_log"
-export GAUDERE_FAKE_DRIFT_ID="$drift_id"
+export GAUDERE_FAKE_DRIFT_ID="$drift_observed"
 
 printf '\n==> exact candidate provenance succeeds\n'
 PODMAN="$fake_podman" sh "$verifier" \
@@ -180,8 +183,8 @@ run_validator()
 }
 
 printf '\n==> complete disposable proof preserves both image identities\n'
-printf '%s\n' "$candidate_id" > "$fake_state/candidate.id"
-printf '%s\n' "$rollback_id" > "$fake_state/rollback.id"
+printf '%s\n' "$candidate_observed" > "$fake_state/candidate.id"
+printf '%s\n' "$rollback_observed" > "$fake_state/rollback.id"
 GAUDERE_FAKE_DRIFT=none run_validator > "$workspace/validator.out"
 grep -q '^image_tag_drift=NONE$' "$workspace/validator.out"
 grep -q '^provider_effects=0$' "$workspace/validator.out"
@@ -191,8 +194,8 @@ grep -q '^gaudere schema v4 image provenance validation: PASS$' \
 grep -q "image=$candidate archive=$archive task=history-task" "$copy_log"
 
 printf '\n==> candidate tag drift during proof fails closed\n'
-printf '%s\n' "$candidate_id" > "$fake_state/candidate.id"
-printf '%s\n' "$rollback_id" > "$fake_state/rollback.id"
+printf '%s\n' "$candidate_observed" > "$fake_state/candidate.id"
+printf '%s\n' "$rollback_observed" > "$fake_state/rollback.id"
 if GAUDERE_FAKE_DRIFT=candidate run_validator \
         > "$workspace/candidate-drift.out" 2> "$workspace/candidate-drift.err"; then
     printf 'validator accepted candidate tag drift\n' >&2
@@ -201,8 +204,8 @@ fi
 grep -q 'image ID mismatch' "$workspace/candidate-drift.err"
 
 printf '\n==> rollback tag drift during proof fails closed\n'
-printf '%s\n' "$candidate_id" > "$fake_state/candidate.id"
-printf '%s\n' "$rollback_id" > "$fake_state/rollback.id"
+printf '%s\n' "$candidate_observed" > "$fake_state/candidate.id"
+printf '%s\n' "$rollback_observed" > "$fake_state/rollback.id"
 if GAUDERE_FAKE_DRIFT=rollback run_validator \
         > "$workspace/rollback-drift.out" 2> "$workspace/rollback-drift.err"; then
     printf 'validator accepted rollback tag drift\n' >&2
@@ -211,8 +214,8 @@ fi
 grep -q 'rollback image drifted' "$workspace/rollback-drift.err"
 
 printf '\n==> pre-existing derived-tag drift fails before disposable work\n'
-printf '%s\n' "$drift_id" > "$fake_state/candidate.id"
-printf '%s\n' "$rollback_id" > "$fake_state/rollback.id"
+printf '%s\n' "$drift_observed" > "$fake_state/candidate.id"
+printf '%s\n' "$rollback_observed" > "$fake_state/rollback.id"
 lines_before=$(wc -l < "$copy_log")
 if GAUDERE_FAKE_DRIFT=none run_validator \
         > "$workspace/pre-drift.out" 2> "$workspace/pre-drift.err"; then

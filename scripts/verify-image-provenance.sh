@@ -18,17 +18,18 @@ valid_commit()
     [ "${#value}" -eq 40 ]
 }
 
-valid_image_id()
+normalize_image_id()
 {
     value=$1
     case "$value" in
         sha256:*) digest=${value#sha256:} ;;
-        *) return 1 ;;
+        *) digest=$value ;;
     esac
     case "$digest" in
         *[!0-9a-f]*|'') return 1 ;;
     esac
-    [ "${#digest}" -eq 64 ]
+    [ "${#digest}" -eq 64 ] || return 1
+    printf 'sha256:%s\n' "$digest"
 }
 
 [ "$#" -ge 3 ] && [ "$#" -le 4 ] \
@@ -48,8 +49,10 @@ valid_commit "$expected_agent_ref" \
 valid_commit "$expected_core_ref" \
     || fail "expected Core revision must be one 40-character lowercase Git SHA"
 if [ -n "$expected_image_id" ]; then
-    valid_image_id "$expected_image_id" \
+    normalized_expected_image_id=$(normalize_image_id "$expected_image_id") \
         || fail "expected image ID must be one full sha256 image ID"
+    [ "$normalized_expected_image_id" = "$expected_image_id" ] \
+        || fail "expected image ID must use the sha256:<64-hex> form"
 fi
 
 command -v "$podman_command" >/dev/null 2>&1 \
@@ -57,9 +60,9 @@ command -v "$podman_command" >/dev/null 2>&1 \
 "$podman_command" image exists "$image" \
     || fail "image does not exist: $image"
 
-image_id=$("$podman_command" image inspect --format '{{.Id}}' "$image") \
+observed_image_id=$("$podman_command" image inspect --format '{{.Id}}' "$image") \
     || fail "cannot resolve image ID: $image"
-valid_image_id "$image_id" \
+image_id=$(normalize_image_id "$observed_image_id") \
     || fail "image did not resolve to one full sha256 ID: $image"
 if [ -n "$expected_image_id" ] && [ "$image_id" != "$expected_image_id" ]; then
     fail "image ID mismatch for $image (expected $expected_image_id, found $image_id)"

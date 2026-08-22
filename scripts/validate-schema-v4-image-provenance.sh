@@ -31,17 +31,18 @@ valid_image_ref()
     esac
 }
 
-valid_image_id()
+normalize_image_id()
 {
     value=$1
     case "$value" in
         sha256:*) digest=${value#sha256:} ;;
-        *) return 1 ;;
+        *) digest=$value ;;
     esac
     case "$digest" in
         *[!0-9a-f]*|'') return 1 ;;
     esac
-    [ "${#digest}" -eq 64 ]
+    [ "${#digest}" -eq 64 ] || return 1
+    printf 'sha256:%s\n' "$digest"
 }
 
 resolve_image_id()
@@ -49,9 +50,9 @@ resolve_image_id()
     reference=$1
     "$podman_command" image exists "$reference" \
         || fail "image does not exist: $reference"
-    resolved=$("$podman_command" image inspect --format '{{.Id}}' "$reference") \
+    observed=$("$podman_command" image inspect --format '{{.Id}}' "$reference") \
         || fail "cannot resolve image ID: $reference"
-    valid_image_id "$resolved" \
+    resolved=$(normalize_image_id "$observed") \
         || fail "image did not resolve to one full sha256 ID: $reference"
     printf '%s\n' "$resolved"
 }
@@ -84,10 +85,14 @@ valid_image_ref "$rollback_image" \
     || fail "GAUDERE_ROLLBACK_IMAGE must name an explicit rollback image"
 [ "$candidate_image" != "$rollback_image" ] \
     || fail "candidate and rollback image references must differ"
-valid_image_id "$expected_candidate_id" \
+normalized_candidate_id=$(normalize_image_id "$expected_candidate_id") \
     || fail "GAUDERE_EXPECTED_CANDIDATE_ID must be one full sha256 image ID"
-valid_image_id "$expected_rollback_id" \
+[ "$normalized_candidate_id" = "$expected_candidate_id" ] \
+    || fail "GAUDERE_EXPECTED_CANDIDATE_ID must use sha256:<64-hex> form"
+normalized_rollback_id=$(normalize_image_id "$expected_rollback_id") \
     || fail "GAUDERE_EXPECTED_ROLLBACK_ID must be one full sha256 image ID"
+[ "$normalized_rollback_id" = "$expected_rollback_id" ] \
+    || fail "GAUDERE_EXPECTED_ROLLBACK_ID must use sha256:<64-hex> form"
 [ -f "$archive" ] || fail "backup archive not found: $archive"
 [ ! -L "$archive" ] || fail "backup archive must not be a symbolic link"
 [ -x "$provenance_verifier" ] \
