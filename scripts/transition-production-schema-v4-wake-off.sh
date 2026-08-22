@@ -284,6 +284,25 @@ post_swap_rollback()
         return 1
     }
 
+    # The state-only engine may already have crossed the swap and successfully
+    # restored v3 before returning failure. Recognize that exact state first; do
+    # not require a rollback directory that the inner engine has already consumed.
+    current_schema=$(schema_version "$state_directory/state.db" 2>/dev/null || true)
+    if [ "$current_schema" = "3" ] && verify_v3_snapshot; then
+        restore_profile || {
+            printf 'transaction_rollback=MANUAL_REVIEW profile_restore_failed\n' >&2
+            return 1
+        }
+        old_profile_resolves_rollback || {
+            printf 'transaction_rollback=MANUAL_REVIEW rollback_image_identity_failed\n' >&2
+            return 1
+        }
+        printf 'transaction_rollback=PASS_ALREADY_RESTORED_BY_STAGE\n' >&2
+        printf 'restored_schema=3\n' >&2
+        printf 'service_left=inactive\n' >&2
+        return 0
+    fi
+
     [ -n "$rollback_directory" ] && [ -d "$rollback_directory" ] \
         || {
             printf 'transaction_rollback=MANUAL_REVIEW rollback_directory_missing\n' >&2
@@ -454,7 +473,7 @@ if [ "$test_mode" = "0" ]; then
         || fail "control override is restricted to synthetic test mode"
 fi
 
-for command in cmp flock grep install mkdir mktemp mv python3 realpath rm sed sha256sum tail; do
+for command in cmp dirname flock grep install mkdir mktemp mv python3 realpath rm sed sha256sum tail tee; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 command -v "$systemctl_command" >/dev/null 2>&1 || fail "systemctl command not found"
@@ -506,7 +525,10 @@ printf '%s\n' "$before_task" | grep -qx \
     || fail "representative provider Task lacks durable usage metadata"
 
 recovery_armed=1
-trap recover EXIT HUP INT TERM
+trap recover EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 set_phase stopping
 service_stop_attempted=1
 "$systemctl_command" --user stop "$service_name"
