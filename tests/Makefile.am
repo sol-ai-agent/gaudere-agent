@@ -64,7 +64,8 @@ explicit_wake_integration_test_SOURCES = \
 	../src/TaskReport.hpp \
 	../src/WorkController.cpp \
 	../src/WorkController.hpp
-explicit_wake_integration_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+explicit_wake_integration_test_LDADD = \
+	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 file_secret_source_test_SOURCES = \
 	file_secret_source_test.cpp \
