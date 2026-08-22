@@ -21,6 +21,11 @@ jobs:
           sh -n scripts/install-openai-user-service.sh
           sh -n scripts/validate-openai-service-capability.sh
 
+      - name: Exercise schema-v3/v4 recovery compatibility
+        run: |
+          set -eu
+          sh tests/openai_installer_schema_compatibility_test.sh
+
       - name: Exercise stopped-state activation fence
         run: |
           set -eu

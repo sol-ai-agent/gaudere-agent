@@ -18,7 +18,7 @@ fail()
     exit 1
 }
 
-for command in "$podman_command" systemctl python3 flock install; do
+for command in "$podman_command" systemctl python3 flock install mktemp rm; do
     command -v "$command" >/dev/null 2>&1 \
         || fail "required command not found: $command"
 done
@@ -46,7 +46,13 @@ with sqlite3.connect(sys.argv[1]) as db:
     print(db.execute("PRAGMA user_version").fetchone()[0])
 PY
 )
-[ "$schema" = "3" ] || fail "provider capability requires production schema v3 (found $schema)"
+case "$schema" in
+    3|4)
+        ;;
+    *)
+        fail "provider capability requires production schema v3 or v4 (found $schema)"
+        ;;
+esac
 
 # Capability activation must never turn inherited provider work into an external
 # call merely because its handler became available. Refuse every nonterminal task
@@ -100,6 +106,88 @@ control_usage=$("$podman_command" run --rm \
     "$image" 2>&1 || true)
 printf '%s\n' "$control_usage" | grep -q 'reflect ID OBJECTIVE' \
     || fail "runtime image predates bounded reflection; rebuild current main first"
+
+# Schema v4 support is a recovery compatibility gate, not WakeIntent activation.
+# Prove that the selected image can reopen a consistent disposable copy through its
+# default path. The probe has no network, secret, provider configuration, or
+# --wake-intents flag and never mounts the production state directory.
+if [ "$schema" = "4" ]; then
+    compatibility_root=${TMPDIR:-/tmp}
+    compatibility_prefix="$compatibility_root/gaudere-openai-schema-v4."
+    compatibility_directory=
+
+    cleanup_compatibility()
+    {
+        case "$compatibility_directory" in
+            "")
+                ;;
+            "$compatibility_prefix"*)
+                rm -rf -- "$compatibility_directory"
+                compatibility_directory=
+                ;;
+            *)
+                printf 'gaudere OpenAI service install: refusing unsafe temporary cleanup path: %s\n' \
+                    "$compatibility_directory" >&2
+                ;;
+        esac
+    }
+
+    trap cleanup_compatibility EXIT
+    trap 'cleanup_compatibility; exit 1' HUP INT TERM
+    compatibility_directory=$(mktemp -d "${compatibility_prefix}XXXXXX")
+    compatibility_database="$compatibility_directory/state.db"
+
+    python3 - "$state_database" "$compatibility_database" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+source_uri = pathlib.Path(sys.argv[1]).resolve().as_uri() + "?mode=ro"
+with sqlite3.connect(source_uri, uri=True) as source:
+    source.execute("PRAGMA query_only=ON")
+    with sqlite3.connect(sys.argv[2]) as target:
+        source.backup(target)
+        if target.execute("PRAGMA user_version").fetchone()[0] != 4:
+            raise SystemExit("disposable compatibility copy is not schema v4")
+        if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise SystemExit("disposable compatibility copy failed integrity_check")
+PY
+
+    if ! compatibility_output=$("$podman_command" run --rm \
+        --network none \
+        --userns keep-id \
+        --read-only \
+        --read-only-tmpfs=true \
+        --cap-drop=all \
+        --security-opt=no-new-privileges \
+        --pids-limit 64 \
+        --memory 256m \
+        --volume "$compatibility_directory:/var/lib/gaudere:Z" \
+        "$image" --state /var/lib/gaudere/state.db --check 2>&1); then
+        printf '%s\n' "$compatibility_output" >&2
+        fail "runtime image cannot safely reopen schema v4 without --wake-intents"
+    fi
+    printf '%s\n' "$compatibility_output" | grep -q '^gaudere-agent: safe$' \
+        || fail "runtime image schema-v4 compatibility probe did not finish safe"
+    if printf '%s\n' "$compatibility_output" | grep -q 'explicit wake enabled'; then
+        fail "runtime image schema-v4 compatibility probe enabled WakeIntent"
+    fi
+
+    python3 - "$compatibility_database" <<'PY'
+import sqlite3
+import sys
+
+with sqlite3.connect(sys.argv[1]) as db:
+    if db.execute("PRAGMA user_version").fetchone()[0] != 4:
+        raise SystemExit("runtime image changed the disposable schema version")
+    if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise SystemExit("runtime image left the disposable copy inconsistent")
+PY
+
+    cleanup_compatibility
+    trap - EXIT HUP INT TERM
+    printf 'gaudere OpenAI service install: schema v4 default reopen probe passed without WakeIntent\n'
+fi
 
 "$podman_command" secret exists "$secret_name" \
     || fail "Podman secret $secret_name does not exist; install it with scripts/install-openai-secret.sh"
