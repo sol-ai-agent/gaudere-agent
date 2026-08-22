@@ -32,19 +32,6 @@ normalize_image_id()
     printf 'sha256:%s\n' "$digest"
 }
 
-render_quadlet()
-{
-    source=$1
-    destination=$2
-    immutable_image=$3
-    python3 - "$source" "$destination" "$immutable_image" <<'PY'
-import pathlib
-import sys
-
-source, destination, image = map(pathlib.Path, sys.argv[1:3]) + (None,)
-PY
-}
-
 for command in "$podman_command" systemctl python3 flock install mktemp rm; do
     command -v "$command" >/dev/null 2>&1 \
         || fail "required command not found: $command"
@@ -242,10 +229,9 @@ import sys
 source = pathlib.Path(sys.argv[1])
 destination = pathlib.Path(sys.argv[2])
 image_id = sys.argv[3]
-text = source.read_text(encoding="utf-8")
-lines = text.splitlines(keepends=True)
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
 indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
-if indexes != [next((i for i, line in enumerate(lines) if line.startswith("Image=")), -1)]:
+if len(indexes) != 1:
     raise SystemExit("OpenAI Quadlet template must contain exactly one Image= line")
 index = indexes[0]
 ending = "\n" if lines[index].endswith("\n") else ""
