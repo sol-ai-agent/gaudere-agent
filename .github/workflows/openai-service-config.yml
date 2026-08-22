@@ -35,11 +35,16 @@ jobs:
           config_home="$workspace/config"
           data_home="$workspace/data"
           state="$data_home/gaudere/state"
+          image_id=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
           mkdir -p "$fakebin" "$state"
 
           cat > "$fakebin/podman" <<'SH'
           #!/bin/sh
           if [ "$1" = "image" ] && [ "$2" = "exists" ]; then exit 0; fi
+          if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+              printf 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n'
+              exit 0
+          fi
           if [ "$1" = "run" ]; then
               if [ "${GAUDERE_FAKE_OLD_IMAGE:-0}" = "1" ]; then
                   printf 'Usage: gaudere-control --socket PATH [echo ID TEXT | openai ID TEXT | task ID | budget]\n' >&2
@@ -77,8 +82,9 @@ jobs:
           XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
           sh scripts/install-openai-user-service.sh > "$workspace/install.out"
           cat "$workspace/install.out"
-          cmp deploy/quadlet/gaudere-agent-openai.container.in \
+          grep -qx "Image=$image_id" \
               "$config_home/containers/systemd/gaudere-agent.container"
+          grep -q "runtime_image_id=$image_id" "$workspace/install.out"
           grep -q 'no provider task was submitted and the service remains stopped' \
               "$workspace/install.out"
 
