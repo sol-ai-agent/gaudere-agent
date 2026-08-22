@@ -72,7 +72,9 @@ jobs:
           sh -n agent/scripts/validate-openai-authorized.sh
           sh -n agent/scripts/validate-live-control.sh
           sh -n agent/scripts/validate-schema-migration-copy.sh
+          sh -n agent/scripts/validate-schema-v4-migration-copy.sh
           sh -n agent/scripts/deploy-schema-v3.sh
+          sh -n agent/tests/schema_v4_migration_copy_validator_test.sh
 
       - name: Build and install Gaudere
         run: |
@@ -170,6 +172,13 @@ jobs:
           grep -q '^status=succeeded$' "$workspace/migration.out"
           grep -q '^result_output="durable v2 result"$' "$workspace/migration.out"
           grep -q '^gaudere schema migration copy validation: PASS$' "$workspace/migration.out"
+
+      - name: Validate schema v4 migration and rollback proof
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          GAUDERE_AGENT_BIN="$GITHUB_WORKSPACE/agent/build/src/gaudere-agent" \
+            sh "$GITHUB_WORKSPACE/agent/tests/schema_v4_migration_copy_validator_test.sh"
 
       - name: Validate staged production schema deployment
         run: |
