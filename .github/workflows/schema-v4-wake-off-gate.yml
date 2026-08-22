@@ -1,0 +1,26 @@
+name: Schema v4 wake-off service gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          set -eu
+          sh -n scripts/validate-schema-v4-service-wake-off.sh
+          sh -n tests/schema_v4_wake_off_service_gate_test.sh
+
+      - name: Exercise wake-off gate without production, secret, or provider
+        run: |
+          set -eu
+          sh tests/schema_v4_wake_off_service_gate_test.sh
