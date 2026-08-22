@@ -2,7 +2,10 @@
 
 Status: **PREP ONLY / SOURCE-AUDIT ONLY**  
 Work item: [gaudere-agent#56](https://github.com/sol-ai-agent/gaudere-agent/issues/56)  
-Audited Agent baseline: `2972ba796f0ef44d438e16efab4d89fb296d5574`  
+Audited Agent integration baseline: `2972ba796f0ef44d438e16efab4d89fb296d5574`  
+Reconciled `main`: `5287ad0387425213b1873c3f64fea118bf3e32c7`, with the same
+source tree (`673b1b8e192812b5a7c9de20be6be4c0a1585df3`) after a transient
+one-shot branch-cleanup workflow was added and removed.  
 Audited Core pin: `c24c40b84a12e51515cee4611e3dc79e9fd83892`
 
 This document does not authorize a production schema migration, an installed
