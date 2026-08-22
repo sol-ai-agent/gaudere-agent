@@ -12,7 +12,23 @@ state_directory="$workspace/state"
 temporary_root="$workspace/tmp"
 podman_log="$workspace/podman.log"
 target_profile="$config_home/containers/systemd/gaudere-agent.container"
+expected_profile="$workspace/profile.expected"
+expected_image_id=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 mkdir -p "$fakebin" "$state_directory" "$temporary_root"
+
+python3 - "$profile" "$expected_profile" "$expected_image_id" <<'PY'
+import pathlib
+import sys
+source, target = map(pathlib.Path, sys.argv[1:3])
+image = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
+assert len(indexes) == 1
+index = indexes[0]
+ending = "\n" if lines[index].endswith("\n") else ""
+lines[index] = f"Image={image}{ending}"
+target.write_text("".join(lines), encoding="utf-8")
+PY
 
 cat > "$fakebin/podman" <<'SH'
 #!/bin/sh
@@ -21,6 +37,10 @@ set -eu
 log=${GAUDERE_FAKE_PODMAN_LOG:?}
 
 if [ "$1" = "image" ] && [ "$2" = "exists" ]; then
+    exit 0
+fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+    printf '%s\n' "${GAUDERE_FAKE_IMAGE_ID:?}"
     exit 0
 fi
 if [ "$1" = "secret" ] && [ "$2" = "exists" ]; then
@@ -170,6 +190,7 @@ run_installer()
     XDG_CONFIG_HOME="$config_home" \
     GAUDERE_STATE_DIR="$state_directory" \
     GAUDERE_FAKE_PODMAN_LOG="$podman_log" \
+    GAUDERE_FAKE_IMAGE_ID="$expected_image_id" \
     sh "$installer"
 }
 
@@ -188,7 +209,9 @@ for version in 3 4; do
     : > "$podman_log"
     run_installer > "$workspace/schema-$version.out"
 
-    cmp "$profile" "$target_profile"
+    cmp "$expected_profile" "$target_profile"
+    grep -qx "Image=$expected_image_id" "$target_profile"
+    grep -q "runtime_image_id=$expected_image_id" "$workspace/schema-$version.out"
     grep -q 'no provider task was submitted and the service remains stopped' \
         "$workspace/schema-$version.out"
     if grep -q -- '--wake-intents' "$target_profile"; then
@@ -259,4 +282,4 @@ grep -q 'schema-v4 compatibility probe enabled WakeIntent' \
 grep -qx 'preserve-existing-profile' "$target_profile"
 test -z "$(find "$temporary_root" -mindepth 1 -maxdepth 1 -print -quit)"
 
-printf 'gaudere OpenAI installer schema compatibility: PASS\n'
+printf 'gaudere OpenAI installer schema compatibility test: PASS\n'
