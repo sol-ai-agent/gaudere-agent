@@ -221,6 +221,7 @@ PY
 
 run_gate()
 {
+    XDG_CONFIG_HOME="$config_home" \
     GAUDERE_TEST_MODE=1 \
     GAUDERE_SERVICE_NAME=gaudere-agent.service \
     GAUDERE_STATE_DIR="$state_directory" \
