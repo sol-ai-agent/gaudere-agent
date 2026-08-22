@@ -1,0 +1,23 @@
+name: OpenAI installer transaction
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'scripts/install-openai-user-service.sh'
+      - 'tests/openai_installer_profile_transaction_test.sh'
+      - '.github/workflows/openai-installer-transaction.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  rollback-on-reload-failure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: sh -n scripts/install-openai-user-service.sh && sh -n tests/openai_installer_profile_transaction_test.sh
+      - name: Exercise transactional profile replacement
+        run: sh tests/openai_installer_profile_transaction_test.sh

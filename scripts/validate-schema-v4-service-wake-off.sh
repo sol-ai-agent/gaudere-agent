@@ -17,6 +17,7 @@ systemctl_command=${SYSTEMCTL:-systemctl}
 journalctl_command=${JOURNALCTL:-journalctl}
 podman_command=${PODMAN:-podman}
 service_name=${GAUDERE_SERVICE_NAME:-}
+container_name=${GAUDERE_CONTAINER:-gaudere-agent}
 state_directory=${GAUDERE_STATE_DIR:-}
 runtime_image=${GAUDERE_RUNTIME_IMAGE:-localhost/gaudere-agent:dev}
 expected_image_id=${GAUDERE_EXPECTED_RUNTIME_IMAGE_ID:-}
@@ -29,6 +30,7 @@ target_profile="$quadlet_directory/gaudere-agent.container"
 phase=preflight
 workspace=
 profile_backup=
+expected_profile=
 profile_replaced=0
 service_started=0
 success=0
@@ -38,6 +40,20 @@ fail()
     printf 'gaudere schema v4 wake-off service gate: phase=%s: %s\n' \
         "$phase" "$*" >&2
     exit 1
+}
+
+normalize_image_id()
+{
+    value=$1
+    case "$value" in
+        sha256:*) digest=${value#sha256:} ;;
+        *) digest=$value ;;
+    esac
+    case "$digest" in
+        *[!0-9a-f]*|'') return 1 ;;
+    esac
+    [ "${#digest}" -eq 64 ] || return 1
+    printf 'sha256:%s\n' "$digest"
 }
 
 [ "$#" -eq 1 ] || fail "usage: $0 REPRESENTATIVE_PROVIDER_TASK_ID"
@@ -79,6 +95,7 @@ command -v "$podman_command" >/dev/null 2>&1 \
 state_database="$state_directory/state.db"
 workspace=$(mktemp -d "${TMPDIR:-/tmp}/gaudere-v4-wake-off.XXXXXX")
 profile_backup="$workspace/profile.before"
+expected_profile="$workspace/profile.expected"
 before_snapshot="$workspace/state.before.json"
 after_snapshot="$workspace/state.after.json"
 install -m 0600 "$target_profile" "$profile_backup"
@@ -86,6 +103,16 @@ install -m 0600 "$target_profile" "$profile_backup"
 service_state()
 {
     "$systemctl_command" --user is-active "$service_name" 2>/dev/null || true
+}
+
+running_container_image_id()
+{
+    raw=$(
+        "$podman_command" container inspect --format '{{.Image}}' "$container_name" 2>/dev/null \
+            || true
+    )
+    [ -n "$raw" ] || return 1
+    normalize_image_id "$raw"
 }
 
 restore_on_failure()
@@ -246,6 +273,12 @@ observe_live()
     label=$1
     [ "$(service_state)" = "active" ] || fail "$service_name is not active during $label"
 
+    actual_running_id=$(running_container_image_id) \
+        || fail "cannot resolve running container image ID during $label"
+    [ "$actual_running_id" = "$expected_image_id" ] \
+        || fail "running container image drift during $label: expected $expected_image_id found $actual_running_id"
+    printf 'running_image_id=%s\n' "$actual_running_id"
+
     budget=$(sh "$control_script" budget)
     printf '%s\n' "$budget"
     printf '%s\n' "$budget" | grep -qx 'provider_enabled=true' \
@@ -288,20 +321,48 @@ observed_image_id=$(
         || true
 )
 [ -n "$observed_image_id" ] || fail "runtime image does not resolve: $runtime_image"
+normalized_observed_image_id=$(normalize_image_id "$observed_image_id") \
+    || fail "runtime image did not resolve to one full sha256 ID"
 if [ -n "$expected_image_id" ]; then
-    [ "$observed_image_id" = "$expected_image_id" ] \
-        || fail "runtime image ID drift: expected $expected_image_id found $observed_image_id"
+    normalized_expected_image_id=$(normalize_image_id "$expected_image_id") \
+        || fail "expected runtime image ID must be one full sha256 image ID"
+    [ "$normalized_expected_image_id" = "$expected_image_id" ] \
+        || fail "expected runtime image ID must use sha256:<64-hex> form"
+    [ "$normalized_observed_image_id" = "$expected_image_id" ] \
+        || fail "runtime image ID drift: expected $expected_image_id found $normalized_observed_image_id"
+else
+    expected_image_id=$normalized_observed_image_id
 fi
-printf 'runtime_image_id=%s\n' "$observed_image_id"
+printf 'runtime_image_id=%s\n' "$normalized_observed_image_id"
+
+python3 - "$source_profile" "$expected_profile" "$expected_image_id" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+image_id = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
+if len(indexes) != 1:
+    raise SystemExit("OpenAI Quadlet template must contain exactly one Image= line")
+index = indexes[0]
+ending = "\n" if lines[index].endswith("\n") else ""
+lines[index] = f"Image={image_id}{ending}"
+destination.write_text("".join(lines), encoding="utf-8")
+PY
 
 phase=profile-install
-sh "$installer"
+GAUDERE_IMAGE="$expected_image_id" sh "$installer"
 profile_replaced=1
-cmp "$source_profile" "$target_profile" \
-    || fail "installed profile differs from reviewed OpenAI template"
+cmp "$expected_profile" "$target_profile" \
+    || fail "installed profile differs from reviewed template pinned to the candidate image ID"
+grep -qx "Image=$expected_image_id" "$target_profile" \
+    || fail "installed profile is not pinned to the candidate image ID"
 if grep -q -- '--wake-intents' "$target_profile"; then
     fail "installed profile contains --wake-intents"
 fi
+printf 'profile_image_id=%s\n' "$expected_image_id"
 printf 'profile_wake_flag=absent\n'
 
 phase=first-live-probe
@@ -353,12 +414,19 @@ if printf '%s\n' "$final_journal" | grep -q 'explicit wake enabled'; then
     fail "final service log reports explicit wake enabled"
 fi
 [ "$(service_state)" = "active" ] || fail "service is not active after final restart"
-cmp "$source_profile" "$target_profile" || fail "installed profile drifted after restart"
-final_image_id=$(
+cmp "$expected_profile" "$target_profile" || fail "installed profile drifted after restart"
+final_tag_image_id=$(
     "$podman_command" image inspect --format '{{.Id}}' "$runtime_image" 2>/dev/null \
         || true
 )
-[ "$final_image_id" = "$observed_image_id" ] || fail "runtime image ID drifted during gate"
+normalized_final_tag_image_id=$(normalize_image_id "$final_tag_image_id") \
+    || fail "runtime image tag no longer resolves to a full image ID"
+[ "$normalized_final_tag_image_id" = "$expected_image_id" ] \
+    || fail "runtime image tag drifted during gate"
+final_running_id=$(running_container_image_id) \
+    || fail "cannot resolve final running container image ID"
+[ "$final_running_id" = "$expected_image_id" ] \
+    || fail "final running container is not using the pinned candidate image"
 
 success=1
 trap - EXIT HUP INT TERM
@@ -366,4 +434,5 @@ rm -rf -- "$workspace"
 printf 'provider_effects=0\n'
 printf 'wake_effects=0\n'
 printf 'service_final=active\n'
+printf 'runtime_image_identity=PASS\n'
 printf 'gaudere schema v4 wake-off service gate: PASS\n'

@@ -14,6 +14,7 @@ control_log="$workspace/control.log"
 service_log="$workspace/service.log"
 target_profile="$config_home/containers/systemd/gaudere-agent.container"
 old_profile="$workspace/profile.old"
+expected_id=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 mkdir -p "$fakebin" "$state_directory" "$(dirname "$target_profile")"
 printf 'inactive\n' > "$state_file"
 printf 'OLD PROFILE\n' > "$old_profile"
@@ -71,6 +72,10 @@ if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
     printf '%s\n' "${GAUDERE_FAKE_IMAGE_ID:?}"
     exit 0
 fi
+if [ "$1" = "container" ] && [ "$2" = "inspect" ]; then
+    printf '%s\n' "${GAUDERE_FAKE_RUNNING_IMAGE_ID:-${GAUDERE_FAKE_IMAGE_ID:?}}"
+    exit 0
+fi
 exit 92
 SH
 chmod +x "$fakebin/podman"
@@ -79,9 +84,21 @@ cat > "$workspace/installer.sh" <<'SH'
 #!/bin/sh
 set -eu
 mkdir -p "$(dirname "${GAUDERE_FAKE_TARGET_PROFILE:?}")"
-cp "${GAUDERE_FAKE_SOURCE_PROFILE:?}" "${GAUDERE_FAKE_TARGET_PROFILE:?}"
+python3 - "${GAUDERE_FAKE_SOURCE_PROFILE:?}" "${GAUDERE_FAKE_TARGET_PROFILE:?}" "${GAUDERE_IMAGE:?}" <<'PY'
+import pathlib
+import sys
+source, target = map(pathlib.Path, sys.argv[1:3])
+image = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
+assert len(indexes) == 1
+index = indexes[0]
+ending = "\n" if lines[index].endswith("\n") else ""
+lines[index] = f"Image={image}{ending}"
+target.write_text("".join(lines), encoding="utf-8")
+PY
 chmod 600 "${GAUDERE_FAKE_TARGET_PROFILE:?}"
-printf 'synthetic installer: profile installed, service remains stopped\n'
+printf 'synthetic installer: profile pinned to %s, service remains stopped\n' "$GAUDERE_IMAGE"
 SH
 chmod +x "$workspace/installer.sh"
 
@@ -225,7 +242,7 @@ run_gate()
     GAUDERE_TEST_MODE=1 \
     GAUDERE_SERVICE_NAME=gaudere-agent.service \
     GAUDERE_STATE_DIR="$state_directory" \
-    GAUDERE_EXPECTED_RUNTIME_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc \
+    GAUDERE_EXPECTED_RUNTIME_IMAGE_ID="$expected_id" \
     GAUDERE_OPENAI_INSTALLER="$workspace/installer.sh" \
     GAUDERE_CONTROL_SCRIPT="$workspace/control.sh" \
     GAUDERE_FAKE_SOURCE_PROFILE="$source_profile" \
@@ -233,7 +250,7 @@ run_gate()
     GAUDERE_FAKE_SERVICE_STATE="$state_file" \
     GAUDERE_FAKE_SERVICE_LOG="$service_log" \
     GAUDERE_FAKE_CONTROL_LOG="$control_log" \
-    GAUDERE_FAKE_IMAGE_ID=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc \
+    GAUDERE_FAKE_IMAGE_ID="$expected_id" \
     SYSTEMCTL="$fakebin/systemctl" \
     JOURNALCTL="$fakebin/journalctl" \
     PODMAN="$fakebin/podman" \
@@ -249,22 +266,24 @@ reset_case()
     cp "$old_profile" "$target_profile"
 }
 
-# Success: service is left active, profile is the reviewed wake-off template, and
-# only observational live-control commands were issued.
+# Success: service is left active, profile is pinned to the reviewed immutable image,
+# and only observational live-control commands were issued.
 reset_case
 run_gate > "$workspace/pass.out"
 cat "$workspace/pass.out"
 grep -q '^schema_before=4$' "$workspace/pass.out"
 grep -q '^wake_rows_before=0$' "$workspace/pass.out"
 grep -q '^provider_budget_rows_before=3$' "$workspace/pass.out"
+grep -q "^profile_image_id=$expected_id$" "$workspace/pass.out"
 grep -q '^profile_wake_flag=absent$' "$workspace/pass.out"
 grep -q '^durable_state_identity=PASS$' "$workspace/pass.out"
 grep -q '^provider_effects=0$' "$workspace/pass.out"
 grep -q '^wake_effects=0$' "$workspace/pass.out"
 grep -q '^service_final=active$' "$workspace/pass.out"
+grep -q '^runtime_image_identity=PASS$' "$workspace/pass.out"
 grep -q '^gaudere schema v4 wake-off service gate: PASS$' "$workspace/pass.out"
 [ "$(cat "$state_file")" = "active" ]
-cmp "$source_profile" "$target_profile"
+grep -qx "Image=$expected_id" "$target_profile"
 if grep -Eq '^(echo|openai|reflect|accept-wake|revoke-wake)( |$)' "$control_log"; then
     printf 'wake-off gate issued a mutating live-control command\n' >&2
     cat "$control_log" >&2
@@ -293,6 +312,20 @@ grep -q 'wake_intents is not empty' "$workspace/wake-row.err"
 cmp "$old_profile" "$target_profile"
 [ "$(cat "$state_file")" = "inactive" ]
 [ ! -s "$control_log" ]
+
+# If the actual running container does not use the pinned candidate image, fail closed,
+# restore the old profile, and leave the service stopped.
+reset_case
+wrong_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+if GAUDERE_FAKE_RUNNING_IMAGE_ID="$wrong_id" run_gate \
+    > "$workspace/running-image.out" 2> "$workspace/running-image.err"; then
+    printf 'gate unexpectedly accepted a running container image mismatch\n' >&2
+    exit 1
+fi
+grep -q 'running container image drift' "$workspace/running-image.err"
+grep -q 'recovery_profile_restored=true' "$workspace/running-image.err"
+cmp "$old_profile" "$target_profile"
+[ "$(cat "$state_file")" = "inactive" ]
 
 # If live control says wake is enabled, the gate must restore the prior profile and
 # leave the service stopped for review.

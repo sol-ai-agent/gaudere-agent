@@ -18,6 +18,20 @@ fail()
     exit 1
 }
 
+normalize_image_id()
+{
+    value=$1
+    case "$value" in
+        sha256:*) digest=${value#sha256:} ;;
+        *) digest=$value ;;
+    esac
+    case "$digest" in
+        *[!0-9a-f]*|'') return 1 ;;
+    esac
+    [ "${#digest}" -eq 64 ] || return 1
+    printf 'sha256:%s\n' "$digest"
+}
+
 for command in "$podman_command" systemctl python3 flock install mktemp rm; do
     command -v "$command" >/dev/null 2>&1 \
         || fail "required command not found: $command"
@@ -92,6 +106,15 @@ PY
 
 "$podman_command" image exists "$image" \
     || fail "runtime image does not exist: $image"
+observed_image_id=$("$podman_command" image inspect --format '{{.Id}}' "$image" 2>/dev/null) \
+    || fail "cannot resolve runtime image ID: $image"
+image_id=$(normalize_image_id "$observed_image_id") \
+    || fail "runtime image did not resolve to one full sha256 ID: $image"
+
+# From this point onward use the immutable image ID only. A mutable tag may be the
+# operator-friendly input, but it cannot drift between validation, compatibility
+# probing, and the installed service profile.
+image="$image_id"
 
 # Refuse to install an older image that can expose the raw provider but cannot
 # accept the bounded-reflection command documented by this profile. This runs the
@@ -108,9 +131,9 @@ printf '%s\n' "$control_usage" | grep -q 'reflect ID OBJECTIVE' \
     || fail "runtime image predates bounded reflection; rebuild current main first"
 
 # Schema v4 support is a recovery compatibility gate, not WakeIntent activation.
-# Prove that the selected image can reopen a consistent disposable copy through its
-# default path. The probe has no network, secret, provider configuration, or
-# --wake-intents flag and never mounts the production state directory.
+# Prove that the selected immutable image can reopen a consistent disposable copy
+# through its default path. The probe has no network, secret, provider configuration,
+# or --wake-intents flag and never mounts the production state directory.
 if [ "$schema" = "4" ]; then
     compatibility_root=${TMPDIR:-/tmp}
     compatibility_prefix="$compatibility_root/gaudere-openai-schema-v4."
@@ -193,10 +216,60 @@ fi
     || fail "Podman secret $secret_name does not exist; install it with scripts/install-openai-secret.sh"
 
 install -d -m 0700 "$quadlet_directory" "$state_directory"
-install -m 0600 "$source_quadlet" "$target_quadlet"
+rendered_quadlet=$(mktemp "${TMPDIR:-/tmp}/gaudere-openai-quadlet.XXXXXX")
+previous_quadlet=$(mktemp "${TMPDIR:-/tmp}/gaudere-openai-previous.XXXXXX")
+had_previous=0
+target_changed=0
+install_committed=0
+
+recover_install()
+{
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$install_committed" != "1" ] && [ "$target_changed" = "1" ]; then
+        if [ "$had_previous" = "1" ]; then
+            install -m 0600 "$previous_quadlet" "$target_quadlet" || true
+        else
+            rm -f -- "$target_quadlet" || true
+        fi
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        printf 'gaudere OpenAI service install: uncommitted profile replacement rolled back\n' >&2
+    fi
+    rm -f -- "$rendered_quadlet" "$previous_quadlet"
+    exit "$status"
+}
+trap recover_install EXIT HUP INT TERM
+
+if [ -f "$target_quadlet" ]; then
+    install -m 0600 "$target_quadlet" "$previous_quadlet"
+    had_previous=1
+fi
+
+python3 - "$source_quadlet" "$rendered_quadlet" "$image_id" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+image_id = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
+if len(indexes) != 1:
+    raise SystemExit("OpenAI Quadlet template must contain exactly one Image= line")
+index = indexes[0]
+ending = "\n" if lines[index].endswith("\n") else ""
+lines[index] = f"Image={image_id}{ending}"
+destination.write_text("".join(lines), encoding="utf-8")
+PY
+install -m 0600 "$rendered_quadlet" "$target_quadlet"
+target_changed=1
 systemctl --user daemon-reload
+install_committed=1
+trap - EXIT HUP INT TERM
+rm -f -- "$rendered_quadlet" "$previous_quadlet"
 
 printf 'gaudere OpenAI service install: installed capability profile as %s\n' "$target_quadlet"
+printf 'gaudere OpenAI service install: runtime_image_id=%s\n' "$image_id"
 printf 'gaudere OpenAI service install: model=gpt-5.6-sol secret=%s\n' "$secret_name"
 printf 'gaudere OpenAI service install: no provider task was submitted and the service remains stopped\n'
 printf 'gaudere OpenAI service install: revert with scripts/install-user-service.sh while the service is stopped\n'
