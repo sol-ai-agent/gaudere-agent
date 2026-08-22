@@ -1,0 +1,31 @@
+name: Schema v4 production copy proof wrapper
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/validate-production-schema-v4-copy-proof.sh'
+      - 'tests/production_schema_v4_copy_proof_wrapper_test.sh'
+      - '.github/workflows/schema-v4-production-copy-proof-wrapper.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/validate-production-schema-v4-copy-proof.sh'
+      - 'tests/production_schema_v4_copy_proof_wrapper_test.sh'
+      - '.github/workflows/schema-v4-production-copy-proof-wrapper.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-orchestration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Syntax check
+        run: |
+          sh -n scripts/validate-production-schema-v4-copy-proof.sh
+          sh -n tests/production_schema_v4_copy_proof_wrapper_test.sh
+      - name: Prove success, restart-on-failure, and override fences
+        run: sh tests/production_schema_v4_copy_proof_wrapper_test.sh
