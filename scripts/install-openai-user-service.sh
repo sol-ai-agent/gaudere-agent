@@ -217,11 +217,34 @@ fi
 
 install -d -m 0700 "$quadlet_directory" "$state_directory"
 rendered_quadlet=$(mktemp "${TMPDIR:-/tmp}/gaudere-openai-quadlet.XXXXXX")
-cleanup_rendered()
+previous_quadlet=$(mktemp "${TMPDIR:-/tmp}/gaudere-openai-previous.XXXXXX")
+had_previous=0
+target_changed=0
+install_committed=0
+
+recover_install()
 {
-    rm -f -- "$rendered_quadlet"
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$install_committed" != "1" ] && [ "$target_changed" = "1" ]; then
+        if [ "$had_previous" = "1" ]; then
+            install -m 0600 "$previous_quadlet" "$target_quadlet" || true
+        else
+            rm -f -- "$target_quadlet" || true
+        fi
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        printf 'gaudere OpenAI service install: uncommitted profile replacement rolled back\n' >&2
+    fi
+    rm -f -- "$rendered_quadlet" "$previous_quadlet"
+    exit "$status"
 }
-trap cleanup_rendered EXIT HUP INT TERM
+trap recover_install EXIT HUP INT TERM
+
+if [ -f "$target_quadlet" ]; then
+    install -m 0600 "$target_quadlet" "$previous_quadlet"
+    had_previous=1
+fi
+
 python3 - "$source_quadlet" "$rendered_quadlet" "$image_id" <<'PY'
 import pathlib
 import sys
@@ -239,9 +262,11 @@ lines[index] = f"Image={image_id}{ending}"
 destination.write_text("".join(lines), encoding="utf-8")
 PY
 install -m 0600 "$rendered_quadlet" "$target_quadlet"
-cleanup_rendered
-trap - EXIT HUP INT TERM
+target_changed=1
 systemctl --user daemon-reload
+install_committed=1
+trap - EXIT HUP INT TERM
+rm -f -- "$rendered_quadlet" "$previous_quadlet"
 
 printf 'gaudere OpenAI service install: installed capability profile as %s\n' "$target_quadlet"
 printf 'gaudere OpenAI service install: runtime_image_id=%s\n' "$image_id"
