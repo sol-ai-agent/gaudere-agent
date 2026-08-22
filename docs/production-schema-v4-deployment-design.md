@@ -23,8 +23,9 @@ The gate is **not ready to execute yet**. Two prerequisites must be resolved fir
    `74a801d4d0cc2bc229e25b33c0174ce54b683ab2`. Both stores in that Core reject
    `PRAGMA user_version > 3`. That image cannot reopen v4. A current, exactly pinned
    image must first replace the mutable `localhost/gaudere-agent:dev` tag and be
-   proven against the untouched production v3 database; the prior image ID must be
-   retained under an immutable rollback tag.
+   proven against the untouched production v3 database. The prior `:dev` image ID
+   must be captured and retained under a verified immutable rollback tag before any
+   candidate build command that could mutate `:dev`.
 2. `scripts/install-openai-user-service.sh` currently accepts only schema v3. The
    migration gate does not reinstall or edit the already installed profile, but a
    post-migration reinstall/recovery path would be blocked. Before production v4 is
@@ -41,10 +42,13 @@ This gate does not accept, revoke, or fire a wake; create a Task; invoke a provi
 change provider budgets; install a secret; change a Quadlet; enable
 `--wake-intents`; add a port; or merge the later exact-wake activation gate.
 
-The existing real-Fedora disposable-copy proof is sufficient evidence for the
-copy migration itself and must not be repeated without a new reason. This design
-adds the missing production swap, runtime-image, live-reopen, and automatic rollback
-requirements.
+Before any production-v4 execution, a provider-free real-Fedora disposable-copy
+proof on a fresh real backup must be observed and recorded in authoritative
+continuity. PR #47 proves the migration path with CI/disposable fixtures; that is
+not host evidence. Once continuity records the real-host gate as PASS, the proof
+must not be repeated without a specific new reason. This design consumes the gate
+status recorded at execution time and adds the production swap, runtime-image,
+live-reopen, and automatic rollback requirements.
 
 ## Names and durable artifacts
 
@@ -135,14 +139,22 @@ not as frozen strings.
 
 ### 3. Runtime-image prerequisite on untouched v3
 
-Build the candidate from the exact approved clean checkout and Core pin. First run
-provider-free disposable checks showing that it opens both an unmodified v3 restore
-and an already migrated v4 restore without `--wake-intents`.
+Before any candidate build command, resolve the image ID currently behind
+`localhost/gaudere-agent:dev`, tag that exact ID as
+`rollback-before-schema-v4-<stamp>`, and verify that the rollback tag resolves back
+to the captured ID. This ordering is mandatory because the historical build path
+defaults to `localhost/gaudere-agent:dev`; an unprotected build could otherwise
+destroy the only known rollback identity.
 
-Before moving the production image tag, tag the prior image ID as
-`rollback-before-schema-v4-<stamp>`. Move `localhost/gaudere-agent:dev` to the exact
-candidate ID, without editing the Quadlet. Start the unchanged profile against the
-untouched v3 state, then prove:
+Build the candidate from the exact approved clean checkout and Core pin under a
+distinct candidate tag, never directly as `localhost/gaudere-agent:dev`. Verify its
+Agent/Core provenance, then run provider-free disposable checks showing that the
+exact candidate image opens both an unmodified v3 restore and an already migrated
+v4 restore without `--wake-intents`.
+
+Only after those checks pass may `localhost/gaudere-agent:dev` be repointed to the
+verified candidate ID, without editing the Quadlet. Start the unchanged profile
+against the untouched v3 state, then prove:
 
 - the service becomes active and the expected main-worker readiness is logged;
 - no explicit-wake-enabled log appears;
@@ -308,7 +320,11 @@ Required provider-free tests:
    is equal.
 2. **Image compatibility:** prove the selected candidate opens v3 and v4 without
    the flag; reject a candidate that cannot default-reopen v4 or whose image ID
-   changes after the fence.
+   changes after the fence. Capture and verify the prior `:dev` rollback identity
+   before any build, build only under a distinct candidate tag, and reject rollback
+   tag drift. The reusable provenance/tag-drift mechanism belongs to issue #50;
+   the staged deployment must consume its reviewed contract rather than duplicate
+   it.
 3. **Wake dormancy:** statically assert both shipped Quadlets omit
    `--wake-intents`; run current main on v4 without the flag; require the disabled
    live-control reply, no wake log, no wake row, no scheduled wake deadline, and no
@@ -330,7 +346,8 @@ Required provider-free tests:
    change, but no new permit may appear in storage.
 9. **Installer recovery prerequisite:** test that the separately updated OpenAI
    installer accepts exactly schemas 3 and 4, rejects all others, and renders bytes
-   identical to the current no-wake Quadlet.
+   identical to the current no-wake Quadlet. That isolated recovery change belongs
+   to issue #51, not to the staged-deployment implementation.
 10. **Static hygiene:** `git diff --check`, shell syntax/lint where available, no
     secret values, no TCP publication, no polling loop, and no provider-capable
     command in the test path.
