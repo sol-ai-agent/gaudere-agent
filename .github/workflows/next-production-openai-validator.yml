@@ -1,0 +1,138 @@
+name: Next production OpenAI validator
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/validate-next-production-openai.sh'
+      - '.github/workflows/next-production-openai-validator.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: sh -n scripts/validate-next-production-openai.sh
+
+      - name: Exercise exact one-additional-call proof offline
+        run: |
+          set -eu
+          workspace=$(mktemp -d)
+          trap 'rm -rf "$workspace"' EXIT
+          phase="$workspace/phase"
+          calls="$workspace/calls"
+          printf 'before\n' > "$phase"
+          printf '0\n' > "$calls"
+
+          cat > "$workspace/systemctl" <<'SH'
+          #!/bin/sh
+          if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+              echo active
+              exit 0
+          fi
+          exit 2
+          SH
+          chmod +x "$workspace/systemctl"
+
+          cat > "$workspace/control.sh" <<'SH'
+          #!/bin/sh
+          set -eu
+          phase=$(cat "$FAKE_PHASE")
+          case "$1" in
+            budget)
+              if [ "$phase" = "before" ]; then
+                  cat <<'EOF'
+          scope="provider.call:openai.responses"
+          provider_enabled=true
+          max_total=12
+          total_used=2
+          remaining_total=10
+          max_window=4
+          window_seconds=86400
+          in_window_used=2
+          remaining_window=2
+          min_interval_seconds=900
+          last_consumed_at_ms=1787351325945
+          next_new_call=available
+          EOF
+              else
+                  cat <<'EOF'
+          scope="provider.call:openai.responses"
+          provider_enabled=true
+          max_total=12
+          total_used=3
+          remaining_total=9
+          max_window=4
+          window_seconds=86400
+          in_window_used=3
+          remaining_window=1
+          min_interval_seconds=900
+          last_consumed_at_ms=1787400000000
+          next_new_call=cooldown
+          EOF
+              fi
+              ;;
+            openai)
+              [ "$2" = "production-initiative-first" ] || exit 92
+              count=$(cat "$FAKE_CALLS")
+              count=$((count + 1))
+              printf '%s\n' "$count" > "$FAKE_CALLS"
+              [ "$count" -eq 1 ] || exit 91
+              printf 'after\n' > "$FAKE_PHASE"
+              cat <<'EOF'
+          id="production-initiative-first"
+          kind="provider.openai.responses"
+          status=pending
+          attempts=0/2
+          EOF
+              ;;
+            task)
+              [ "$2" = "production-initiative-first" ] || exit 93
+              cat <<'EOF'
+          id="production-initiative-first"
+          kind="provider.openai.responses"
+          status=succeeded
+          attempts=1/2
+          result_content_type="text/plain; charset=utf-8"
+          result_output="Bertrand, je voudrais commencer par comprendre ce que nous voulons construire ensemble."
+          result_metadata_content_type="application/vnd.gaudere.provider-usage+json"
+          result_metadata="{\"schema\":\"gaudere.provider_usage.v1\",\"provider\":\"openai\",\"model\":\"gpt-5.6-sol\",\"input_tokens\":120,\"cached_input_tokens\":0,\"cache_write_input_tokens\":0,\"output_tokens\":30,\"reasoning_tokens\":0,\"total_tokens\":150}"
+          EOF
+              ;;
+            *) exit 2 ;;
+          esac
+          SH
+          chmod +x "$workspace/control.sh"
+
+          FAKE_PHASE="$phase" FAKE_CALLS="$calls" \
+          SYSTEMCTL="$workspace/systemctl" \
+          GAUDERE_CONTROL_SCRIPT="$workspace/control.sh" \
+          GAUDERE_VALIDATION_POLL_SECONDS=0 \
+          sh scripts/validate-next-production-openai.sh \
+            2 production-initiative-first 'initiative prompt' \
+            > "$workspace/first.out"
+          cat "$workspace/first.out"
+          grep -q '^normalized_usage=PASS$' "$workspace/first.out"
+          grep -q '^total_tokens=150$' "$workspace/first.out"
+          grep -q '^total_used=3$' "$workspace/first.out"
+          grep -q '^gaudere next production OpenAI validation: PASS$' "$workspace/first.out"
+          test "$(cat "$calls")" = "1"
+
+          # Reusing the same expected-before value must now fail before another
+          # provider submission because the durable lifetime counter is already 3.
+          if FAKE_PHASE="$phase" FAKE_CALLS="$calls" \
+              SYSTEMCTL="$workspace/systemctl" \
+              GAUDERE_CONTROL_SCRIPT="$workspace/control.sh" \
+              GAUDERE_VALIDATION_POLL_SECONDS=0 \
+              sh scripts/validate-next-production-openai.sh \
+                2 production-initiative-first 'initiative prompt' \
+              > "$workspace/second.out" 2>&1; then
+              echo 'validator unexpectedly accepted a stale expected budget' >&2
+              exit 1
+          fi
+          grep -q 'expected total_used=2 but observed 3' "$workspace/second.out"
+          test "$(cat "$calls")" = "1"
