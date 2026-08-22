@@ -44,6 +44,20 @@ need_file()
     [ -f "$1" ] && [ ! -L "$1" ] || fail "required helper is missing or unsafe: $1"
 }
 
+normalize_image_id()
+{
+    value=$1
+    case "$value" in
+        sha256:*) digest=${value#sha256:} ;;
+        *) digest=$value ;;
+    esac
+    case "$digest" in
+        *[!0-9a-f]*|'') return 1 ;;
+    esac
+    [ "${#digest}" -eq 64 ] || return 1
+    printf 'sha256:%s\n' "$digest"
+}
+
 snapshot_state()
 {
     output=$1
@@ -155,9 +169,10 @@ printf 'ROLLBACK_ID=%s\n' "$rollback_id"
 
 printf '\n==> build distinct exact candidate image\n'
 GAUDERE_IMAGE_TAG="$candidate_image" sh "$build_script"
-candidate_id=$("$podman_command" image inspect --format '{{.Id}}' "$candidate_image") \
+observed_candidate_id=$("$podman_command" image inspect --format '{{.Id}}' "$candidate_image") \
     || fail "cannot inspect candidate image"
-[ -n "$candidate_id" ] || fail "candidate image ID is empty"
+candidate_id=$(normalize_image_id "$observed_candidate_id") \
+    || fail "candidate image did not resolve to one full sha256 ID"
 printf 'CANDIDATE_ID=%s\n' "$candidate_id"
 
 before_snapshot=$(mktemp "${TMPDIR:-/tmp}/gaudere-real-before.XXXXXX")

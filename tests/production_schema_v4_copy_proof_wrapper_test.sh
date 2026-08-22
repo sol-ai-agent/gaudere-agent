@@ -15,7 +15,8 @@ printf 'active\n' > "$service_state"
 agent_ref=$(git -C "$srcdir" rev-parse HEAD)
 core_ref=$(tr -d '\r\n' < "$srcdir/gaudere.ref")
 rollback_id="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-candidate_id="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+candidate_digest="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+candidate_id="sha256:$candidate_digest"
 
 python3 - "$state/state.db" <<'PY'
 import sqlite3
@@ -54,7 +55,8 @@ cat > "$bin/podman" <<'SH'
 #!/bin/sh
 set -eu
 [ "$1" = "image" ] && [ "$2" = "inspect" ] || exit 92
-printf '%s\n' "${GAUDERE_TEST_CANDIDATE_ID:?}"
+# Fedora/Podman may return the full 64-hex image digest without the sha256: prefix.
+printf '%s\n' "${GAUDERE_TEST_CANDIDATE_INSPECT_ID:?}"
 SH
 
 cat > "$workspace/control.sh" <<'SH'
@@ -123,7 +125,7 @@ cat > "$workspace/proof-ok.sh" <<'SH'
 #!/bin/sh
 set -eu
 [ "$GAUDERE_EXPECT_PROVIDER_BUDGET_ROWS" = "3" ]
-[ "$GAUDERE_EXPECTED_CANDIDATE_ID" = "$GAUDERE_TEST_CANDIDATE_ID" ]
+[ "$GAUDERE_EXPECTED_CANDIDATE_ID" = "$GAUDERE_TEST_CANONICAL_CANDIDATE_ID" ]
 [ "$GAUDERE_EXPECTED_ROLLBACK_ID" = "$GAUDERE_TEST_ROLLBACK_ID" ]
 printf 'schema_before=3\n'
 printf 'schema_after=4\n'
@@ -161,7 +163,8 @@ run_wrapper()
     GAUDERE_BACKUP_SCRIPT="$workspace/backup.sh" \
     GAUDERE_IMAGE_PROOF_SCRIPT="$proof_script" \
     GAUDERE_TEST_SERVICE_STATE="$service_state" \
-    GAUDERE_TEST_CANDIDATE_ID="$candidate_id" \
+    GAUDERE_TEST_CANDIDATE_INSPECT_ID="$candidate_digest" \
+    GAUDERE_TEST_CANONICAL_CANDIDATE_ID="$candidate_id" \
     GAUDERE_TEST_ROLLBACK_ID="$rollback_id" \
     SYSTEMCTL="$bin/systemctl" PODMAN="$bin/podman" \
         sh "$wrapper"
@@ -169,6 +172,7 @@ run_wrapper()
 
 before_hash=$(sha256sum "$state/state.db")
 run_wrapper "$workspace/proof-ok.sh" success > "$workspace/success.out"
+grep -q "^CANDIDATE_ID=$candidate_id$" "$workspace/success.out"
 grep -q '^REAL_STATE_BYTE_IDENTITY=PASS$' "$workspace/success.out"
 grep -q '^REAL_SCHEMA_AFTER_PROOF=3$' "$workspace/success.out"
 grep -q '^REAL_WAKE_OBJECTS_AFTER_PROOF=0$' "$workspace/success.out"
