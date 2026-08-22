@@ -1,0 +1,25 @@
+name: Production schema v4 transaction
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'scripts/transition-production-schema-v4-wake-off.sh'
+      - 'tests/production_schema_v4_transaction_test.sh'
+      - '.github/workflows/production-schema-v4-transaction.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-transaction:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: |
+          sh -n scripts/transition-production-schema-v4-wake-off.sh
+          sh -n tests/production_schema_v4_transaction_test.sh
+      - name: Exercise success and rollback boundaries
+        run: sh tests/production_schema_v4_transaction_test.sh
