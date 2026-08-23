@@ -1,0 +1,29 @@
+name: Provider call 04 gate
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/run-provider-call-04-gate-v0.sh'
+      - 'tests/provider_call_04_gate_test.sh'
+      - 'docs/provider-call-04-gate-v0.md'
+      - '.github/workflows/provider-call-04-gate.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/run-provider-call-04-gate-v0.sh'
+      - 'tests/provider_call_04_gate_test.sh'
+      - 'docs/provider-call-04-gate-v0.md'
+      - '.github/workflows/provider-call-04-gate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate provider call 04 gate
+        run: sh tests/provider_call_04_gate_test.sh
