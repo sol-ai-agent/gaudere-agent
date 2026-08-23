@@ -12,7 +12,7 @@ expected_provider_budget_rows=${GAUDERE_EXPECT_PROVIDER_BUDGET_ROWS:-}
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH= cd -- "$script_directory/.." && pwd)
 required_agent_base=a5a5fbb27af85faf584318bf8ddcfa290d3df5ad
-required_core_ref=c24c40b84a12e51515cee4611e3dc79e9fd83892
+required_core_ref=1316cf68db93e4c91a7bd79fbd289b8f382f8659
 
 fail()
 {
