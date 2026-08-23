@@ -15,6 +15,7 @@ check_PROGRAMS = \
 	openai_responses_provider_test \
 	provider_task_handler_test \
 	provider_usage_durability_test \
+	resume_after_wake_test \
 	state_lock_test \
 	task_dispatcher_test \
 	task_executor_test \
@@ -179,6 +180,14 @@ provider_usage_durability_test_SOURCES = \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
 provider_usage_durability_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+resume_after_wake_test_SOURCES = \
+	resume_after_wake_test.cpp \
+	../src/ExplicitWake.cpp \
+	../src/ExplicitWake.hpp \
+	../src/ResumeAfterWake.cpp \
+	../src/ResumeAfterWake.hpp
+resume_after_wake_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 state_lock_test_SOURCES = \
 	state_lock_test.cpp \
