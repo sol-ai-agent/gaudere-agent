@@ -23,7 +23,8 @@ enum class LiveControlOperation {
     inspect_budget,
     accept_wake,
     revoke_wake,
-    inspect_wake
+    inspect_wake,
+    inspect_wake_status
 };
 
 struct LiveControlCommand {
