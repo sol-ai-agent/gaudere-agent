@@ -1,0 +1,135 @@
+name: One-shot WorkerDev approved branch cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/delete-workerdev-approved-branches-once.yml
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: read
+
+jobs:
+  delete-approved-branches:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Revalidate and atomically delete the exact approved refs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          keep_branch='sol/first-real-wake-gate-v0'
+          keep_expected='ec140dfef7fd9f6071259d9c4eca758379cf7e7a'
+
+          records=(
+            'agent/wake-status-observability|7dd817154de32b6b62c120857a7af737c923eb80|76'
+            'sol/fix-frozen-v4-wrapper-test|fd7f1af12e032359709776f70c711eefe72ee2e0|77'
+            'sol/fix-schema-v4-podman-id-normalization|7adda81d74ae0e31e4429ed214298d52d5c53318|68'
+            'sol/fix-v4-readonly-wal-sidecar|399c0d8ab169d7a69d76fb31f9a0de0c2dbe9e52|75'
+            'sol/freeze-prod-v4-invocation|48c81373f72570542e0d4fccc24bdd6ed9e2dc02|74'
+            'sol/pin-v4-runtime-image|c79c059192f0761c0b6bd9420323b56ca47faa56|70'
+            'sol/prewake-runtime-upgrade-v0|9abd8adb50faf3231b4914b10e5f6f0190579e45|78'
+            'sol/provider-call-04-gate-v0|0b71347901a6dbc5be24a736d35a2ece834fe779|79'
+            'sol/schema-v4-host-proof-wrapper-ci|68d111b5e4239d1b848fd24465835a84a3210e92|64'
+            'sol/schema-v4-wake-off-gate|6d739cfc5c261583574524cb31dc7d885c957192|61'
+            'sol/transaction-v4-production|f09f8be84c8a1bf17971be76d8e3b5dcea0a374d|71'
+            'workermax/fence-v4-autostart|3db0a0ccf1a1a45209d63c90b5db84880d021178|73'
+            'workermax/wake-intent-v0-observability-design-20260822|c0f5922504b596ae652c585ebbc2ac6c91075b7c|63'
+            'workermax/wake-intent-v0-p1-tests-20260822|9b30c75598b270eed7bb27260ffe43172766933e|62'
+            'workermax/wake-intent-v0-threat-model-20260822|617990d9bff9eb19aee353e8b823364f070f0e19|58'
+            'agent/staged-production-schema-v3-dupcheck|ca5c46a4f407bf7d79026f14c190749cf8552aec|ANCESTOR'
+            'agent/truthful-service-readiness-ci|054c5ff517edf4ce06b6c6bbd0829152d2f430ca|ANCESTOR'
+            'agent/truthful-service-readiness-final|054c5ff517edf4ce06b6c6bbd0829152d2f430ca|ANCESTOR'
+            'agent/truthful-service-readiness-review|054c5ff517edf4ce06b6c6bbd0829152d2f430ca|ANCESTOR'
+            'sol/first-wake-production-gate-v0|9740ff51ceb0bbd34f9ed2427064fca621dd3333|ANCESTOR'
+            'sol/schema-v4-host-proof-wrapper-ci-v2|a7e9bf027c68957e29c1d9656fd763ba2e4f402f|ANCESTOR'
+          )
+
+          open_pr_count="$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f per_page=100 --jq 'length')"
+          if [[ "$open_pr_count" != 0 ]]; then
+            echo "::error::REFUSE: $open_pr_count open pull request(s) appeared"
+            exit 1
+          fi
+
+          open_issue_count="$(gh api -X GET "repos/$GITHUB_REPOSITORY/issues" -f state=open -f per_page=100 --jq '[.[] | select(.pull_request == null)] | length')"
+          if [[ "$open_issue_count" != 0 ]]; then
+            echo "::error::REFUSE: $open_issue_count open issue(s) appeared"
+            exit 1
+          fi
+
+          keep_actual="$(git ls-remote --exit-code --heads origin "refs/heads/$keep_branch" | awk '{print $1}')"
+          if [[ "$keep_actual" != "$keep_expected" ]]; then
+            echo "::error::REFUSE: protected branch moved or disappeared: $keep_branch expected=$keep_expected actual=$keep_actual"
+            exit 1
+          fi
+
+          refspecs=()
+          for record in "${records[@]}"; do
+            IFS='|' read -r branch expected proof <<<"$record"
+
+            actual="$(git ls-remote --exit-code --heads origin "refs/heads/$branch" | awk '{print $1}')"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error::REFUSE: branch moved or disappeared: $branch expected=$expected actual=$actual"
+              exit 1
+            fi
+
+            open_for_head="$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f head="sol-ai-agent:$branch" -f per_page=100 --jq 'length')"
+            if [[ "$open_for_head" != 0 ]]; then
+              echo "::error::REFUSE: open PR now uses $branch"
+              exit 1
+            fi
+
+            if [[ "$proof" == ANCESTOR ]]; then
+              git fetch --no-tags origin "refs/heads/$branch:refs/remotes/origin/$branch"
+              if ! git merge-base --is-ancestor "$expected" "$GITHUB_SHA"; then
+                echo "::error::REFUSE: $branch is no longer fully contained in main"
+                exit 1
+              fi
+              echo "proof=ancestor branch=$branch sha=$expected"
+            else
+              pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$proof")"
+              pr_state="$(jq -r '.state' <<<"$pr_json")"
+              pr_merged="$(jq -r '.merged_at // ""' <<<"$pr_json")"
+              pr_head_ref="$(jq -r '.head.ref' <<<"$pr_json")"
+              pr_head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+              if [[ "$pr_state" != closed || -z "$pr_merged" || "$pr_head_ref" != "$branch" || "$pr_head_sha" != "$expected" ]]; then
+                echo "::error::REFUSE: PR proof mismatch branch=$branch pr=$proof state=$pr_state merged_at=$pr_merged head_ref=$pr_head_ref head_sha=$pr_head_sha"
+                exit 1
+              fi
+              echo "proof=merged_pr branch=$branch sha=$expected pr=$proof"
+            fi
+
+            refspecs+=(":refs/heads/$branch")
+          done
+
+          git push --atomic origin "${refspecs[@]}"
+
+          for record in "${records[@]}"; do
+            IFS='|' read -r branch _ _ <<<"$record"
+            if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+              echo "::error::branch still exists after atomic cleanup: $branch"
+              exit 1
+            fi
+            echo "deleted=$branch"
+          done
+
+          if ! git ls-remote --exit-code --heads origin refs/heads/main >/dev/null 2>&1; then
+            echo "::error::main disappeared"
+            exit 1
+          fi
+          if ! git ls-remote --exit-code --heads origin "refs/heads/$keep_branch" >/dev/null 2>&1; then
+            echo "::error::protected branch disappeared: $keep_branch"
+            exit 1
+          fi
+
+          echo "deleted_count=${#records[@]}"
+          echo "protected=main"
+          echo "protected=$keep_branch"
