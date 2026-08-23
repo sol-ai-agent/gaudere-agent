@@ -297,9 +297,6 @@ int main(int argc, char* argv[])
 {
     try {
         const auto options = parse_options(argc, argv);
-        // Service/operator output is deliberately unbuffered so journald and test
-        // harnesses observe readiness and shutdown transitions when they happen,
-        // not only when the process eventually exits.
         std::cout << std::unitbuf;
 
         sigset_t signals{};
@@ -366,9 +363,6 @@ int main(int argc, char* argv[])
             throw std::runtime_error("cannot register local task handlers");
         }
 
-        // Live control must be able to observe the durable OpenAI budget even while
-        // the provider itself remains disabled/offline. Creating BudgetStore only
-        // creates the additive budget table/index; it never consumes a permit.
         if (options.openai_enabled || !options.control_socket.empty()) {
             provider_budget_store =
                 std::make_unique<gaudere::persistence::sqlite::BudgetStore>(
@@ -459,7 +453,8 @@ int main(int argc, char* argv[])
                 control_processor = std::make_unique<gaudere_agent::LiveControlProcessor>(
                     work_runtime, task_store, *provider_budget_store,
                     gaudere_agent::OpenAIActivation::bootstrap_budget_policy(),
-                    options.openai_enabled, explicit_wake.get());
+                    options.openai_enabled, explicit_wake.get(),
+                    [&work_scheduler] { return work_scheduler.next(); });
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.notify_work(); });
@@ -470,9 +465,6 @@ int main(int argc, char* argv[])
                           << options.control_socket << '\n';
             }
 
-            // `running` is a readiness statement. Do not emit it until every
-            // mandatory service resource for this mode (notably live control)
-            // has been initialized successfully.
             std::cout << "gaudere-agent: running\n";
 
             int received = 0;
