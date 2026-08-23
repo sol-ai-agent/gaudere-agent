@@ -18,7 +18,11 @@ using Json = nlohmann::json;
 using WakeIntent = gaudere::scheduling::wake::WakeIntent;
 using WakeIntentAcceptResult =
     gaudere::scheduling::wake::WakeIntentAcceptResult;
+using WakeIntentScopeResult =
+    gaudere::scheduling::wake::WakeIntentScopeResult;
 using WakeIntentStatus = gaudere::scheduling::wake::WakeIntentStatus;
+using WakeIntentTimePoint =
+    gaudere::scheduling::wake::WakeIntentTimePoint;
 
 constexpr std::size_t max_decision_bytes = 4096;
 constexpr std::size_t max_reason_bytes = 1024;
@@ -130,8 +134,22 @@ std::string status_name(const WakeIntentStatus status)
     throw std::invalid_argument("unknown wake-intent status");
 }
 
-std::int64_t milliseconds(
-    const gaudere::scheduling::wake::WakeIntentTimePoint value)
+const char* task_status_name(const gaudere::work::TaskStatus status) noexcept
+{
+    using Status = gaudere::work::TaskStatus;
+    switch (status) {
+    case Status::pending: return "pending";
+    case Status::running: return "running";
+    case Status::cancel_requested: return "cancel_requested";
+    case Status::succeeded: return "succeeded";
+    case Status::failed: return "failed";
+    case Status::cancelled: return "cancelled";
+    case Status::manual_review: return "manual_review";
+    }
+    return "unknown";
+}
+
+std::int64_t milliseconds(const WakeIntentTimePoint value)
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         value.time_since_epoch()).count();
@@ -140,6 +158,19 @@ std::int64_t milliseconds(
 std::string quoted(const std::string& value)
 {
     return Json(value).dump();
+}
+
+void time_line(std::ostringstream& output,
+               const char* name,
+               const std::optional<WakeIntentTimePoint>& value)
+{
+    output << name << '=';
+    if (value) {
+        output << milliseconds(*value);
+    } else {
+        output << "none";
+    }
+    output << '\n';
 }
 
 bool safe_revocation_reason(const std::string& reason) noexcept
@@ -230,6 +261,117 @@ gaudere::scheduling::wake::WakeIntentRevokeResult ExplicitWake::revoke(
 std::optional<WakeIntent> ExplicitWake::find(const std::string& wake_id) const
 {
     return wake_runtime_.find(wake_id);
+}
+
+ExplicitWakeStatus ExplicitWake::inspect_status(
+    std::optional<WakeIntentTimePoint> next_lease_at,
+    std::optional<WakeIntentTimePoint> scheduler_next_at) const
+{
+    const auto scoped = wake_runtime_.inspect_scope();
+    std::ostringstream output;
+    output << "report_schema=\"gaudere.wake_status.v1\"\n"
+           << "scope=" << quoted(wake_runtime_.scope()) << '\n';
+
+    if (scoped.result == WakeIntentScopeResult::empty) {
+        output << "record=none\n"
+               << "health=empty\n"
+               << "scheduler_coverage=not_applicable\n";
+        return {true, output.str()};
+    }
+    if (scoped.result == WakeIntentScopeResult::ambiguous) {
+        output << "record=ambiguous\n"
+               << "health=ambiguous\n"
+               << "scheduler_coverage=not_applicable\n";
+        return {false, output.str()};
+    }
+    if (!scoped.intent) {
+        throw std::runtime_error(
+            "wake scope inspection reported one record without an intent");
+    }
+
+    const auto& intent = *scoped.intent;
+    output << "record=one\n"
+           << "id=" << quoted(intent.id) << '\n'
+           << "source_task_id=" << quoted(intent.source_id) << '\n';
+
+    const auto source_task = task_store_.find(intent.source_id);
+    bool source_eligible = false;
+    if (!source_task) {
+        output << "source_consistency=missing\n";
+    } else {
+        const auto decision = source_decision(*source_task);
+        source_eligible = decision.eligible;
+        output << "source_task_kind=" << quoted(source_task->kind) << '\n'
+               << "source_task_status=" << task_status_name(source_task->status) << '\n'
+               << "source_task_attempts=" << source_task->attempts_started << '/'
+               << source_task->limits.max_attempts << '\n'
+               << "source_result_content_type="
+               << quoted(source_task->result ? source_task->result->content_type
+                                             : std::string{}) << '\n'
+               << "source_consistency="
+               << (source_eligible ? "eligible" : "ineligible") << '\n';
+    }
+
+    output << "status=" << status_name(intent.status) << '\n'
+           << "accepted_at_ms=" << milliseconds(intent.accepted_at) << '\n'
+           << "due_at_ms=" << milliseconds(intent.due_at) << '\n';
+    if (intent.terminal_at) {
+        output << "terminal_at_ms=" << milliseconds(*intent.terminal_at) << '\n';
+    } else {
+        output << "terminal_at_ms=none\n";
+    }
+    output << "terminal_reason=" << quoted(intent.terminal_reason) << '\n';
+
+    const auto derived_wake_at = wake_runtime_.next_scheduled_at();
+    time_line(output, "derived_wake_at_ms", derived_wake_at);
+    time_line(output, "derived_lease_at_ms", next_lease_at);
+    time_line(output, "scheduler_next_at_ms", scheduler_next_at);
+
+    if (!source_task || !source_eligible) {
+        output << "health=source_inconsistent\n"
+               << "scheduler_coverage=not_applicable\n";
+        return {false, output.str()};
+    }
+
+    if (intent.status == WakeIntentStatus::manual_review) {
+        output << "health=manual_review\n"
+               << "scheduler_coverage=not_applicable\n";
+        return {false, output.str()};
+    }
+    if (intent.status == WakeIntentStatus::fired
+        || intent.status == WakeIntentStatus::revoked) {
+        output << "health=terminal\n"
+               << "scheduler_coverage=not_applicable\n";
+        return {true, output.str()};
+    }
+
+    if (!derived_wake_at || *derived_wake_at != intent.due_at) {
+        output << "health=derived_mismatch\n"
+               << "scheduler_coverage=derived_mismatch\n";
+        return {false, output.str()};
+    }
+    if (!scheduler_next_at) {
+        output << "health=scheduling_divergence\n"
+               << "scheduler_coverage=missing\n";
+        return {false, output.str()};
+    }
+    if (*scheduler_next_at > intent.due_at) {
+        output << "health=scheduling_divergence\n"
+               << "scheduler_coverage=late\n";
+        return {false, output.str()};
+    }
+    if (*scheduler_next_at < intent.due_at) {
+        output << "health=ok\n"
+               << "scheduler_coverage=covered_by_earlier_event\n";
+        return {true, output.str()};
+    }
+
+    output << "health=ok\n"
+           << "scheduler_coverage="
+           << (next_lease_at && *next_lease_at == intent.due_at
+                   ? "shared_with_lease" : "exact")
+           << '\n';
+    return {true, output.str()};
 }
 
 std::string wake_intent_report(const WakeIntent& intent)
