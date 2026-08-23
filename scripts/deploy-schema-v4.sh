@@ -33,6 +33,48 @@ fail()
     exit 1
 }
 
+# A read-only SQLite connection to a database whose persistent journal mode is WAL
+# can create an empty -wal plus a -shm sidecar even though it performs no write.
+# The outer production transaction takes exactly such an observational snapshot
+# after the service is stopped. Under Gaudere's exclusive state flock, an empty WAL
+# has no committed frames to preserve, so remove only that known transient pair and
+# durably fsync the state directory. A non-empty WAL, an orphan SHM, a symlink, or a
+# non-regular sidecar remains a hard stop: never discard possible durable state.
+canonicalize_empty_read_sidecars()
+{
+    database=$1
+    python3 - "$database" <<'PY'
+import os
+import pathlib
+import sys
+
+database = pathlib.Path(sys.argv[1])
+wal = pathlib.Path(str(database) + "-wal")
+shm = pathlib.Path(str(database) + "-shm")
+
+def require_regular(path, label):
+    if path.is_symlink() or not path.is_file():
+        raise SystemExit(f"unexpected non-regular SQLite {label} sidecar: {path}")
+
+if wal.exists() or wal.is_symlink():
+    require_regular(wal, "WAL")
+    if wal.stat().st_size != 0:
+        raise SystemExit(f"non-empty SQLite WAL remains in stopped state: {wal}")
+    if shm.exists() or shm.is_symlink():
+        require_regular(shm, "shared-memory")
+    wal.unlink()
+    if shm.exists():
+        shm.unlink()
+    directory_fd = os.open(database.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+elif shm.exists() or shm.is_symlink():
+    raise SystemExit(f"SQLite shared-memory sidecar exists without WAL: {shm}")
+PY
+}
+
 [ "$#" -eq 0 ] || fail "usage: $0"
 case "$test_mode" in
     0|1) ;;
@@ -48,6 +90,7 @@ command -v "$systemctl_command" >/dev/null 2>&1 \
     || fail "required command not found: $systemctl_command"
 command -v flock >/dev/null 2>&1 || fail "required command not found: flock"
 command -v grep >/dev/null 2>&1 || fail "required command not found: grep"
+command -v python3 >/dev/null 2>&1 || fail "required command not found: python3"
 
 if [ "$test_mode" = "0" ]; then
     [ "$provenance_validator" = "$default_provenance_validator" ] \
@@ -110,11 +153,15 @@ chmod 600 "$state_directory/state.db.lock" 2>/dev/null || true
 if ! flock -n 9; then
     fail "state database is currently owned"
 fi
+if ! canonicalize_empty_read_sidecars "$state_directory/state.db"; then
+    fail "stopped SQLite sidecar fence failed"
+fi
 flock -u 9
 exec 9>&-
 
 printf 'status=PREP_ONLY_NOT_AUTHORIZED_FOR_PRODUCTION\n'
 printf 'provenance_contract=gaudere.schema-v4-image-provenance.v1\n'
+printf 'sqlite_sidecar_fence=PASS\n'
 printf '\n==> create fresh provider-free backup for the image-provenance gate\n'
 if ! provenance_backup=$(GAUDERE_STATE_DIR="$state_directory" \
         GAUDERE_BACKUP_DIR="$backup_directory" sh "$backup_script"); then
