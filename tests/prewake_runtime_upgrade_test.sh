@@ -10,6 +10,7 @@ state="$workspace/state"
 service_state="$workspace/service.state"
 gate_log="$workspace/gate.log"
 build_log="$workspace/build.log"
+gate_done="$workspace/gate.done"
 mkdir -p "$state"
 printf 'synthetic schema-v4 bytes\n' > "$state/state.db"
 printf 'active\n' > "$service_state"
@@ -42,8 +43,19 @@ cat > "$fake_podman" <<'SH'
 #!/bin/sh
 set -eu
 case "$1 $2" in
+    'container inspect')
+        printf 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'
+        ;;
     'image inspect')
         printf 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+        ;;
+    'image exists')
+        if [ "${GAUDERE_TEST_DROP_ROLLBACK:-0}" = "1" ] \
+            && [ -f "$GAUDERE_TEST_GATE_DONE" ] \
+            && [ "$3" = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]; then
+            exit 1
+        fi
+        exit 0
         ;;
     'run --rm')
         if [ "${GAUDERE_TEST_NO_WAKE_STATUS:-0}" = "1" ]; then
@@ -80,6 +92,7 @@ set -eu
 [ "$GAUDERE_EXPECTED_RUNTIME_IMAGE_ID" = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]
 printf 'called\n' >> "$GAUDERE_TEST_GATE_LOG"
 printf 'active\n' > "$GAUDERE_TEST_SERVICE_STATE_FILE"
+: > "$GAUDERE_TEST_GATE_DONE"
 printf 'gaudere schema v4 wake-off service gate: PASS\n'
 printf 'provider_effects=0\n'
 printf 'wake_effects=0\n'
@@ -115,9 +128,11 @@ run_wrapper()
     GAUDERE_TEST_MODE=1 \
     GAUDERE_STATE_DIR="$state" \
     GAUDERE_SERVICE_NAME=gaudere-agent.service \
+    GAUDERE_EXPECTED_PREVIOUS_IMAGE_ID=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
     GAUDERE_TEST_SERVICE_STATE_FILE="$service_state" \
     GAUDERE_TEST_GATE_LOG="$gate_log" \
     GAUDERE_TEST_BUILD_LOG="$build_log" \
+    GAUDERE_TEST_GATE_DONE="$gate_done" \
     GAUDERE_PREWAKE_BUILD_SCRIPT="$fake_build" \
     GAUDERE_PREWAKE_WAKE_OFF_GATE="$fake_gate" \
     GAUDERE_PREWAKE_CONTROL_SCRIPT="$fake_control" \
@@ -139,6 +154,9 @@ grep -q '^wake_capability_active=false$' "$workspace/success.out"
 grep -q '^wake_status_surface=present$' "$workspace/success.out"
 grep -q '^candidate_image_id=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa$' \
     "$workspace/success.out"
+grep -q '^rollback_image_id=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb$' \
+    "$workspace/success.out"
+grep -q '^rollback_image_retained=true$' "$workspace/success.out"
 [ "$(cat "$service_state")" = "active" ]
 [ "$(wc -l < "$build_log" | tr -d ' ')" -eq 1 ]
 [ "$(wc -l < "$gate_log" | tr -d ' ')" -eq 1 ]
@@ -146,6 +164,7 @@ grep -q '^candidate_image_id=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # Missing wake-status must fail before the production service is stopped and before
 # the wake-off gate is entered.
 printf 'active\n' > "$service_state"
+rm -f "$gate_done"
 : > "$gate_log"
 GAUDERE_TEST_NO_WAKE_STATUS=1 run_wrapper \
     > "$workspace/no-status.out" 2> "$workspace/no-status.err" && {
@@ -159,6 +178,7 @@ grep -q 'candidate image does not expose wake-status observability' "$workspace/
 # The upgrade belongs before provider permit #4. A changed durable count fails
 # before image build or service mutation.
 printf 'active\n' > "$service_state"
+rm -f "$gate_done"
 : > "$gate_log"
 GAUDERE_TEST_PROVIDER_TOTAL=4 run_wrapper \
     > "$workspace/budget.out" 2> "$workspace/budget.err" && {
@@ -168,5 +188,19 @@ GAUDERE_TEST_PROVIDER_TOTAL=4 run_wrapper \
 grep -q 'requires exactly three durable provider consumptions' "$workspace/budget.err"
 [ "$(cat "$service_state")" = "active" ]
 [ ! -s "$gate_log" ]
+
+# Losing the old immutable image after a nominal candidate gate must not be reported
+# as success. The service may be active, but rollback integrity is a hard result.
+printf 'active\n' > "$service_state"
+rm -f "$gate_done"
+: > "$gate_log"
+GAUDERE_TEST_DROP_ROLLBACK=1 run_wrapper \
+    > "$workspace/rollback.out" 2> "$workspace/rollback.err" && {
+        printf 'prewake wrapper accepted loss of rollback image\n' >&2
+        exit 1
+    }
+grep -q 'frozen rollback image disappeared after successful upgrade' "$workspace/rollback.err"
+[ "$(cat "$service_state")" = "active" ]
+[ "$(wc -l < "$gate_log" | tr -d ' ')" -eq 1 ]
 
 printf 'prewake runtime upgrade synthetic test: PASS\n'
