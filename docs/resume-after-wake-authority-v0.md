@@ -31,13 +31,15 @@ No code path may make layer 1 call layer 3 directly. Any future automatic path m
 
 ## Why the Task row is the resume claim
 
-`gaudere::work::Runtime::submit` accepts only valid pending Tasks and rejects an existing Task ID or idempotency key as a duplicate. The current runtime has one database-owning process and one durable mutator path. Under that ownership invariant, a deterministic Task gives the required one-shot claim:
+`gaudere::work::Runtime::submit` accepts only valid pending Tasks and rejects an existing Task ID or idempotency key as a duplicate. SQLite additionally constrains `tasks.id` as the primary key and `tasks.idempotency_key` as unique. The current runtime has one database-owning process and one durable mutator path. Under that ownership invariant, a deterministic Task gives the required one-shot claim:
 
 - crash before Task save: no claim exists; retry is safe;
-- crash after Task save but before notification/reply: claim exists durably; retry returns duplicate;
+- crash after Task save but before notification/reply: claim exists durably; retry observes a duplicate;
 - restart/reopen: the same pending/running/terminal Task is rediscovered;
 - no delete/recycle path is introduced;
 - no external effect has occurred merely because the Task exists.
+
+A duplicate is accepted as the same claim only after reloading the existing Task and proving that its complete immutable definition matches the canonical expected resume Task. A same-ID or same-key record with a different kind/input/limits/identity is a conflict and fails closed; generic `Runtime::submit == duplicate` alone is not sufficient evidence.
 
 This design is not valid for a future multi-process/multi-writer runtime without an atomic claim/insert primitive. Multi-writer support is a new design boundary.
 
@@ -71,7 +73,7 @@ A resume claim may be created only when all of these are true:
 
 `revoked`, `manual_review`, `scheduled`, malformed, missing, foreign-scope, foreign-kind, failed, noncanonical, or source-inconsistent records fail closed and create no Task.
 
-A duplicate observation of an already-created valid resume Task is success-by-identity, not a new claim.
+A duplicate observation of an already-created **canonically identical** resume Task is success-by-identity, not a new claim.
 
 ## Capability shape
 
@@ -147,7 +149,7 @@ A later planner/executor that consumes `objective` is another authority boundary
 The current `ProviderTaskHandler` already establishes the correct external-effect ordering:
 
 1. derive deterministic provider Action/idempotency identity from the Task;
-2. consume durable provider budget before provider creation/invocation;
+2. consume durable provider budget before `provider.invoke()`; the Provider object may already exist from service activation;
 3. submit/start a critical Action;
 4. persist `effect_started` before `provider.invoke()`;
 5. on exception or ambiguous transport, persist unknown/manual-review and never replay automatically;
@@ -275,4 +277,4 @@ This document does not authorize or design:
 
 ## Acceptance decision
 
-The proposed v0 boundary is reviewable without a new persistence schema: **one fired wake lineage → at most one deterministic resume Task → at most one existing provider Action**. The Task row is the durable internal claim; the existing Action effect marker remains the durable external-effect marker. WakeIntent remains inert and unchanged.
+The proposed v0 boundary is reviewable without a new persistence schema: **one fired wake lineage -> at most one deterministic resume Task -> at most one existing provider Action**. The Task row is the durable internal claim; the existing Action effect marker remains the durable external-effect marker. WakeIntent remains inert and unchanged.
