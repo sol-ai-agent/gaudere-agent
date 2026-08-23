@@ -1,0 +1,31 @@
+name: First real WakeIntent gate
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/run-first-real-wake-phase-a-v0.sh'
+      - 'scripts/run-first-real-wake-phase-b-v0.sh'
+      - 'tests/first_real_wake_gate_test.sh'
+      - 'docs/first-real-wake-gate-v0.md'
+      - '.github/workflows/first-real-wake-gate.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/run-first-real-wake-phase-a-v0.sh'
+      - 'scripts/run-first-real-wake-phase-b-v0.sh'
+      - 'tests/first_real_wake_gate_test.sh'
+      - 'docs/first-real-wake-gate-v0.md'
+      - '.github/workflows/first-real-wake-gate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate first real WakeIntent lifecycle gate
+        run: sh tests/first_real_wake_gate_test.sh
