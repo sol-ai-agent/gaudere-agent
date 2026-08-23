@@ -1,0 +1,24 @@
+name: WakeIntent host-downtime proof
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/run-wake-host-downtime-*.sh'
+      - 'tests/wake_host_downtime_gate_test.sh'
+      - 'docs/wake-host-downtime-proof-v0.md'
+      - '.github/workflows/wake-host-downtime-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-fedora:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: dnf -y install python3 grep sed coreutils diffutils util-linux
+      - name: Run host-downtime gate proof
+        run: sh tests/wake_host_downtime_gate_test.sh
