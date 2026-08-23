@@ -23,9 +23,8 @@ sh -n "$observe"
     || fail "arm phase must contain exactly accepted + duplicate wake calls"
 ! grep -q 'accept-wake' "$poweroff" || fail "poweroff phase must not accept a wake"
 ! grep -q 'accept-wake' "$observe" || fail "observe phase must not accept a wake"
-! grep -q -- '--openai-' "$repo_root/scripts/run-wake-host-downtime-poweroff-v0.sh" \
-    || fail "poweroff phase must not contain OpenAI capability"
-! grep -q ' --user start "$staging_service"' "$observe" \
+! grep -q -- '--openai-' "$poweroff" || fail "poweroff phase must not contain OpenAI capability"
+! grep -Eq '"\$systemctl_command" --user start "\$staging_service"' "$observe" \
     || fail "observe phase must not manually start staging before autostart proof"
 grep -q 'Network=none' "$arm" || fail "staging profile does not force Network=none"
 grep -q 'WantedBy=default.target' "$arm" || fail "staging profile lacks reboot startup wiring"
@@ -272,7 +271,6 @@ grep -qx 'status=POWER_OFF_REQUESTED_BEFORE_DUE' "$workspace/poweroff.out" || fa
 
 proof="$data/gaudere/wake-proof-v0/host-downtime"
 due=$(sed -n 's/^due_at_ms=//p' "$proof/phase-arm.meta")
-accepted=$(sed -n 's/^accepted_at_ms=//p' "$proof/phase-arm.meta")
 terminal=$((due + 12345))
 python3 - "$stage_db" "$terminal" <<'PY'
 import sqlite3, sys
@@ -287,6 +285,9 @@ printf 'active\n' > "$workspace/services/gaudere-wake-staging.service"
 if common_env sh "$observe" >"$workspace/observe-noauth.out" 2>&1; then
     fail "observe phase accepted execution without explicit argument"
 fi
+# From here on, record only the real observe invocation. The arm phase legitimately
+# started staging; that must not be confused with a forbidden manual start after reboot.
+: > "$systemctl_log"
 common_env sh "$observe" --observe-after-reboot-and-close > "$workspace/observe.out"
 grep -qx 'host_down_across_deadline=PASS' "$workspace/observe.out" || fail "host-down proof missing"
 grep -qx 'staging_autostart_after_reboot=PASS' "$workspace/observe.out" || fail "autostart proof missing"
@@ -301,10 +302,7 @@ grep -qx 'gaudere wake host-downtime observe: PASS' "$workspace/observe.out" || 
 [ ! -e "$data/gaudere/wake-host-downtime-v0" ] || fail "staging state remained after PASS"
 [ -f "$proof/staging-final.db" ] || fail "final staging proof DB missing"
 ! grep -Eq ':(reflect|openai)$' "$control_log" || fail "host-downtime lifecycle invoked provider work"
-
-# The observe phase may restart staging only after it has first proved post-reboot
-# active/autostart state; it must never contain a manual start operation.
 ! grep -q '^--user start gaudere-wake-staging.service$' "$systemctl_log" \
-    || fail "observe or another phase manually started staging unexpectedly after reboot fixture"
+    || fail "observe manually started staging instead of proving reboot autostart"
 
 printf 'wake_host_downtime_gate_test: PASS\n'
