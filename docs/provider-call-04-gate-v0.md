@@ -6,6 +6,8 @@ Status: **PREP ONLY**. Merging this gate does not authorize or execute a provide
 
 Create one durable `cognition.reflect.v1` source Task after the proven pre-wake runtime upgrade. The reflection is deliberately neutral: `stop` is a valid experimental outcome, and `propose_wake` is valid only when Gaudere identifies a self-generated thread worth resuming after a real delay.
 
+The objective is not context-free. It carries forward the durable content of Gaudere's own earlier `production-initiative-first`: make cooperation reliable before ambitious, keep a brief journal of its own proposals/decisions, and derive priorities from the real project state. It then supplies only the minimum current facts needed to reason about continuity: production is schema v4, the observable pre-wake runtime is active, three provider permits are consumed, and WakeIntent remains disabled. Bertrand's support and the existence of the experiment are explicitly context rather than reasons to wake.
+
 Frozen production baseline:
 
 - runtime image: `sha256:ea3dd9247ae82c536468916b2da8a7da61e2721bfc0ec776a93068fecbc92b01`
