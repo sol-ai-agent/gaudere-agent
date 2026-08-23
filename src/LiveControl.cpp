@@ -41,6 +41,8 @@ std::string operation_name(const LiveControlOperation operation)
         return "revoke_wake";
     case LiveControlOperation::inspect_wake:
         return "inspect_wake";
+    case LiveControlOperation::inspect_wake_status:
+        return "inspect_wake_status";
     }
     throw std::invalid_argument("unknown live control operation");
 }
@@ -70,6 +72,9 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "inspect_wake") {
         return LiveControlOperation::inspect_wake;
+    }
+    if (value == "inspect_wake_status") {
+        return LiveControlOperation::inspect_wake_status;
     }
     throw std::invalid_argument("unsupported live control operation");
 }
@@ -151,6 +156,12 @@ void validate_command(const LiveControlCommand& command)
     case LiveControlOperation::inspect_wake:
         if (!command.text.empty()) {
             throw std::invalid_argument("inspect_wake does not accept text");
+        }
+        break;
+    case LiveControlOperation::inspect_wake_status:
+        if (command.id != "current" || !command.text.empty()) {
+            throw std::invalid_argument(
+                "inspect_wake_status accepts only id 'current' and no text");
         }
         break;
     }

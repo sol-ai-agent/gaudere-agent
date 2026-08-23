@@ -30,6 +30,11 @@ struct ExplicitWakeAcceptance {
     std::string detail;
 };
 
+struct ExplicitWakeStatus {
+    bool healthy = false;
+    std::string report;
+};
+
 /** Explicit authority boundary from one canonical reflection Task to one wake.
  *
  * The application-fixed scope and lifetime maximum are verified at construction.
@@ -48,6 +53,19 @@ public:
         const std::string& reason);
     [[nodiscard]] std::optional<gaudere::scheduling::wake::WakeIntent> find(
         const std::string& wake_id) const;
+
+    /** Read-only composite status for the application-fixed wake scope.
+     *
+     * The caller supplies already-observed worker lease and scheduler deadlines.
+     * This method never reconciles, refreshes, accepts, revokes, submits work, or
+     * performs provider effects. Source eligibility reuses the exact canonical
+     * decision validator used by accept().
+     */
+    [[nodiscard]] ExplicitWakeStatus inspect_status(
+        std::optional<gaudere::scheduling::wake::WakeIntentTimePoint>
+            next_lease_at,
+        std::optional<gaudere::scheduling::wake::WakeIntentTimePoint>
+            scheduler_next_at) const;
 
 private:
     gaudere::work::TaskStore& task_store_;

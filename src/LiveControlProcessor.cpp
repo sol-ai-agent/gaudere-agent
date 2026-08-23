@@ -158,13 +158,15 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            gaudere::budget::Store& budget_store,
                                            gaudere::budget::Policy budget_policy,
                                            const bool openai_enabled,
-                                           ExplicitWake* explicit_wake)
+                                           ExplicitWake* explicit_wake,
+                                           SchedulerNext scheduler_next)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
       budget_policy_(std::move(budget_policy)),
       openai_enabled_(openai_enabled),
-      explicit_wake_(explicit_wake)
+      explicit_wake_(explicit_wake),
+      scheduler_next_(std::move(scheduler_next))
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -191,10 +193,6 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
                 pending->command(), work_may_be_pending,
                 wake_deadline_may_have_changed));
         } catch (const std::exception& error) {
-            // Fail safe across the narrow boundary after a durable commit but
-            // before its reply/notification: one immediate reconciliation event
-            // is harmless when no transition committed and prevents stranded
-            // Task or WakeIntent state when one did.
             work_may_be_pending = task_submission_may_have_committed;
             wake_deadline_may_have_changed =
                 wake_transition_may_have_committed;
@@ -234,6 +232,20 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
             std::chrono::system_clock::now(), budget_policy_);
         return LiveControlReply{
             true, 0, budget_report(snapshot, budget_policy_, openai_enabled_)};
+    }
+
+    if (command.operation == LiveControlOperation::inspect_wake_status) {
+        if (!explicit_wake_) {
+            return wake_disabled();
+        }
+        if (!scheduler_next_) {
+            throw std::runtime_error(
+                "wake status scheduler observation is unavailable");
+        }
+        const auto status = explicit_wake_->inspect_status(
+            runtime_.next_recovery_at(), scheduler_next_());
+        return LiveControlReply{status.healthy, status.healthy ? 0 : 4,
+                                status.report};
     }
 
     if (command.operation == LiveControlOperation::inspect_wake) {
@@ -330,6 +342,7 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
     case LiveControlOperation::accept_wake:
     case LiveControlOperation::revoke_wake:
     case LiveControlOperation::inspect_wake:
+    case LiveControlOperation::inspect_wake_status:
         throw std::logic_error(
             "non-submit operation unexpectedly reached submit path");
     }
@@ -347,8 +360,6 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
         throw std::runtime_error(description + " task is missing after submission");
     }
 
-    // A duplicate can still refer to pending/recoverable work. Waking the normal
-    // dispatcher is cheap and preserves the event-driven no-polling model.
     if (!gaudere::work::is_terminal(stored->status)) {
         work_may_be_pending = true;
     }

@@ -24,11 +24,13 @@ enum class WorkCycleResult {
  *
  * The controller owns no thread and performs no polling. start() requests an
  * immediate first wake. notify_work() advances the scheduler to an immediate
- * wake after accepted in-process work. wait_and_run() blocks in Scheduler,
- * reconciles optional durable wake intents, recovers expired leases, drains
- * eligible pending work through TaskDispatcher, then schedules the exact minimum
- * of the next lease-recovery and wake-intent deadlines. refresh_deadlines() is a
- * worker-only hook used after a durable live-control wake transition commits.
+ * wake after accepted in-process work. interrupt() wakes a blocked worker for
+ * control-plane observation without changing an armed deadline or starting a
+ * work cycle. wait_and_run() blocks in Scheduler, reconciles optional durable
+ * wake intents, recovers expired leases, drains eligible pending work through
+ * TaskDispatcher, then schedules the exact minimum of the next lease-recovery
+ * and wake-intent deadlines. refresh_deadlines() is a worker-only hook used
+ * after a durable live-control wake transition commits.
  *
  * stop() is safe to call from another thread: it only publishes the stop request
  * and wakes/stops Scheduler. The worker thread that is inside wait_and_run()
@@ -45,6 +47,7 @@ public:
 
     [[nodiscard]] bool start();
     void notify_work();
+    void interrupt();
     void refresh_deadlines();
     [[nodiscard]] WorkCycleResult wait_and_run();
     void stop();

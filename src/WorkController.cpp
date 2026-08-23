@@ -40,6 +40,14 @@ void WorkController::notify_work()
     static_cast<void>(scheduler_.request_after(std::chrono::seconds{0}));
 }
 
+void WorkController::interrupt()
+{
+    if (!started_.load() || stopping_.load()) {
+        return;
+    }
+    scheduler_.interrupt();
+}
+
 void WorkController::refresh_deadlines()
 {
     if (!started_.load() || stopping_.load()) {
@@ -57,9 +65,13 @@ WorkCycleResult WorkController::wait_and_run()
         return enter_draining();
     }
 
-    if (scheduler_.wait() == gaudere::scheduling::wake::WaitResult::stopped
+    const auto wait_result = scheduler_.wait();
+    if (wait_result == gaudere::scheduling::wake::WaitResult::stopped
         || stopping_.load()) {
         return enter_draining();
+    }
+    if (wait_result == gaudere::scheduling::wake::WaitResult::interrupted) {
+        return WorkCycleResult::idle;
     }
 
     reconcile_wakes();

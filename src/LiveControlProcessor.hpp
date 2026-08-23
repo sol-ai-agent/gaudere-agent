@@ -9,6 +9,8 @@
 #include <gaudere/work/TaskStore.hpp>
 
 #include <cstddef>
+#include <functional>
+#include <optional>
 
 namespace gaudere_agent {
 
@@ -28,12 +30,16 @@ struct LiveControlProcessResult {
  */
 class LiveControlProcessor {
 public:
+    using SchedulerNext = std::function<
+        std::optional<gaudere::scheduling::wake::WakeIntentTimePoint>()>;
+
     LiveControlProcessor(gaudere::work::Runtime& runtime,
                          gaudere::work::TaskStore& store,
                          gaudere::budget::Store& budget_store,
                          gaudere::budget::Policy budget_policy,
                          bool openai_enabled,
-                         ExplicitWake* explicit_wake = nullptr);
+                         ExplicitWake* explicit_wake = nullptr,
+                         SchedulerNext scheduler_next = {});
 
     [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
 
@@ -48,6 +54,7 @@ private:
     gaudere::budget::Policy budget_policy_;
     bool openai_enabled_;
     ExplicitWake* explicit_wake_;
+    SchedulerNext scheduler_next_;
 };
 
 } // namespace gaudere_agent
