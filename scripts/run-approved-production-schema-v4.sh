@@ -70,7 +70,7 @@ verify_blob()
 verify_blob 'scripts/transition-production-schema-v4-wake-off.sh' \
     '5c75e9aee338968af7cc0324e6a1897e03ff7222'
 verify_blob 'scripts/deploy-schema-v4.sh' \
-    '9596e64bb45177da5ad26218ba31a526bb90e7ba'
+    '4650c6f8133bda8e5eb3d3171864c9bd9fa447a1'
 verify_blob 'scripts/deploy-schema-v4-stage-internal.sh' \
     '8435184a3f613bff697572837aad4895248900d3'
 verify_blob 'scripts/validate-schema-v4-image-provenance.sh' \
