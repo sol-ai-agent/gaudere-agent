@@ -6,7 +6,8 @@ set -eu
 # One production transaction joins the already reviewed stopped-state v3->v4
 # staging engine to the schema-v4 wake-off service gate. There is deliberately no
 # externally visible half-way success: either the candidate service reaches the
-# final wake-off proof, or recovery restores the original schema-v3 state/profile.
+# final wake-off proof, or recovery restores schema v3 while keeping post-swap
+# autostart durably disarmed for explicit operator review.
 #
 # This script never enables --wake-intents, submits provider work, consumes a
 # provider permit, or publishes a port. A real run requires a one-shot explicit
@@ -16,6 +17,7 @@ script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 default_deploy="$script_directory/deploy-schema-v4.sh"
 default_wake_gate="$script_directory/validate-schema-v4-service-wake-off.sh"
 default_control="$script_directory/control-service.sh"
+default_openai_profile="$script_directory/../deploy/quadlet/gaudere-agent-openai.container.in"
 deploy_script=${GAUDERE_SCHEMA_V4_DEPLOY_SCRIPT:-$default_deploy}
 wake_gate=${GAUDERE_SCHEMA_V4_WAKE_OFF_GATE:-$default_wake_gate}
 control_script=${GAUDERE_CONTROL_SCRIPT:-$default_control}
@@ -41,6 +43,10 @@ workspace=
 phase_file=
 profile_backup=
 profile_target=
+candidate_profile_enabled=
+candidate_profile_disarmed=
+profile_autostart_before=
+service_enablement_before=
 v3_snapshot=
 snapshot_ready=0
 recovery_armed=0
@@ -56,6 +62,212 @@ fail()
     printf 'gaudere production schema v4 transaction: phase=%s: %s\n' \
         "$phase" "$*" >&2
     exit 1
+}
+
+durable_install()
+{
+    gaudere_source=$1
+    gaudere_target=$2
+    gaudere_mode=$3
+    python3 - "$gaudere_source" "$gaudere_target" "$gaudere_mode" <<'PY'
+import os
+import pathlib
+import sys
+import tempfile
+
+source = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+mode = int(sys.argv[3], 8)
+parent = target.parent
+parent.mkdir(parents=True, exist_ok=True)
+data = source.read_bytes()
+fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=parent)
+try:
+    os.fchmod(fd, mode)
+    with os.fdopen(fd, "wb", closefd=True) as output:
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
+    fd = -1
+    os.replace(temporary, target)
+    directory_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+except BaseException:
+    if fd >= 0:
+        os.close(fd)
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+    raise
+PY
+}
+
+durable_remove()
+{
+    gaudere_target=$1
+    python3 - "$gaudere_target" <<'PY'
+import os
+import pathlib
+import sys
+
+target = pathlib.Path(sys.argv[1])
+parent = target.parent
+try:
+    target.unlink()
+except FileNotFoundError:
+    pass
+directory_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory_fd)
+finally:
+    os.close(directory_fd)
+PY
+}
+
+sync_directory()
+{
+    gaudere_directory=$1
+    python3 - "$gaudere_directory" <<'PY'
+import os
+import sys
+
+directory_fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory_fd)
+finally:
+    os.close(directory_fd)
+PY
+}
+
+durable_text()
+{
+    gaudere_target=$1
+    gaudere_value=$2
+    python3 - "$gaudere_target" "$gaudere_value" <<'PY'
+import os
+import pathlib
+import sys
+import tempfile
+
+target = pathlib.Path(sys.argv[1])
+value = sys.argv[2] + "\n"
+parent = target.parent
+fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=parent)
+try:
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", closefd=True) as output:
+        output.write(value)
+        output.flush()
+        os.fsync(output.fileno())
+    fd = -1
+    os.replace(temporary, target)
+    directory_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+except BaseException:
+    if fd >= 0:
+        os.close(fd)
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+    raise
+PY
+}
+
+render_profile()
+{
+    gaudere_source=$1
+    gaudere_output=$2
+    gaudere_image=$3
+    gaudere_autostart=$4
+    python3 - "$gaudere_source" "$gaudere_output" "$gaudere_image" \
+            "$gaudere_autostart" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+image_id = sys.argv[3]
+autostart = sys.argv[4]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
+if len(indexes) != 1:
+    raise SystemExit("OpenAI Quadlet template must contain exactly one Image= line")
+index = indexes[0]
+ending = "\n" if lines[index].endswith("\n") else ""
+lines[index] = f"Image={image_id}{ending}"
+if autostart == "disarmed":
+    filtered = []
+    in_install = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_install = stripped == "[Install]"
+            if in_install:
+                continue
+        if not in_install:
+            filtered.append(line)
+    lines = filtered
+destination.write_text("".join(lines), encoding="utf-8")
+PY
+    chmod 600 "$gaudere_output"
+}
+
+profile_autostart_mode()
+{
+    gaudere_profile=$1
+    python3 - "$gaudere_profile" <<'PY'
+import pathlib
+import sys
+
+section = None
+wanted_by = []
+install_sections = 0
+for raw in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if line.startswith("[") and line.endswith("]"):
+        section = line[1:-1]
+        if section == "Install":
+            install_sections += 1
+        continue
+    if section == "Install" and line.startswith("WantedBy="):
+        wanted_by.append(line.split("=", 1)[1].strip())
+if install_sections > 1 or len(wanted_by) > 1:
+    raise SystemExit("ambiguous Quadlet [Install]/WantedBy layout")
+print("enabled" if wanted_by and wanted_by[0] else "disarmed")
+PY
+}
+
+service_enablement_state()
+{
+    "$systemctl_command" --user is-enabled "$service_name" 2>/dev/null || true
+}
+
+autostart_is_disarmed()
+{
+    if [ -e "$profile_target" ]; then
+        [ "$(profile_autostart_mode "$profile_target" 2>/dev/null || true)" = "disarmed" ] \
+            || return 1
+    fi
+    gaudere_enablement=$(service_enablement_state | tail -n 1)
+    case "$gaudere_enablement" in
+        enabled|enabled-runtime|linked|linked-runtime) return 1 ;;
+    esac
+    return 0
+}
+
+disarm_profile_source()
+{
+    durable_remove "$profile_target" || return 1
+    "$systemctl_command" --user daemon-reload >/dev/null 2>&1 || return 1
+    autostart_is_disarmed
 }
 
 normalize_image_id()
@@ -123,8 +335,7 @@ set_phase()
 {
     phase=$1
     if [ -n "$phase_file" ]; then
-        printf '%s\n' "$phase" > "$phase_file.tmp"
-        mv "$phase_file.tmp" "$phase_file"
+        durable_text "$phase_file" "$phase"
     fi
     printf 'transaction_phase=%s\n' "$phase"
 }
@@ -251,9 +462,12 @@ PY
 restore_profile()
 {
     [ -f "$profile_backup" ] || return 1
-    install -m 0600 "$profile_backup" "$profile_target" || return 1
+    durable_install "$profile_backup" "$profile_target" 0600 || return 1
     "$systemctl_command" --user daemon-reload >/dev/null 2>&1 || return 1
-    cmp -s "$profile_backup" "$profile_target"
+    cmp -s "$profile_backup" "$profile_target" || return 1
+    [ "$(profile_autostart_mode "$profile_target" 2>/dev/null || true)" = \
+        "$profile_autostart_before" ] || return 1
+    [ "$(service_enablement_state | tail -n 1)" = "$service_enablement_before" ]
 }
 
 old_profile_resolves_rollback()
@@ -283,16 +497,17 @@ post_swap_rollback()
         printf 'transaction_rollback=MANUAL_REVIEW service_not_inactive\n' >&2
         return 1
     }
+    disarm_profile_source || {
+        printf 'transaction_rollback=MANUAL_REVIEW autostart_disarm_failed\n' >&2
+        return 1
+    }
+    printf 'transaction_autostart=DISARMED\n' >&2
 
     # The state-only engine may already have crossed the swap and successfully
     # restored v3 before returning failure. Recognize that exact state first; do
     # not require a rollback directory that the inner engine has already consumed.
     current_schema=$(schema_version "$state_directory/state.db" 2>/dev/null || true)
     if [ "$current_schema" = "3" ] && verify_v3_snapshot; then
-        restore_profile || {
-            printf 'transaction_rollback=MANUAL_REVIEW profile_restore_failed\n' >&2
-            return 1
-        }
         old_profile_resolves_rollback || {
             printf 'transaction_rollback=MANUAL_REVIEW rollback_image_identity_failed\n' >&2
             return 1
@@ -300,6 +515,8 @@ post_swap_rollback()
         printf 'transaction_rollback=PASS_ALREADY_RESTORED_BY_STAGE\n' >&2
         printf 'restored_schema=3\n' >&2
         printf 'service_left=inactive\n' >&2
+        printf 'autostart_left=disarmed\n' >&2
+        printf 'rollback_profile_retained=%s\n' "$profile_backup" >&2
         return 0
     fi
 
@@ -355,10 +572,6 @@ post_swap_rollback()
         printf 'transaction_rollback=MANUAL_REVIEW restored_v3_mismatch\n' >&2
         return 1
     }
-    restore_profile || {
-        printf 'transaction_rollback=MANUAL_REVIEW profile_restore_failed\n' >&2
-        return 1
-    }
     old_profile_resolves_rollback || {
         printf 'transaction_rollback=MANUAL_REVIEW rollback_image_identity_failed\n' >&2
         return 1
@@ -368,6 +581,8 @@ post_swap_rollback()
     printf 'restored_schema=3\n' >&2
     printf 'retained_failed_v4=%s\n' "$failed_state_directory" >&2
     printf 'service_left=inactive\n' >&2
+    printf 'autostart_left=disarmed\n' >&2
+    printf 'rollback_profile_retained=%s\n' "$profile_backup" >&2
     return 0
 }
 
@@ -473,7 +688,7 @@ if [ "$test_mode" = "0" ]; then
         || fail "control override is restricted to synthetic test mode"
 fi
 
-for command in cmp dirname flock grep install mkdir mktemp mv python3 realpath rm sed sha256sum tail tee; do
+for command in chmod cmp dirname flock grep install mkdir mktemp mv python3 realpath rm sed sha256sum tail tee; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 command -v "$systemctl_command" >/dev/null 2>&1 || fail "systemctl command not found"
@@ -481,6 +696,7 @@ command -v "$podman_command" >/dev/null 2>&1 || fail "podman command not found"
 [ -f "$deploy_script" ] || fail "deploy script not found: $deploy_script"
 [ -f "$wake_gate" ] || fail "wake-off gate not found: $wake_gate"
 [ -f "$control_script" ] || fail "control script not found: $control_script"
+[ -f "$default_openai_profile" ] || fail "OpenAI Quadlet template not found: $default_openai_profile"
 [ -d "$state_directory" ] && [ -f "$state_directory/state.db" ] \
     || fail "production state is missing"
 
@@ -490,13 +706,37 @@ state_parent=$(dirname "$state_directory")
 transition_root="$state_parent/.schema-v4-transitions"
 mkdir -p -m 0700 "$transition_root"
 workspace=$(mktemp -d "$transition_root/transition.XXXXXX")
+sync_directory "$transition_root"
 phase_file="$workspace/phase"
 profile_target="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd/gaudere-agent.container"
 profile_backup="$workspace/profile.before"
+candidate_profile_enabled="$workspace/profile.candidate.enabled"
+candidate_profile_disarmed="$workspace/profile.candidate.disarmed"
 v3_snapshot="$workspace/v3.before.json"
 [ -f "$profile_target" ] || fail "installed service profile not found: $profile_target"
-install -m 0600 "$profile_target" "$profile_backup"
-sha256sum "$profile_backup" > "$workspace/profile.before.sha256"
+durable_install "$profile_target" "$profile_backup" 0600
+profile_backup_hash=$(sha256sum "$profile_backup" | sed 's/[[:space:]].*$//')
+durable_text "$workspace/profile.before.sha256" \
+    "$profile_backup_hash  $profile_backup"
+profile_autostart_before=$(profile_autostart_mode "$profile_backup") \
+    || fail "cannot determine prior Quadlet autostart contract"
+service_enablement_before=$(service_enablement_state | tail -n 1)
+[ -n "$service_enablement_before" ] \
+    || fail "cannot determine prior systemd enablement state"
+durable_text "$workspace/profile.autostart.before" "$profile_autostart_before"
+durable_text "$workspace/service.enablement.before" "$service_enablement_before"
+render_profile "$default_openai_profile" "$candidate_profile_enabled" \
+    "$expected_candidate_id" enabled
+render_profile "$default_openai_profile" "$candidate_profile_disarmed" \
+    "$expected_candidate_id" disarmed
+[ "$(profile_autostart_mode "$candidate_profile_enabled")" = enabled ] \
+    || fail "reviewed candidate profile does not enable its install target"
+[ "$(profile_autostart_mode "$candidate_profile_disarmed")" = disarmed ] \
+    || fail "reviewed disarmed candidate profile retains an install target"
+if grep -q -- '--wake-intents' "$candidate_profile_enabled" \
+        "$candidate_profile_disarmed"; then
+    fail "reviewed candidate profile unexpectedly enables WakeIntent"
+fi
 
 set_phase live-preflight
 [ "$(service_state)" = "active" ] || fail "$service_name must be active before transition"
@@ -534,6 +774,15 @@ service_stop_attempted=1
 "$systemctl_command" --user stop "$service_name"
 [ "$(service_state)" = "inactive" ] || fail "$service_name did not become inactive"
 
+set_phase disarming-autostart
+disarm_profile_source || fail "cannot durably disarm Quadlet autostart"
+[ ! -e "$profile_target" ] || fail "Quadlet source still exists after disarm"
+durable_text "$workspace/autostart.fence" "DISARMED"
+set_phase autostart-disarmed
+printf 'transaction_autostart=DISARMED\n'
+printf 'prior_profile_autostart=%s\n' "$profile_autostart_before"
+printf 'prior_systemd_enablement=%s\n' "$service_enablement_before"
+
 set_phase stopped-v3-snapshot
 exec 9>>"$state_directory/state.db.lock"
 chmod 600 "$state_directory/state.db.lock" 2>/dev/null || true
@@ -557,6 +806,7 @@ if ! deployment_output=$(\
     GAUDERE_ROLLBACK_IMAGE="$rollback_image" \
     GAUDERE_EXPECTED_ROLLBACK_ID="$expected_rollback_id" \
     GAUDERE_TEST_MODE="$test_mode" \
+    GAUDERE_TEST_TRANSACTION_PID="$$" \
     SYSTEMCTL="$systemctl_command" PODMAN="$podman_command" \
         sh "$deploy_script" 2>&1); then
     printf '%s\n' "$deployment_output" | tee "$workspace/deploy.out" >&2
@@ -587,6 +837,7 @@ if ! wake_output=$(\
     GAUDERE_SERVICE_NAME="$service_name" \
     GAUDERE_RUNTIME_IMAGE="$candidate_image" \
     GAUDERE_EXPECTED_RUNTIME_IMAGE_ID="$expected_candidate_id" \
+    GAUDERE_QUADLET_AUTOSTART=disarmed \
     GAUDERE_SCHEMA_V4_WAKE_OFF_AUTHORIZATION=AUTHORIZED_SCHEMA_V4_WAKE_OFF_GATE \
     GAUDERE_TEST_MODE="$test_mode" \
     SYSTEMCTL="$systemctl_command" PODMAN="$podman_command" \
@@ -604,6 +855,12 @@ printf '%s\n' "$wake_output" | grep -q '^wake_effects=0$' \
     || fail "wake-off gate did not prove zero wake effects"
 printf '%s\n' "$wake_output" | grep -q '^runtime_image_identity=PASS$' \
     || fail "wake-off gate did not prove running image identity"
+printf '%s\n' "$wake_output" | grep -q '^profile_autostart=disarmed$' \
+    || fail "wake-off gate did not report a disarmed candidate profile"
+cmp -s "$candidate_profile_disarmed" "$profile_target" \
+    || fail "candidate probe profile is not the reviewed disarmed profile"
+autostart_is_disarmed \
+    || fail "candidate probe profile can still auto-start after reboot"
 
 set_phase final-live-audit
 [ "$(service_state)" = "active" ] || fail "candidate service is not active after wake-off gate"
@@ -635,6 +892,32 @@ printf '%s\n' "$wake_observation" | grep -q \
     'explicit wake capability is not enabled in this service' \
     || fail "final wake observation did not prove disabled capability"
 
+set_phase committing-autostart
+case "$profile_autostart_before" in
+    enabled) final_profile=$candidate_profile_enabled ;;
+    disarmed) final_profile=$candidate_profile_disarmed ;;
+    *) fail "unsupported prior profile autostart state: $profile_autostart_before" ;;
+esac
+
+# This durable replacement is the commit point. Before it, the canonical candidate
+# profile contains no [Install]/WantedBy contract. After it, the already validated
+# schema-v4 state and already running immutable candidate are safe to start at boot.
+durable_install "$final_profile" "$profile_target" 0600 \
+    || fail "cannot durably restore the prior autostart contract"
+cmp -s "$final_profile" "$profile_target" \
+    || fail "committed candidate profile differs from the reviewed profile"
+[ "$(profile_autostart_mode "$profile_target" 2>/dev/null || true)" = \
+    "$profile_autostart_before" ] \
+    || fail "committed candidate profile changed the prior autostart contract"
+"$systemctl_command" --user daemon-reload \
+    || fail "cannot reload the committed candidate profile"
+[ "$(service_enablement_state | tail -n 1)" = "$service_enablement_before" ] \
+    || fail "systemd enablement state was not restored exactly"
+[ "$(service_state)" = "active" ] \
+    || fail "candidate service is not active at the autostart commit"
+[ "$(running_image_id || true)" = "$expected_candidate_id" ] \
+    || fail "autostart commit does not retain the approved running candidate"
+
 set_phase committed
 committed=1
 recovery_armed=0
@@ -647,6 +930,8 @@ printf 'backup=%s\n' "$deployment_backup"
 printf 'provider_effects=0\n'
 printf 'wake_effects=0\n'
 printf 'service_final=active\n'
+printf 'profile_autostart_final=%s\n' "$profile_autostart_before"
+printf 'systemd_enablement_final=%s\n' "$service_enablement_before"
 printf 'wake_capability_active=false\n'
 printf 'transition_workspace=%s\n' "$workspace"
 printf 'gaudere production schema v4 wake-off transaction: PASS\n'

@@ -23,6 +23,18 @@ case "$2" in
         [ "$value" = active ] && exit 0
         exit 3
         ;;
+    is-enabled)
+        if [ ! -f "$profile" ]; then
+            printf 'not-found\n'
+            exit 4
+        fi
+        if grep -q '^WantedBy=default.target$' "$profile"; then
+            printf 'enabled\n'
+            exit 0
+        fi
+        printf 'disabled\n'
+        exit 1
+        ;;
     stop)
         printf 'inactive\n' > "$state"
         exit 0
@@ -35,6 +47,17 @@ case "$2" in
         exit 0
         ;;
     daemon-reload)
+        exit 0
+        ;;
+    reboot)
+        if [ -f "$profile" ] && grep -q '^WantedBy=default.target$' "$profile"; then
+            image=$(sed -n 's/^Image=//p' "$profile")
+            [ -n "$image" ] || exit 91
+            printf '%s\n' "$image" > "$running"
+            printf 'active\n' > "$state"
+        else
+            printf 'inactive\n' > "$state"
+        fi
         exit 0
         ;;
     *) exit 92 ;;
@@ -129,6 +152,11 @@ if [ "$mode" = fail-pre ]; then
 fi
 
 mv "$state" "$rollback"
+if [ "$mode" = power-loss-rename-gap ]; then
+    transaction_pid=${GAUDERE_TEST_TRANSACTION_PID:?}
+    kill -KILL "$transaction_pid"
+    exit 137
+fi
 mkdir -p "$state"
 cp "$rollback/state.db" "$state/state.db"
 python3 - "$state/state.db" <<'PY'
@@ -164,6 +192,8 @@ profile=${GAUDERE_FAKE_PROFILE:?}
 service_state=${GAUDERE_FAKE_SERVICE_STATE:?}
 running=${GAUDERE_FAKE_RUNNING_IMAGE:?}
 candidate=${GAUDERE_EXPECTED_RUNTIME_IMAGE_ID:?}
+autostart=${GAUDERE_QUADLET_AUTOSTART:?}
+[ "$autostart" = disarmed ] || exit 31
 
 python3 - "$state/state.db" <<'PY'
 import sqlite3, sys
@@ -171,7 +201,30 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert db.execute("PRAGMA user_version").fetchone()[0] == 4
 PY
 
-printf 'Image=%s\n' "$candidate" > "$profile"
+python3 - deploy/quadlet/gaudere-agent-openai.container.in "$profile" "$candidate" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+image = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
+assert len(indexes) == 1
+ending = "\n" if lines[indexes[0]].endswith("\n") else ""
+lines[indexes[0]] = f"Image={image}{ending}"
+filtered = []
+in_install = False
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        in_install = stripped == "[Install]"
+        if in_install:
+            continue
+    if not in_install:
+        filtered.append(line)
+target.write_text("".join(filtered), encoding="utf-8")
+PY
 chmod 600 "$profile"
 if [ "$mode" = fail ]; then
     printf 'inactive\n' > "$service_state"
@@ -184,6 +237,7 @@ printf 'provider_effects=0\n'
 printf 'wake_effects=0\n'
 printf 'service_final=active\n'
 printf 'runtime_image_identity=PASS\n'
+printf 'profile_autostart=disarmed\n'
 printf 'gaudere schema v4 wake-off service gate: PASS\n'
 SH
 chmod +x "$workspace/wake-gate.sh"
@@ -191,6 +245,7 @@ chmod +x "$workspace/wake-gate.sh"
 make_fixture()
 {
     root=$1
+    autostart=${2:-enabled}
     state="$root/data/gaudere/state"
     config="$root/config/containers/systemd"
     mkdir -p "$state" "$config" "$root/backups"
@@ -216,6 +271,13 @@ with sqlite3.connect(sys.argv[1]) as db:
     """)
 PY
     printf 'Image=%s\n' "$rollback_id" > "$config/gaudere-agent.container"
+    if [ "$autostart" = enabled ]; then
+        printf '\n[Install]\nWantedBy=default.target\n' >> \
+            "$config/gaudere-agent.container"
+    elif [ "$autostart" != disarmed ]; then
+        printf 'invalid synthetic autostart mode: %s\n' "$autostart" >&2
+        exit 1
+    fi
     chmod 600 "$config/gaudere-agent.container"
     printf 'active\n' > "$root/service.state"
     printf '%s\n' "$rollback_id" > "$root/running.image"
@@ -228,6 +290,25 @@ import sqlite3, sys
 with sqlite3.connect(sys.argv[1]) as db:
     print(db.execute("PRAGMA user_version").fetchone()[0])
 PY
+}
+
+fake_enablement()
+{
+    root=$1
+    GAUDERE_FAKE_SERVICE_STATE="$root/service.state" \
+    GAUDERE_FAKE_RUNNING_IMAGE="$root/running.image" \
+    GAUDERE_FAKE_PROFILE="$root/config/containers/systemd/gaudere-agent.container" \
+        "$workspace/systemctl" --user is-enabled gaudere-agent.service 2>/dev/null \
+        || true
+}
+
+simulate_reboot()
+{
+    root=$1
+    GAUDERE_FAKE_SERVICE_STATE="$root/service.state" \
+    GAUDERE_FAKE_RUNNING_IMAGE="$root/running.image" \
+    GAUDERE_FAKE_PROFILE="$root/config/containers/systemd/gaudere-agent.container" \
+        "$workspace/systemctl" --user reboot gaudere-agent.service
 }
 
 run_case()
@@ -271,16 +352,39 @@ cat "$case_success/out"
 [ "$(cat "$case_success/service.state")" = active ]
 [ "$(cat "$case_success/running.image")" = "$candidate_id" ]
 grep -qx "Image=$candidate_id" "$case_success/config/containers/systemd/gaudere-agent.container"
+grep -qx 'WantedBy=default.target' \
+    "$case_success/config/containers/systemd/gaudere-agent.container"
+[ "$(fake_enablement "$case_success")" = enabled ]
 grep -q '^provider_effects=0$' "$case_success/out"
 grep -q '^wake_effects=0$' "$case_success/out"
 grep -q '^service_final=active$' "$case_success/out"
+grep -q '^profile_autostart_final=enabled$' "$case_success/out"
 grep -q '^gaudere production schema v4 wake-off transaction: PASS$' "$case_success/out"
 test -d "$case_success/data/gaudere/state.pre-v4-test"
+
+# A service that was active but intentionally not configured for boot remains
+# disarmed after success while the candidate process itself stays active.
+case_success_disabled="$workspace/success-disabled"
+make_fixture "$case_success_disabled" disarmed
+run_case "$case_success_disabled" success success \
+    > "$case_success_disabled/out" 2> "$case_success_disabled/err"
+[ "$(schema "$case_success_disabled/data/gaudere/state/state.db")" = 4 ]
+[ "$(cat "$case_success_disabled/service.state")" = active ]
+[ "$(cat "$case_success_disabled/running.image")" = "$candidate_id" ]
+[ "$(fake_enablement "$case_success_disabled")" = disabled ]
+if grep -q '^WantedBy=' \
+        "$case_success_disabled/config/containers/systemd/gaudere-agent.container"; then
+    printf 'disabled success unexpectedly rearmed autostart\n' >&2
+    exit 1
+fi
+grep -q '^profile_autostart_final=disarmed$' "$case_success_disabled/out"
 
 # Failure before any swap: restore/reload the exact original profile and restart
 # unchanged schema v3 automatically.
 case_pre="$workspace/fail-pre"
 make_fixture "$case_pre"
+cp "$case_pre/config/containers/systemd/gaudere-agent.container" \
+    "$case_pre/profile.expected"
 if run_case "$case_pre" fail-pre success > "$case_pre/out" 2> "$case_pre/err"; then
     printf 'pre-swap failure unexpectedly succeeded\n' >&2
     exit 1
@@ -290,11 +394,31 @@ cat "$case_pre/err"
 [ "$(cat "$case_pre/service.state")" = active ]
 [ "$(cat "$case_pre/running.image")" = "$rollback_id" ]
 grep -qx "Image=$rollback_id" "$case_pre/config/containers/systemd/gaudere-agent.container"
+cmp "$case_pre/profile.expected" \
+    "$case_pre/config/containers/systemd/gaudere-agent.container"
+[ "$(fake_enablement "$case_pre")" = enabled ]
 grep -q '^pre_swap_recovery=PASS$' "$case_pre/err"
 grep -q '^service_restored=active$' "$case_pre/err"
 
-# Failure after the state swap: automatically put exact v3 + old profile back,
-# retain failed v4, and intentionally leave the service stopped for human review.
+case_pre_disabled="$workspace/fail-pre-disabled"
+make_fixture "$case_pre_disabled" disarmed
+cp "$case_pre_disabled/config/containers/systemd/gaudere-agent.container" \
+    "$case_pre_disabled/profile.expected"
+if run_case "$case_pre_disabled" fail-pre success \
+        > "$case_pre_disabled/out" 2> "$case_pre_disabled/err"; then
+    printf 'disabled pre-swap failure unexpectedly succeeded\n' >&2
+    exit 1
+fi
+[ "$(schema "$case_pre_disabled/data/gaudere/state/state.db")" = 3 ]
+[ "$(cat "$case_pre_disabled/service.state")" = active ]
+[ "$(cat "$case_pre_disabled/running.image")" = "$rollback_id" ]
+cmp "$case_pre_disabled/profile.expected" \
+    "$case_pre_disabled/config/containers/systemd/gaudere-agent.container"
+[ "$(fake_enablement "$case_pre_disabled")" = disabled ]
+grep -q '^pre_swap_recovery=PASS$' "$case_pre_disabled/err"
+
+# Failure after the state swap: put exact v3 back, retain failed v4, and leave both
+# the service and Quadlet autostart durably disarmed for human review.
 case_post="$workspace/fail-post"
 make_fixture "$case_post"
 if run_case "$case_post" success fail > "$case_post/out" 2> "$case_post/err"; then
@@ -304,11 +428,15 @@ fi
 cat "$case_post/err"
 [ "$(schema "$case_post/data/gaudere/state/state.db")" = 3 ]
 [ "$(cat "$case_post/service.state")" = inactive ]
-grep -qx "Image=$rollback_id" "$case_post/config/containers/systemd/gaudere-agent.container"
+test ! -e "$case_post/config/containers/systemd/gaudere-agent.container"
+[ "$(fake_enablement "$case_post")" = not-found ]
 grep -q '^transaction_rollback=PASS$' "$case_post/err"
 grep -q '^service_left=inactive$' "$case_post/err"
+grep -q '^autostart_left=disarmed$' "$case_post/err"
 test -d "$case_post/data/gaudere/state.failed-v4-test"
 [ "$(schema "$case_post/data/gaudere/state.failed-v4-test/state.db")" = 4 ]
+simulate_reboot "$case_post"
+[ "$(cat "$case_post/service.state")" = inactive ]
 
 # If the inner deployment crossed the swap and already restored v3 itself, the
 # outer transaction must recognize the exact snapshot, not demand a consumed
@@ -322,6 +450,53 @@ fi
 cat "$case_inner/err"
 [ "$(schema "$case_inner/data/gaudere/state/state.db")" = 3 ]
 [ "$(cat "$case_inner/service.state")" = inactive ]
+test ! -e "$case_inner/config/containers/systemd/gaudere-agent.container"
+[ "$(fake_enablement "$case_inner")" = not-found ]
 grep -q '^transaction_rollback=PASS_ALREADY_RESTORED_BY_STAGE$' "$case_inner/err"
+
+# A synthetic SIGKILL immediately after state -> state.pre-v4 proves that traps are
+# not part of the safety boundary. The canonical profile is already absent, so a
+# simulated reboot cannot start a unit or create a replacement bind-mount source.
+case_power="$workspace/power-loss-rename-gap"
+make_fixture "$case_power" enabled
+if run_case "$case_power" power-loss-rename-gap success \
+        > "$case_power/out" 2> "$case_power/err"; then
+    printf 'rename-gap power loss unexpectedly succeeded\n' >&2
+    exit 1
+fi
+test ! -e "$case_power/data/gaudere/state"
+test -d "$case_power/data/gaudere/state.pre-v4-test"
+[ "$(schema "$case_power/data/gaudere/state.pre-v4-test/state.db")" = 3 ]
+test ! -e "$case_power/config/containers/systemd/gaudere-agent.container"
+[ "$(fake_enablement "$case_power")" = not-found ]
+[ "$(cat "$case_power/service.state")" = inactive ]
+simulate_reboot "$case_power"
+[ "$(cat "$case_power/service.state")" = inactive ]
+
+power_workspace=$(find "$case_power/data/gaudere/.schema-v4-transitions" \
+    -mindepth 1 -maxdepth 1 -type d -name 'transition.*' -print -quit)
+[ -n "$power_workspace" ]
+[ "$(cat "$power_workspace/phase")" = deploying-v4 ]
+[ "$(cat "$power_workspace/autostart.fence")" = DISARMED ]
+test -f "$power_workspace/profile.before"
+
+# Exercise the documented operator order on the disposable layout: keep the
+# profile absent, restore exact v3 first, then restore/reload/start rollback.
+mv "$case_power/data/gaudere/state.pre-v4-test" \
+    "$case_power/data/gaudere/state"
+install -m 0600 "$power_workspace/profile.before" \
+    "$case_power/config/containers/systemd/gaudere-agent.container"
+GAUDERE_FAKE_SERVICE_STATE="$case_power/service.state" \
+GAUDERE_FAKE_RUNNING_IMAGE="$case_power/running.image" \
+GAUDERE_FAKE_PROFILE="$case_power/config/containers/systemd/gaudere-agent.container" \
+    "$workspace/systemctl" --user daemon-reload
+GAUDERE_FAKE_SERVICE_STATE="$case_power/service.state" \
+GAUDERE_FAKE_RUNNING_IMAGE="$case_power/running.image" \
+GAUDERE_FAKE_PROFILE="$case_power/config/containers/systemd/gaudere-agent.container" \
+    "$workspace/systemctl" --user start gaudere-agent.service
+[ "$(schema "$case_power/data/gaudere/state/state.db")" = 3 ]
+[ "$(cat "$case_power/service.state")" = active ]
+[ "$(cat "$case_power/running.image")" = "$rollback_id" ]
+[ "$(fake_enablement "$case_power")" = enabled ]
 
 printf 'gaudere production schema v4 transaction test: PASS\n'

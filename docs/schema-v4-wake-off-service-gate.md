@@ -45,6 +45,13 @@ service therefore cannot silently follow a later `:dev` or candidate-tag move. A
 service start, the gate independently inspects the running container and requires its
 actual image ID to equal the approved candidate ID.
 
+The standalone gate keeps its historical `enabled` profile behavior. The enclosing
+production transaction invokes it with `GAUDERE_QUADLET_AUTOSTART=disarmed` after
+durably removing the prior source. In that mode the installer omits the complete
+`[Install]` section, the gate rejects any remaining `WantedBy`, and all service starts
+are explicit. The transaction alone restores the prior autostart contract at its final
+durable commit point.
+
 ## Proof sequence
 
 1. While stopped and under `state.db.lock`, require schema v4, SQLite integrity, the
@@ -55,8 +62,9 @@ actual image ID to equal the approved candidate ID.
 3. Resolve the reviewed runtime reference and require it to match the expected immutable
    candidate image ID.
 4. Run the OpenAI service installer with that immutable ID. Require the installed
-   Quadlet to equal the reviewed template except for its `Image=` line, which must be
-   exactly the immutable candidate ID, and require no `--wake-intents`.
+   Quadlet to equal the reviewed template except for its `Image=` line and, in
+   transaction-disarmed mode, omission of `[Install]`. Require the image to be exactly
+   the immutable candidate ID and require no `--wake-intents` or boot-time `WantedBy`.
 5. Start the service and prove the **running container itself** uses the same immutable
    image ID. Perform observations only: budget, representative Task, and a `wake` lookup
    that must fail because wake is disabled. No `echo`, `openai`, `reflect`, `accept-wake`,
@@ -80,6 +88,9 @@ looks correct. The validator never changes the schema back to v3: the v3 rollbac
 backup, and prior image from the separately authorized migration gate remain the recovery
 artifacts for a schema rollback.
 
+When disarmed mode began with no canonical source, failure removes the uncommitted
+candidate source and reloads systemd instead of inventing a prior profile.
+
 If the service cannot be proven inactive during failure recovery, the validator does not
 claim the prior profile was restored and reports the observed state for human recovery.
 
@@ -96,6 +107,8 @@ fake `systemctl`, `journalctl`, Podman, installer, and live-control commands. It
 - an unexpected running-container image, enabled wake command, or `explicit wake enabled`
   log is fatal;
 - post-start failures restore the prior profile and leave the service stopped.
+- disarmed success contains no `[Install]`/`WantedBy`, and disarmed failure with no prior
+  source removes the candidate source again.
 
 `tests/openai_installer_schema_compatibility_test.sh` separately proves that the ordinary
 OpenAI installer resolves a mutable input reference to one immutable image ID, uses only

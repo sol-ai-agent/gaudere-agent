@@ -5,6 +5,7 @@ podman_command=${PODMAN:-podman}
 service_name=${GAUDERE_SERVICE_NAME:-gaudere-agent.service}
 secret_name=${GAUDERE_OPENAI_SECRET_NAME:-gaudere-openai-api-key}
 image=${GAUDERE_IMAGE:-localhost/gaudere-agent:dev}
+quadlet_autostart=${GAUDERE_QUADLET_AUTOSTART:-enabled}
 quadlet_directory="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 state_directory=${GAUDERE_STATE_DIR:-"$data_home/gaudere/state"}
@@ -38,6 +39,10 @@ for command in "$podman_command" systemctl python3 flock install mktemp rm; do
 done
 [ -f "$source_quadlet" ] || fail "OpenAI Quadlet template not found: $source_quadlet"
 [ -f "$state_database" ] || fail "production state database not found: $state_database"
+case "$quadlet_autostart" in
+    enabled|disarmed) ;;
+    *) fail "GAUDERE_QUADLET_AUTOSTART must be enabled or disarmed" ;;
+esac
 
 service_state=$(systemctl --user is-active "$service_name" 2>/dev/null || true)
 case "$service_state" in
@@ -245,13 +250,14 @@ if [ -f "$target_quadlet" ]; then
     had_previous=1
 fi
 
-python3 - "$source_quadlet" "$rendered_quadlet" "$image_id" <<'PY'
+python3 - "$source_quadlet" "$rendered_quadlet" "$image_id" "$quadlet_autostart" <<'PY'
 import pathlib
 import sys
 
 source = pathlib.Path(sys.argv[1])
 destination = pathlib.Path(sys.argv[2])
 image_id = sys.argv[3]
+autostart = sys.argv[4]
 lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
 indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
 if len(indexes) != 1:
@@ -259,6 +265,18 @@ if len(indexes) != 1:
 index = indexes[0]
 ending = "\n" if lines[index].endswith("\n") else ""
 lines[index] = f"Image={image_id}{ending}"
+if autostart == "disarmed":
+    filtered = []
+    in_install = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_install = stripped == "[Install]"
+            if in_install:
+                continue
+        if not in_install:
+            filtered.append(line)
+    lines = filtered
 destination.write_text("".join(lines), encoding="utf-8")
 PY
 install -m 0600 "$rendered_quadlet" "$target_quadlet"
@@ -270,6 +288,7 @@ rm -f -- "$rendered_quadlet" "$previous_quadlet"
 
 printf 'gaudere OpenAI service install: installed capability profile as %s\n' "$target_quadlet"
 printf 'gaudere OpenAI service install: runtime_image_id=%s\n' "$image_id"
+printf 'gaudere OpenAI service install: quadlet_autostart=%s\n' "$quadlet_autostart"
 printf 'gaudere OpenAI service install: model=gpt-5.6-sol secret=%s\n' "$secret_name"
 printf 'gaudere OpenAI service install: no provider task was submitted and the service remains stopped\n'
 printf 'gaudere OpenAI service install: revert with scripts/install-user-service.sh while the service is stopped\n'
