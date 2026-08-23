@@ -4,17 +4,41 @@ set -eu
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 wrapper="$repo_root/scripts/run-approved-production-schema-v4.sh"
 transaction="$repo_root/scripts/transition-production-schema-v4-wake-off.sh"
+control="$repo_root/scripts/control-service.sh"
 workspace=$(mktemp -d)
-original="$workspace/transaction.original"
+transaction_original="$workspace/transaction.original"
+control_current="$workspace/control.current"
 capture="$workspace/capture"
 fake="$workspace/fake-transition.sh"
-cp "$transaction" "$original"
+cp "$transaction" "$transaction_original"
+cp "$control" "$control_current"
 cleanup()
 {
-    cp "$original" "$transaction" 2>/dev/null || true
+    cp "$transaction_original" "$transaction" 2>/dev/null || true
+    cp "$control_current" "$control" 2>/dev/null || true
     rm -rf "$workspace"
 }
 trap cleanup EXIT HUP INT TERM
+
+install_approved_control()
+{
+    cat > "$control" <<'SH'
+#!/bin/sh
+set -eu
+
+podman_command=${PODMAN:-podman}
+container=${GAUDERE_CONTAINER:-gaudere-agent}
+socket=${GAUDERE_CONTROL_SOCKET:-/tmp/gaudere-control.sock}
+
+if [ "$#" -lt 1 ]; then
+    echo "Usage: $0 echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | task ID | budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | wake WAKE_ID" >&2
+    exit 2
+fi
+
+exec "$podman_command" exec "$container" \
+    /usr/local/bin/gaudere-control --socket "$socket" "$@"
+SH
+}
 
 cat > "$fake" <<'SH'
 #!/bin/sh
@@ -46,6 +70,13 @@ fi
 test ! -e "$capture"
 grep -q 'usage: .*--execute-after-explicit-production-go' "$workspace/no-go.err"
 
+# Reconstruct the one historical helper that has legitimately evolved after the
+# completed production transaction. This proves the frozen wrapper still accepts
+# exactly its approved byte set without changing the wrapper or its hashes.
+install_approved_control
+[ "$(git -C "$repo_root" hash-object -- scripts/control-service.sh)" \
+    = 'dc6b2c57a2ab06b3191bb1617a96e573d35398b7' ]
+
 # The authorized synthetic path exports exactly the frozen production identities.
 XDG_DATA_HOME="$workspace/data" \
 GAUDERE_TEST_MODE=1 \
@@ -68,8 +99,28 @@ grep -qx 'rollback_id=sha256:6f2dab2ece7783556647f99204e4620a53b6574319310f5c61f
 grep -qx 'authorization=AUTHORIZED_PRODUCTION_SCHEMA_V4_WAKE_OFF' "$capture"
 grep -qx 'test_mode=1' "$capture"
 
-# Any drift in one frozen critical helper must fail before invoking the transition.
+# The modern development helper must remain rejected by the historical wrapper.
+# This is expected drift after production completed, not a reason to rewrite the
+# approved production hashes.
+cp "$control_current" "$control"
 rm -f "$capture"
+if XDG_DATA_HOME="$workspace/data" \
+        GAUDERE_TEST_MODE=1 \
+        GAUDERE_APPROVED_TRANSITION_SCRIPT="$fake" \
+        GAUDERE_TEST_CAPTURE="$capture" \
+        sh "$wrapper" --execute-after-explicit-production-go \
+        > "$workspace/current-drift.out" 2> "$workspace/current-drift.err"; then
+    printf 'wrapper unexpectedly accepted current control-service drift\n' >&2
+    exit 1
+fi
+test ! -e "$capture"
+grep -q 'approved helper drift: scripts/control-service.sh' \
+    "$workspace/current-drift.err"
+
+# Any drift in another frozen critical helper must still fail before invoking the
+# transition. Restore the approved control helper first so this test reaches the
+# intended transition hash fence rather than the known current control drift.
+install_approved_control
 printf '\n# synthetic drift\n' >> "$transaction"
 if XDG_DATA_HOME="$workspace/data" \
         GAUDERE_TEST_MODE=1 \
@@ -83,6 +134,7 @@ fi
 test ! -e "$capture"
 grep -q 'approved helper drift: scripts/transition-production-schema-v4-wake-off.sh' \
     "$workspace/drift.err"
-cp "$original" "$transaction"
+cp "$transaction_original" "$transaction"
+cp "$control_current" "$control"
 
 printf 'gaudere approved production schema v4 wrapper test: PASS\n'
