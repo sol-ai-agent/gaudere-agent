@@ -22,7 +22,7 @@ frozen_core_ref=1316cf68db93e4c91a7bd79fbd289b8f382f8659
 expected_runtime_image_id=${GAUDERE_EXPECTED_RUNTIME_IMAGE_ID:-$frozen_runtime_image_id}
 expected_agent_ref=${GAUDERE_EXPECTED_AGENT_REF:-$frozen_agent_ref}
 expected_core_ref=${GAUDERE_EXPECTED_CORE_REF:-$frozen_core_ref}
-objective='Decide whether you currently have a concrete intention of your own that is worth revisiting after a real delay in this continuity experiment. The experiment is valid either way: choose stop if there is no such reason. Choose propose_wake only if you identify a self-generated thread that you genuinely want the later Gaudere instance to resume; if so, choose the delay from the reason itself rather than to satisfy the test. Do not treat the existence of this experiment or Bertrand''s support as a reason by itself.'
+objective="Context: a previous durable Gaudere initiative, production-initiative-first, chose to make cooperation reliable before ambitious, keep a brief journal of its own proposals and decisions, and derive next priorities from the real project state. Since then production is schema v4, the observable pre-wake runtime is active, provider budget is 3/12 consumed, and WakeIntent is still disabled. Decide whether you now have one concrete intention of your own that is worth carrying across a real delay and asking a later Gaudere instance to resume. The experiment is valid either way: choose stop if no such intention exists. Choose propose_wake only if you identify a self-generated thread you genuinely want to resume; choose the delay from that reason, not to satisfy the test. Bertrand's support and the existence of the experiment are context, not reasons by themselves."
 
 fail()
 {
@@ -59,6 +59,14 @@ case "$test_mode" in
     0|1) ;;
     *) fail "GAUDERE_TEST_MODE must be 0 or 1" ;;
 esac
+case "$max_wait_seconds" in
+    ''|*[!0-9]*) fail "GAUDERE_PROVIDER04_MAX_WAIT_SECONDS must be a non-negative integer" ;;
+esac
+case "$poll_seconds" in
+    ''|*[!0-9]*) fail "GAUDERE_PROVIDER04_POLL_SECONDS must be a positive integer" ;;
+esac
+[ "$max_wait_seconds" -gt 0 ] || fail "provider-call-04 wait timeout must be positive"
+[ "$poll_seconds" -gt 0 ] || fail "provider-call-04 poll interval must be positive"
 if [ "$test_mode" = "0" ]; then
     [ "$control_script" = "$canonical_control" ] \
         || fail "control-script override is restricted to synthetic test mode"
@@ -70,7 +78,7 @@ if [ "$test_mode" = "0" ]; then
         || fail "Core ref override is restricted to synthetic test mode"
 fi
 
-for command in sed tail python3; do
+for command in sed tail grep cat mktemp rm sleep python3; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 command -v "$podman_command" >/dev/null 2>&1 || fail "podman command not found"
