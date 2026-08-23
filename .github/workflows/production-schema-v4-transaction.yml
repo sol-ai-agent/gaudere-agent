@@ -6,9 +6,11 @@ on:
   pull_request:
     paths:
       - 'scripts/transition-production-schema-v4-wake-off.sh'
+      - 'scripts/run-approved-production-schema-v4.sh'
       - 'scripts/install-openai-user-service.sh'
       - 'scripts/validate-schema-v4-service-wake-off.sh'
       - 'tests/production_schema_v4_transaction_test.sh'
+      - 'tests/approved_production_schema_v4_wrapper_test.sh'
       - 'tests/openai_installer_profile_transaction_test.sh'
       - 'tests/schema_v4_wake_off_service_gate_test.sh'
       - 'docs/production-schema-v4-autostart-fence-recovery.md'
@@ -26,11 +28,15 @@ jobs:
       - name: Syntax check
         run: |
           sh -n scripts/transition-production-schema-v4-wake-off.sh
+          sh -n scripts/run-approved-production-schema-v4.sh
           sh -n scripts/install-openai-user-service.sh
           sh -n scripts/validate-schema-v4-service-wake-off.sh
           sh -n tests/production_schema_v4_transaction_test.sh
+          sh -n tests/approved_production_schema_v4_wrapper_test.sh
           sh -n tests/openai_installer_profile_transaction_test.sh
           sh -n tests/schema_v4_wake_off_service_gate_test.sh
+      - name: Exercise frozen operator entrypoint
+        run: sh tests/approved_production_schema_v4_wrapper_test.sh
       - name: Exercise autostart, success, rollback, and power-loss boundaries
         run: |
           sh tests/openai_installer_profile_transaction_test.sh
