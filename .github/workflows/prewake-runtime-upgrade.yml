@@ -1,0 +1,29 @@
+name: Pre-wake runtime upgrade
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/run-prewake-runtime-upgrade-v0.sh'
+      - 'tests/prewake_runtime_upgrade_test.sh'
+      - 'docs/prewake-runtime-upgrade-v0.md'
+      - '.github/workflows/prewake-runtime-upgrade.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/run-prewake-runtime-upgrade-v0.sh'
+      - 'tests/prewake_runtime_upgrade_test.sh'
+      - 'docs/prewake-runtime-upgrade-v0.md'
+      - '.github/workflows/prewake-runtime-upgrade.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pre-wake runtime upgrade gate
+        run: sh tests/prewake_runtime_upgrade_test.sh
