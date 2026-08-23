@@ -163,6 +163,35 @@ void test_notification_advances_idle_controller()
            "notified work completes");
 }
 
+void test_observation_interrupt_preserves_deadline_and_skips_work()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path);
+    expect(harness.controller.start(), "observation controller starts");
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "observation controller reaches idle");
+
+    static_cast<void>(harness.scheduler.request_after(2s));
+    const auto deadline = harness.scheduler.next();
+    expect(deadline.has_value(), "future deadline is armed before observation");
+    expect(harness.runtime.submit(make_task("unnotified", "local.echo", "pending"))
+               == SubmitResult::accepted,
+           "work can be durable without a work notification");
+
+    harness.controller.interrupt();
+    expect(harness.controller.wait_and_run() == WorkCycleResult::idle,
+           "observation interrupt returns without running a work cycle");
+    expect(harness.scheduler.next() == deadline,
+           "observation interrupt preserves the exact armed deadline");
+    const auto task = harness.store.find("unnotified");
+    expect(task && task->status == TaskStatus::pending,
+           "observation interrupt does not dispatch unrelated durable work");
+
+    harness.controller.stop();
+    expect(harness.controller.wait_and_run() == WorkCycleResult::stopped,
+           "observation controller stops cleanly");
+}
+
 void test_future_lease_wakes_recovery_without_polling()
 {
     TemporaryDatabase database;
@@ -411,6 +440,7 @@ int main()
 {
     test_initial_wake_dispatches_existing_work();
     test_notification_advances_idle_controller();
+    test_observation_interrupt_preserves_deadline_and_skips_work();
     test_future_lease_wakes_recovery_without_polling();
     test_unknown_kind_remains_pending();
     test_exact_wake_fires_once_without_successor_work();
