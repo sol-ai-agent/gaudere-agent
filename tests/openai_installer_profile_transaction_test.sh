@@ -90,4 +90,22 @@ grep -qx "Image=$image_id" "$target"
 grep -q "runtime_image_id=$image_id" "$workspace/pass.out"
 [ "$(grep -c '^reload$' "$reload_log")" -eq 1 ]
 
+: > "$reload_log"
+rm -f -- "$target"
+GAUDERE_QUADLET_AUTOSTART=disarmed \
+GAUDERE_FAKE_RELOAD_LOG="$reload_log" \
+GAUDERE_FAKE_IMAGE_ID="$image_id" \
+PATH="$fakebin:$PATH" \
+XDG_CONFIG_HOME="$config_home" XDG_DATA_HOME="$data_home" \
+sh "$installer" > "$workspace/disarmed.out"
+
+grep -qx "Image=$image_id" "$target"
+if grep -q '^\[Install\]$\|^WantedBy=' "$target"; then
+    printf 'disarmed installer retained an automatic-start directive\n' >&2
+    exit 1
+fi
+grep -q '^gaudere OpenAI service install: quadlet_autostart=disarmed$' \
+    "$workspace/disarmed.out"
+[ "$(grep -c '^reload$' "$reload_log")" -eq 1 ]
+
 printf 'gaudere OpenAI installer profile transaction test: PASS\n'

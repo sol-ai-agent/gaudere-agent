@@ -268,15 +268,17 @@ make the installed service wake-capable.
 Any failure after the first production-tree rename and before `P9 committed`
 triggers rollback. The handler must:
 
-1. stop the unit and prove it inactive;
+1. stop the unit, prove it inactive, remove the canonical Quadlet source, and
+   reload systemd so autostart is durably disarmed;
 2. acquire the state flock;
 3. move an installed v4 tree, if present, to `state.failed-v4-<stamp>`;
 4. move the untouched `state.pre-v4-<stamp>` back to `state`;
-5. restore `localhost/gaudere-agent:dev` to the saved prior image ID;
+5. retain the exact rollback profile in the transaction workspace without
+   reinstalling or restarting it automatically;
 6. validate v3 integrity, complete snapshot, historical Tasks, budget rows, and
    profile checksum offline;
-7. leave the service stopped and print the exact retained artifacts and recovery
-   command for human review.
+7. leave both service and autostart disarmed and print the exact retained artifacts
+   and recovery command for human review.
 
 If inactivity or flock ownership cannot be proved, the handler must perform no
 rename and report manual recovery. If a rollback rename fails, it must delete
@@ -303,6 +305,11 @@ automatic cleanup action.
 | Post-probe offline audit or final start fails | Execute automatic rollback | Restored v3, service stopped |
 | Stop/flock cannot be proved during rollback | No filesystem move; emit manual instructions | All trees retained; no claimed recovery |
 | Rollback move/validation fails | Delete nothing; emit exact layout and checksums | Service stopped; human recovery possible |
+
+Every post-swap row above also requires the canonical Quadlet source to remain
+absent and autostart disarmed. The power-loss and rename-gap decision table plus
+the exact operator ordering are documented in
+[`production-schema-v4-autostart-fence-recovery.md`](production-schema-v4-autostart-fence-recovery.md).
 
 ## WorkerDev implementation and tests
 

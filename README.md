@@ -102,6 +102,12 @@ pre-v4 rollback image before any candidate build can move `:dev`, and composes t
 identity checks with the disposable v3/v4 reopen proof. It remains provider-free
 and does not install an image or modify production.
 
+The PREP-only production transaction's Quadlet boot fence and catastrophic
+rename-gap recovery order are documented in
+[`docs/production-schema-v4-autostart-fence-recovery.md`](docs/production-schema-v4-autostart-fence-recovery.md).
+The canonical profile stays absent or lacks `[Install]/WantedBy` until the final
+validated candidate profile becomes the durable commit point.
+
 Offline operator commands:
 
 ```sh

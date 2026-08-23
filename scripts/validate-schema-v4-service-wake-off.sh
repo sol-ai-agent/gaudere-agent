@@ -21,6 +21,7 @@ container_name=${GAUDERE_CONTAINER:-gaudere-agent}
 state_directory=${GAUDERE_STATE_DIR:-}
 runtime_image=${GAUDERE_RUNTIME_IMAGE:-localhost/gaudere-agent:dev}
 expected_image_id=${GAUDERE_EXPECTED_RUNTIME_IMAGE_ID:-}
+quadlet_autostart=${GAUDERE_QUADLET_AUTOSTART:-enabled}
 test_mode=${GAUDERE_TEST_MODE:-0}
 authorization=${GAUDERE_SCHEMA_V4_WAKE_OFF_AUTHORIZATION:-}
 representative_task=${1:-}
@@ -32,6 +33,7 @@ workspace=
 profile_backup=
 expected_profile=
 profile_replaced=0
+profile_existed=0
 service_started=0
 success=0
 
@@ -64,6 +66,10 @@ case "$test_mode" in
     0|1) ;;
     *) fail "GAUDERE_TEST_MODE must be 0 or 1" ;;
 esac
+case "$quadlet_autostart" in
+    enabled|disarmed) ;;
+    *) fail "GAUDERE_QUADLET_AUTOSTART must be enabled or disarmed" ;;
+esac
 if [ "$test_mode" = "0" ]; then
     [ "$authorization" = "AUTHORIZED_SCHEMA_V4_WAKE_OFF_GATE" ] \
         || fail "real execution requires GAUDERE_SCHEMA_V4_WAKE_OFF_AUTHORIZATION=AUTHORIZED_SCHEMA_V4_WAKE_OFF_GATE"
@@ -90,7 +96,11 @@ command -v "$podman_command" >/dev/null 2>&1 \
 [ -f "$source_profile" ] || fail "OpenAI Quadlet template not found: $source_profile"
 [ -d "$state_directory" ] || fail "state directory not found: $state_directory"
 [ -f "$state_directory/state.db" ] || fail "state database not found"
-[ -f "$target_profile" ] || fail "installed Quadlet not found: $target_profile"
+if [ -f "$target_profile" ]; then
+    profile_existed=1
+elif [ "$quadlet_autostart" != "disarmed" ]; then
+    fail "installed Quadlet not found: $target_profile"
+fi
 
 state_database="$state_directory/state.db"
 workspace=$(mktemp -d "${TMPDIR:-/tmp}/gaudere-v4-wake-off.XXXXXX")
@@ -98,7 +108,9 @@ profile_backup="$workspace/profile.before"
 expected_profile="$workspace/profile.expected"
 before_snapshot="$workspace/state.before.json"
 after_snapshot="$workspace/state.after.json"
-install -m 0600 "$target_profile" "$profile_backup"
+if [ "$profile_existed" = "1" ]; then
+    install -m 0600 "$target_profile" "$profile_backup"
+fi
 
 service_state()
 {
@@ -133,7 +145,11 @@ restore_on_failure()
     esac
     current=$(service_state)
     if [ "$profile_replaced" = "1" ] && [ "$current" = "inactive" ]; then
-        install -m 0600 "$profile_backup" "$target_profile"
+        if [ "$profile_existed" = "1" ]; then
+            install -m 0600 "$profile_backup" "$target_profile"
+        else
+            rm -f -- "$target_profile"
+        fi
         "$systemctl_command" --user daemon-reload >/dev/null 2>&1 || true
         printf 'gaudere schema v4 wake-off service gate: recovery_profile_restored=true\n' >&2
     elif [ "$profile_replaced" = "1" ]; then
@@ -335,13 +351,14 @@ else
 fi
 printf 'runtime_image_id=%s\n' "$normalized_observed_image_id"
 
-python3 - "$source_profile" "$expected_profile" "$expected_image_id" <<'PY'
+python3 - "$source_profile" "$expected_profile" "$expected_image_id" "$quadlet_autostart" <<'PY'
 import pathlib
 import sys
 
 source = pathlib.Path(sys.argv[1])
 destination = pathlib.Path(sys.argv[2])
 image_id = sys.argv[3]
+autostart = sys.argv[4]
 lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
 indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
 if len(indexes) != 1:
@@ -349,11 +366,25 @@ if len(indexes) != 1:
 index = indexes[0]
 ending = "\n" if lines[index].endswith("\n") else ""
 lines[index] = f"Image={image_id}{ending}"
+if autostart == "disarmed":
+    filtered = []
+    in_install = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_install = stripped == "[Install]"
+            if in_install:
+                continue
+        if not in_install:
+            filtered.append(line)
+    lines = filtered
 destination.write_text("".join(lines), encoding="utf-8")
 PY
 
 phase=profile-install
-GAUDERE_IMAGE="$expected_image_id" sh "$installer"
+GAUDERE_IMAGE="$expected_image_id" \
+GAUDERE_QUADLET_AUTOSTART="$quadlet_autostart" \
+    sh "$installer"
 profile_replaced=1
 cmp "$expected_profile" "$target_profile" \
     || fail "installed profile differs from reviewed template pinned to the candidate image ID"
@@ -362,8 +393,22 @@ grep -qx "Image=$expected_image_id" "$target_profile" \
 if grep -q -- '--wake-intents' "$target_profile"; then
     fail "installed profile contains --wake-intents"
 fi
+if [ "$quadlet_autostart" = "disarmed" ]; then
+    if grep -q '^\[Install\]$\|^[[:space:]]*WantedBy=' "$target_profile"; then
+        fail "disarmed profile still contains an automatic-start directive"
+    fi
+    enablement=$(
+        "$systemctl_command" --user is-enabled "$service_name" 2>/dev/null || true
+    )
+    case "$enablement" in
+        enabled|enabled-runtime|linked|linked-runtime)
+            fail "disarmed profile remains auto-start enabled: $enablement"
+            ;;
+    esac
+fi
 printf 'profile_image_id=%s\n' "$expected_image_id"
 printf 'profile_wake_flag=absent\n'
+printf 'profile_autostart=%s\n' "$quadlet_autostart"
 
 phase=first-live-probe
 started_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')

@@ -33,6 +33,15 @@ case "$operation" in
         [ "$value" = "active" ] && exit 0
         exit 3
         ;;
+    is-enabled)
+        profile=${GAUDERE_FAKE_TARGET_PROFILE:?}
+        if [ -f "$profile" ] && grep -q '^WantedBy=default.target$' "$profile"; then
+            printf 'enabled\n'
+            exit 0
+        fi
+        printf 'disabled\n'
+        exit 1
+        ;;
     start)
         printf 'active\n' > "$state"
         printf 'start\n' >> "$log"
@@ -84,17 +93,31 @@ cat > "$workspace/installer.sh" <<'SH'
 #!/bin/sh
 set -eu
 mkdir -p "$(dirname "${GAUDERE_FAKE_TARGET_PROFILE:?}")"
-python3 - "${GAUDERE_FAKE_SOURCE_PROFILE:?}" "${GAUDERE_FAKE_TARGET_PROFILE:?}" "${GAUDERE_IMAGE:?}" <<'PY'
+python3 - "${GAUDERE_FAKE_SOURCE_PROFILE:?}" "${GAUDERE_FAKE_TARGET_PROFILE:?}" \
+        "${GAUDERE_IMAGE:?}" "${GAUDERE_QUADLET_AUTOSTART:-enabled}" <<'PY'
 import pathlib
 import sys
 source, target = map(pathlib.Path, sys.argv[1:3])
 image = sys.argv[3]
+autostart = sys.argv[4]
 lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
 indexes = [i for i, line in enumerate(lines) if line.startswith("Image=")]
 assert len(indexes) == 1
 index = indexes[0]
 ending = "\n" if lines[index].endswith("\n") else ""
 lines[index] = f"Image={image}{ending}"
+if autostart == "disarmed":
+    filtered = []
+    in_install = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_install = stripped == "[Install]"
+            if in_install:
+                continue
+        if not in_install:
+            filtered.append(line)
+    lines = filtered
 target.write_text("".join(lines), encoding="utf-8")
 PY
 chmod 600 "${GAUDERE_FAKE_TARGET_PROFILE:?}"
@@ -243,6 +266,7 @@ run_gate()
     GAUDERE_SERVICE_NAME=gaudere-agent.service \
     GAUDERE_STATE_DIR="$state_directory" \
     GAUDERE_EXPECTED_RUNTIME_IMAGE_ID="$expected_id" \
+    GAUDERE_QUADLET_AUTOSTART="${GAUDERE_QUADLET_AUTOSTART:-enabled}" \
     GAUDERE_OPENAI_INSTALLER="$workspace/installer.sh" \
     GAUDERE_CONTROL_SCRIPT="$workspace/control.sh" \
     GAUDERE_FAKE_SOURCE_PROFILE="$source_profile" \
@@ -293,6 +317,32 @@ fi
 [ "$(grep -c '^budget$' "$control_log")" -eq 2 ]
 [ "$(grep -c '^task production-initiative-first$' "$control_log")" -eq 2 ]
 
+# The production transaction can start the same immutable candidate for live probes
+# while omitting every [Install]/WantedBy directive. With no previous source, a
+# failed disarmed gate must remove the candidate source again.
+reset_case
+rm -f -- "$target_profile"
+GAUDERE_QUADLET_AUTOSTART=disarmed run_gate > "$workspace/disarmed.out"
+grep -q '^profile_autostart=disarmed$' "$workspace/disarmed.out"
+grep -qx "Image=$expected_id" "$target_profile"
+if grep -q '^\[Install\]$\|^WantedBy=' "$target_profile"; then
+    printf 'disarmed wake-off gate retained an automatic-start directive\n' >&2
+    exit 1
+fi
+[ "$(cat "$state_file")" = active ]
+
+reset_case
+rm -f -- "$target_profile"
+wrong_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+if GAUDERE_QUADLET_AUTOSTART=disarmed GAUDERE_FAKE_RUNNING_IMAGE_ID="$wrong_id" \
+        run_gate > "$workspace/disarmed-fail.out" 2> "$workspace/disarmed-fail.err"; then
+    printf 'disarmed gate unexpectedly accepted a running image mismatch\n' >&2
+    exit 1
+fi
+grep -q 'recovery_profile_restored=true' "$workspace/disarmed-fail.err"
+test ! -e "$target_profile"
+[ "$(cat "$state_file")" = inactive ]
+
 # A pre-existing WakeIntent must stop before profile installation or service start.
 reset_case
 python3 - "$state_directory/state.db" <<'PY'
@@ -316,7 +366,6 @@ cmp "$old_profile" "$target_profile"
 # If the actual running container does not use the pinned candidate image, fail closed,
 # restore the old profile, and leave the service stopped.
 reset_case
-wrong_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 if GAUDERE_FAKE_RUNNING_IMAGE_ID="$wrong_id" run_gate \
     > "$workspace/running-image.out" 2> "$workspace/running-image.err"; then
     printf 'gate unexpectedly accepted a running container image mismatch\n' >&2
