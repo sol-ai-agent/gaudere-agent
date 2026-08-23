@@ -457,7 +457,7 @@ int main(int argc, char* argv[])
                     [&work_scheduler] { return work_scheduler.next(); });
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
-                    [&work_controller] { work_controller.notify_work(); });
+                    [&work_controller] { work_controller.interrupt(); });
                 if (!control_server->start()) {
                     throw std::runtime_error("cannot start live control server");
                 }
