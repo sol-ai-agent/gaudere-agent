@@ -1,11 +1,8 @@
 #include "ResumeAfterWake.hpp"
 
-#include "BoundedReflection.hpp"
-
 #include <nlohmann/json.hpp>
 
 #include <chrono>
-#include <cstdint>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -18,6 +15,7 @@ using Json = nlohmann::json;
 using Task = gaudere::work::Task;
 using TaskStatus = gaudere::work::TaskStatus;
 using WakeIntent = gaudere::scheduling::wake::WakeIntent;
+using WakeIntentScopeResult = gaudere::scheduling::wake::WakeIntentScopeResult;
 using WakeIntentStatus = gaudere::scheduling::wake::WakeIntentStatus;
 
 struct Eligibility {
@@ -28,7 +26,8 @@ struct Eligibility {
     std::string detail;
 };
 
-std::int64_t milliseconds(const gaudere::scheduling::wake::WakeIntentTimePoint value)
+std::int64_t milliseconds(
+    const gaudere::scheduling::wake::WakeIntentTimePoint value)
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         value.time_since_epoch()).count();
@@ -86,7 +85,7 @@ bool same_definition(const Task& existing, const Task& expected) noexcept
         && same_limits(existing.limits, expected.limits);
 }
 
-Json parse_canonical_source_decision(const Task& source)
+Json canonical_source_json(const Task& source)
 {
     if (!source.result) {
         throw std::invalid_argument("resume source result is missing");
@@ -98,34 +97,16 @@ Json parse_canonical_source_decision(const Task& source)
     }
 }
 
-std::uint64_t wake_after_seconds(const Json& decision)
-{
-    try {
-        if (decision.at("wake_after_seconds").is_number_unsigned()) {
-            return decision.at("wake_after_seconds").get<std::uint64_t>();
-        }
-        if (decision.at("wake_after_seconds").is_number_integer()) {
-            const auto value = decision.at("wake_after_seconds").get<std::int64_t>();
-            if (value >= 0) {
-                return static_cast<std::uint64_t>(value);
-            }
-        }
-    } catch (...) {
-    }
-    throw std::invalid_argument("resume source wake delay is invalid");
-}
-
 Task make_resume_task(const Task& source, const WakeIntent& wake)
 {
     if (!wake.terminal_at) {
         throw std::invalid_argument("resume wake lacks terminal timestamp");
     }
-    const auto source_decision = parse_canonical_source_decision(source);
 
     Json context = {
         {"schema", resume_after_wake_context_schema},
         {"source_task_id", source.id},
-        {"source_decision", source_decision},
+        {"source_decision", canonical_source_json(source)},
         {"wake", {
             {"id", wake.id},
             {"accepted_at_ms", milliseconds(wake.accepted_at)},
@@ -162,61 +143,66 @@ Task make_resume_task(const Task& source, const WakeIntent& wake)
     task.limits.max_input_bytes = 16 * 1024;
     task.limits.max_output_bytes = 8 * 1024;
     task.limits.max_runtime = std::chrono::seconds{60};
-    // A future second attempt is reconciliation only. Existing provider Action
-    // evidence must prevent a second provider invocation.
+    // Attempt two is reconciliation only. Existing provider Action evidence must
+    // prevent a second provider invocation in any future provider-bearing slice.
     task.limits.max_attempts = 2;
     if (task.input.size() > task.limits.max_input_bytes) {
-        throw std::invalid_argument("resume-after-wake prompt exceeds hard input limit");
+        throw std::invalid_argument(
+            "resume-after-wake prompt exceeds hard input limit");
     }
     return task;
 }
 
 Eligibility evaluate(gaudere::work::TaskStore& task_store,
-                     ExplicitWake& explicit_wake,
+                     gaudere::scheduling::wake::WakeIntentStore& wake_store,
                      const std::string& wake_id)
 {
-    const auto wake = explicit_wake.find(wake_id);
-    if (!wake) {
+    gaudere::scheduling::wake::WakeIntentScopeInspection scoped;
+    try {
+        scoped = wake_store.inspect_scope(bounded_reflection_wake_scope);
+    } catch (...) {
+        return {false, false, {}, {}, "wake scope inspection is unavailable"};
+    }
+
+    if (scoped.result == WakeIntentScopeResult::empty) {
         return {false, true, {}, {}, "wake not found"};
     }
-    if (wake->scope != explicit_wake_scope || wake->id != wake_id
-        || wake->source_id != wake->id) {
-        return {false, false, wake, {}, "wake identity/source relationship is invalid"};
+    if (scoped.result == WakeIntentScopeResult::ambiguous || !scoped.intent) {
+        return {false, false, {}, {}, "wake scope is ambiguous"};
     }
-    if (!gaudere::scheduling::wake::valid_wake_intent(*wake)) {
+
+    const auto wake = *scoped.intent;
+    if (wake.id != wake_id) {
+        return {false, true, wake, {}, "wake not found"};
+    }
+    if (wake.scope != bounded_reflection_wake_scope
+        || wake.source_id != wake.id) {
+        return {false, false, wake, {},
+                "wake identity/source relationship is invalid"};
+    }
+    if (!gaudere::scheduling::wake::valid_wake_intent(wake)) {
         return {false, false, wake, {}, "wake durable shape is invalid"};
     }
-    if (wake->status != WakeIntentStatus::fired || !wake->terminal_at
-        || *wake->terminal_at < wake->due_at) {
-        return {false, false, wake, {}, "wake is not a valid fired terminal intent"};
+    if (wake.status != WakeIntentStatus::fired || !wake.terminal_at
+        || *wake.terminal_at < wake.due_at) {
+        return {false, false, wake, {},
+                "wake is not a valid fired terminal intent"};
     }
 
-    // Reuse ExplicitWake's exact canonical source validator and fixed-scope
-    // ambiguity check. For a fired record scheduler deadlines are not applicable.
-    const auto wake_status = explicit_wake.inspect_status(std::nullopt, std::nullopt);
-    if (!wake_status.healthy) {
-        return {false, false, wake, {}, "wake scope/source consistency is not healthy"};
+    const auto source = task_store.find(wake.source_id);
+    if (!source) {
+        return {false, false, wake, {}, "source task is missing"};
+    }
+    const auto decision = inspect_wake_source_decision(*source);
+    if (!decision.eligible) {
+        return {false, false, wake, source, decision.detail};
     }
 
-    const auto source = task_store.find(wake->source_id);
-    if (!source || source->kind != bounded_reflection_task_kind
-        || source->status != TaskStatus::succeeded || !source->result
-        || source->result->content_type != bounded_reflection_decision_content_type) {
-        return {false, false, wake, source, "source task is not canonical succeeded reflection"};
-    }
-
-    Json decision;
-    std::uint64_t delay_seconds = 0;
-    try {
-        decision = parse_canonical_source_decision(*source);
-        delay_seconds = wake_after_seconds(decision);
-    } catch (const std::exception& error) {
-        return {false, false, wake, source, error.what()};
-    }
-    const auto durable_delay = std::chrono::duration_cast<std::chrono::milliseconds>(
-        wake->due_at - wake->accepted_at);
-    const auto source_delay = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::seconds{static_cast<std::int64_t>(delay_seconds)});
+    const auto durable_delay =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            wake.due_at - wake.accepted_at);
+    const auto source_delay =
+        std::chrono::duration_cast<std::chrono::milliseconds>(decision.delay);
     if (durable_delay != source_delay) {
         return {false, false, wake, source,
                 "wake deadline does not match canonical source proposal"};
@@ -236,12 +222,14 @@ ExistingClaim inspect_existing(gaudere::work::TaskStore& task_store,
                                const Task& expected)
 {
     const auto by_id = task_store.find(expected.id);
-    const auto by_key = task_store.find_by_idempotency_key(expected.idempotency_key);
+    const auto by_key =
+        task_store.find_by_idempotency_key(expected.idempotency_key);
     if (!by_id && !by_key) {
         return {};
     }
     if (by_id && by_key && by_id->id != by_key->id) {
-        return {true, true, {}, "resume Task id and idempotency key resolve to different Tasks"};
+        return {true, true, {},
+                "resume Task id and idempotency key resolve to different Tasks"};
     }
     const auto candidate = by_id ? by_id : by_key;
     if (!candidate || candidate->id != expected.id
@@ -285,14 +273,16 @@ std::string status_report(const ResumeAfterWakeState state,
            << "state=" << state_name(state) << '\n';
     if (task) {
         output << "resume_task_id=" << quoted(task->id) << '\n'
-               << "resume_task_idempotency_key=" << quoted(task->idempotency_key) << '\n'
+               << "resume_task_idempotency_key="
+               << quoted(task->idempotency_key) << '\n'
                << "resume_task_kind=" << quoted(task->kind) << '\n'
                << "resume_task_status=" << task_status_name(task->status) << '\n'
                << "resume_task_attempts=" << task->attempts_started << '/'
                << task->limits.max_attempts << '\n';
     } else {
         output << "resume_task_id="
-               << quoted(std::string{resume_after_wake_task_prefix} + wake_id) << '\n'
+               << quoted(std::string{resume_after_wake_task_prefix} + wake_id)
+               << '\n'
                << "resume_task_status=none\n";
     }
     output << "detail=" << quoted(detail) << '\n'
@@ -302,12 +292,13 @@ std::string status_report(const ResumeAfterWakeState state,
 
 } // namespace
 
-ResumeAfterWake::ResumeAfterWake(gaudere::work::TaskStore& task_store,
-                                 ExplicitWake& explicit_wake,
-                                 gaudere::work::Runtime& work_runtime,
-                                 const bool enabled) noexcept
+ResumeAfterWake::ResumeAfterWake(
+    gaudere::work::TaskStore& task_store,
+    gaudere::scheduling::wake::WakeIntentStore& wake_store,
+    gaudere::work::Runtime& work_runtime,
+    const bool enabled) noexcept
     : task_store_(task_store),
-      explicit_wake_(explicit_wake),
+      wake_store_(wake_store),
       work_runtime_(work_runtime),
       enabled_(enabled)
 {
@@ -320,7 +311,7 @@ ResumeAfterWakeClaim ResumeAfterWake::claim(const std::string& wake_id)
                 "resume-after-wake capability is disabled"};
     }
 
-    const auto eligibility = evaluate(task_store_, explicit_wake_, wake_id);
+    const auto eligibility = evaluate(task_store_, wake_store_, wake_id);
     if (!eligibility.eligible) {
         return {eligibility.not_found
                     ? ResumeAfterWakeClaimResult::wake_not_found
@@ -337,7 +328,8 @@ ResumeAfterWakeClaim ResumeAfterWake::claim(const std::string& wake_id)
 
     const auto existing = inspect_existing(task_store_, expected);
     if (existing.conflict) {
-        return {ResumeAfterWakeClaimResult::conflict, existing.task, existing.detail};
+        return {ResumeAfterWakeClaimResult::conflict,
+                existing.task, existing.detail};
     }
     if (existing.exists) {
         return {ResumeAfterWakeClaimResult::duplicate, existing.task, {}};
@@ -380,7 +372,7 @@ ResumeAfterWakeStatus ResumeAfterWake::inspect(const std::string& wake_id) const
                               {}, "resume-after-wake capability is disabled", true)};
     }
 
-    const auto eligibility = evaluate(task_store_, explicit_wake_, wake_id);
+    const auto eligibility = evaluate(task_store_, wake_store_, wake_id);
     if (!eligibility.eligible) {
         return {ResumeAfterWakeState::ineligible, !eligibility.not_found,
                 status_report(ResumeAfterWakeState::ineligible, true, wake_id,
