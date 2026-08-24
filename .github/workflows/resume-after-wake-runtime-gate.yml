@@ -1,0 +1,52 @@
+name: Resume-after-wake runtime gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  disabled-by-default:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove production service has no resume authority
+        run: |
+          set -eu
+          ! grep -q 'gaudere-resume-after-wake' src/main.cpp
+          ! grep -q 'execute-after-explicit-resume-go' src/main.cpp
+          ! grep -q 'gaudere-resume-after-wake' deploy/quadlet/gaudere-agent-openai.container.in
+          ! grep -q 'execute-after-explicit-resume-go' deploy/quadlet/gaudere-agent-openai.container.in
+          ! grep -q 'resume-after-wake' scripts/install-openai-user-service.sh
+
+      - name: Prove one-shot authority is explicit and bounded
+        run: |
+          set -eu
+          grep -q 'execute-after-explicit-resume-go' src/resume_after_wake_main.cpp
+          grep -q 'choose exactly one of --check or --execute-after-explicit-resume-go' src/resume_after_wake_main.cpp
+          grep -q -- '--check does not accept provider configuration' src/resume_after_wake_main.cpp
+          grep -q 'inspect_scope(gaudere_agent::bounded_reflection_wake_scope)' src/resume_after_wake_main.cpp
+          grep -q 'StateLock state_lock(options.state_path)' src/resume_after_wake_main.cpp
+          grep -q 'resume_after_wake_task_kind' src/resume_after_wake_main.cpp
+          grep -q 'ResumeAfterWakeCognitionHandler' src/resume_after_wake_main.cpp
+          grep -q 'gaudere-resume-after-wake' src/Makefile.am
+
+      - name: Prove check path precedes provider construction
+        run: |
+          set -eu
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('src/resume_after_wake_main.cpp').read_text()
+          check = text.index('if (options.check)')
+          activation = text.index('OpenAIActivation activation')
+          execute = text.index('work_runtime.recover()')
+          assert check < execute < activation
+          block = text[check:execute]
+          assert 'activation' not in block
+          assert 'Provider' not in block
+          assert 'provider_effects=0' in block
+          PY
