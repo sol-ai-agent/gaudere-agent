@@ -1,8 +1,9 @@
 #ifndef GAUDERE_AGENT_RESUME_AFTER_WAKE_HPP
 #define GAUDERE_AGENT_RESUME_AFTER_WAKE_HPP
 
-#include "ExplicitWake.hpp"
+#include "WakeSourceDecision.hpp"
 
+#include <gaudere/scheduling/wake/WakeIntentStore.hpp>
 #include <gaudere/work/Runtime.hpp>
 #include <gaudere/work/TaskStore.hpp>
 
@@ -54,10 +55,12 @@ struct ResumeAfterWakeStatus {
 
 /** Provider-free authority boundary from one durable fired WakeIntent to one Task.
  *
- * This component cannot invoke a provider, create an Action, touch provider
- * budget, mutate WakeIntent, or schedule work by itself. Its sole mutation is an
- * idempotent gaudere::work::Runtime::submit() of one deterministic Task after
- * strict validation of the existing fixed-scope ExplicitWake lineage.
+ * This component reads already-durable wake evidence directly from the fixed-scope
+ * WakeIntentStore. It does not require or own the ExplicitWake acceptance/revocation
+ * capability. It cannot invoke a provider, create an Action, touch provider budget,
+ * mutate WakeIntent, or schedule work by itself. Its sole mutation is an idempotent
+ * gaudere::work::Runtime::submit() of one deterministic Task after strict lineage
+ * validation.
  *
  * The default is disabled. Initial v0 assumes the existing one-process,
  * one-database-mutator ownership model; multi-writer support requires a new
@@ -66,7 +69,7 @@ struct ResumeAfterWakeStatus {
 class ResumeAfterWake {
 public:
     ResumeAfterWake(gaudere::work::TaskStore& task_store,
-                    ExplicitWake& explicit_wake,
+                    gaudere::scheduling::wake::WakeIntentStore& wake_store,
                     gaudere::work::Runtime& work_runtime,
                     bool enabled = false) noexcept;
 
@@ -78,7 +81,7 @@ public:
 
 private:
     gaudere::work::TaskStore& task_store_;
-    ExplicitWake& explicit_wake_;
+    gaudere::scheduling::wake::WakeIntentStore& wake_store_;
     gaudere::work::Runtime& work_runtime_;
     bool enabled_ = false;
 };
