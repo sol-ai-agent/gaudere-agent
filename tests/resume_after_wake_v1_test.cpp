@@ -194,6 +194,9 @@ void expect_no_external_effects(const Fixture& fixture,
                                 const std::filesystem::path& path,
                                 const std::string& label)
 {
+    const auto scoped = fixture.wakes.inspect_scope(bounded_reflection_wake_scope);
+    expect(scoped.result == gaudere::scheduling::wake::WakeIntentScopeResult::one,
+           label + ": wake scope remains singular");
     expect(count_rows(path, "actions") == 0, label + ": no Action rows");
     expect(count_rows(path, "budget_consumptions") == 0,
            label + ": no provider budget rows");
