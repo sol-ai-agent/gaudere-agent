@@ -8,6 +8,9 @@
 
 namespace gaudere_agent {
 
+inline constexpr const char* bounded_reflection_wake_scope =
+    "cognition.reflect.wake.v0";
+
 /** Exact canonical validation shared by explicit wake acceptance/observability and
  * future read-only consumers of already-durable wake evidence.
  */
