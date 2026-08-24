@@ -35,6 +35,15 @@ jobs:
           grep -q 'ResumeAfterWakeCognitionHandler' src/resume_after_wake_main.cpp
           grep -q 'gaudere-resume-after-wake' src/Makefile.am
 
+      - name: Prove runtime image contains the one-shot but does not auto-run it
+        run: |
+          set -eu
+          grep -q 'cp /opt/gaudere-agent/bin/gaudere-resume-after-wake /opt/runtime/bin/' Containerfile
+          grep -q 'test -x /opt/runtime/bin/gaudere-resume-after-wake' Containerfile
+          grep -q 'test -x /usr/local/bin/gaudere-resume-after-wake' Containerfile
+          grep -q 'ENTRYPOINT \["/usr/local/bin/gaudere-agent"\]' Containerfile
+          ! grep -q 'ENTRYPOINT .*gaudere-resume-after-wake' Containerfile
+
       - name: Prove check path precedes provider construction
         run: |
           set -eu
