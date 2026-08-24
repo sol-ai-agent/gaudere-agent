@@ -1,6 +1,6 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent gaudere-control
+bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake
 
 gaudere_agent_SOURCES = \
 	main.cpp \
@@ -53,3 +53,31 @@ gaudere_control_SOURCES = \
 	LiveControl.cpp \
 	LiveControl.hpp
 gaudere_control_LDADD = $(JSON_LIBS)
+
+gaudere_resume_after_wake_SOURCES = \
+	resume_after_wake_main.cpp \
+	ResumeAfterWake.cpp \
+	ResumeAfterWake.hpp \
+	ResumeAfterWakeCognition.cpp \
+	ResumeAfterWakeCognition.hpp \
+	WakeSourceDecision.cpp \
+	WakeSourceDecision.hpp \
+	CurlHttpTransport.cpp \
+	CurlHttpTransport.hpp \
+	FileSecretSource.cpp \
+	FileSecretSource.hpp \
+	HttpTransport.hpp \
+	OpenAIActivation.cpp \
+	OpenAIActivation.hpp \
+	OpenAIBudget.hpp \
+	OpenAIResponsesProvider.cpp \
+	OpenAIResponsesProvider.hpp \
+	Provider.hpp \
+	ProviderTaskHandler.cpp \
+	ProviderTaskHandler.hpp \
+	SecretSource.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp
+gaudere_resume_after_wake_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
