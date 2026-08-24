@@ -10,6 +10,8 @@ gaudere_agent_SOURCES = \
 	CurlHttpTransport.hpp \
 	ExplicitWake.cpp \
 	ExplicitWake.hpp \
+	WakeSourceDecision.cpp \
+	WakeSourceDecision.hpp \
 	FileSecretSource.cpp \
 	FileSecretSource.hpp \
 	HttpTransport.hpp \
