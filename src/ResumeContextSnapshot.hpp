@@ -4,6 +4,7 @@
 #include <gaudere/work/Runtime.hpp>
 #include <gaudere/work/TaskStore.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -33,6 +34,21 @@ struct ResumeContextSnapshotRecord {
     std::optional<gaudere::work::Task> task;
     std::string detail;
 };
+
+/** Strict read-only interpretation of one already-durable snapshot Task. */
+struct ResumeContextSnapshotInspection {
+    bool eligible = false;
+    std::int64_t captured_at_ms = 0;
+    std::string canonical_capsule;
+    std::string detail;
+};
+
+/**
+ * Validate one terminal snapshot Task exactly as a future resume claim must see it.
+ * No state is mutated and no provenance source is fetched implicitly.
+ */
+[[nodiscard]] ResumeContextSnapshotInspection inspect_resume_context_snapshot(
+    const gaudere::work::Task& task) noexcept;
 
 /** Provider-free durable recorder for bounded current-context capsules.
  *
