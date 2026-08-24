@@ -1,6 +1,8 @@
 #ifndef GAUDERE_AGENT_EXPLICIT_WAKE_HPP
 #define GAUDERE_AGENT_EXPLICIT_WAKE_HPP
 
+#include "WakeSourceDecision.hpp"
+
 #include <gaudere/scheduling/wake/WakeIntentRuntime.hpp>
 #include <gaudere/work/TaskStore.hpp>
 
@@ -10,8 +12,7 @@
 
 namespace gaudere_agent {
 
-inline constexpr const char* explicit_wake_scope =
-    "cognition.reflect.wake.v0";
+inline constexpr const char* explicit_wake_scope = bounded_reflection_wake_scope;
 inline constexpr std::uint64_t explicit_wake_max_total = 1;
 
 enum class ExplicitWakeAcceptResult {
