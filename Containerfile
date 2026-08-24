@@ -62,7 +62,8 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp -a /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /opt/runtime/lib/ \
     && cp /opt/gaudere-agent/bin/gaudere-agent /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-control /opt/runtime/bin/ \
-    && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake /opt/runtime/bin/
+    && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake /opt/runtime/bin/ \
+    && test -x /opt/runtime/bin/gaudere-resume-after-wake
 
 FROM registry.fedoraproject.org/fedora:44
 
@@ -80,7 +81,8 @@ RUN dnf install -y libcurl libstdc++ sqlite-libs \
 
 COPY --from=builder /opt/runtime/ /usr/local/
 
-RUN echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
+RUN test -x /usr/local/bin/gaudere-resume-after-wake \
+    && echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
     && ldconfig
 
 USER 1000:1000
