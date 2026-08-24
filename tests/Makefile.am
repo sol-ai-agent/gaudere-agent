@@ -50,7 +50,9 @@ curl_http_transport_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
 explicit_wake_test_SOURCES = \
 	explicit_wake_test.cpp \
 	../src/ExplicitWake.cpp \
-	../src/ExplicitWake.hpp
+	../src/ExplicitWake.hpp \
+	../src/WakeSourceDecision.cpp \
+	../src/WakeSourceDecision.hpp
 explicit_wake_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 explicit_wake_integration_test_SOURCES = \
@@ -59,6 +61,8 @@ explicit_wake_integration_test_SOURCES = \
 	../src/BoundedReflection.hpp \
 	../src/ExplicitWake.cpp \
 	../src/ExplicitWake.hpp \
+	../src/WakeSourceDecision.cpp \
+	../src/WakeSourceDecision.hpp \
 	../src/LiveControl.cpp \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
@@ -95,6 +99,8 @@ live_control_processor_test_SOURCES = \
 	../src/BoundedReflection.hpp \
 	../src/ExplicitWake.cpp \
 	../src/ExplicitWake.hpp \
+	../src/WakeSourceDecision.cpp \
+	../src/WakeSourceDecision.hpp \
 	../src/LiveControl.cpp \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
@@ -185,6 +191,8 @@ resume_after_wake_test_SOURCES = \
 	resume_after_wake_test.cpp \
 	../src/ExplicitWake.cpp \
 	../src/ExplicitWake.hpp \
+	../src/WakeSourceDecision.cpp \
+	../src/WakeSourceDecision.hpp \
 	../src/ResumeAfterWake.cpp \
 	../src/ResumeAfterWake.hpp
 resume_after_wake_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
@@ -221,6 +229,8 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/BoundedReflection.hpp \
 	../src/ExplicitWake.cpp \
 	../src/ExplicitWake.hpp \
+	../src/WakeSourceDecision.cpp \
+	../src/WakeSourceDecision.hpp \
 	../src/LiveControl.cpp \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
@@ -244,6 +254,8 @@ wake_status_test_SOURCES = \
 	../src/BoundedReflection.hpp \
 	../src/ExplicitWake.cpp \
 	../src/ExplicitWake.hpp \
+	../src/WakeSourceDecision.cpp \
+	../src/WakeSourceDecision.hpp \
 	../src/LiveControl.cpp \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
