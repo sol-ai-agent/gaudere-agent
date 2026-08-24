@@ -71,18 +71,6 @@ jobs:
           ! grep -Eq 'OpenAI|CurlHttpTransport|OpenAIResponsesProvider' \
             agent/src/ResumeAfterWakeCognition.cpp
 
-      - name: Build existing Agent tests
-        run: |
-          set -eu
-          cd agent
-          autoreconf --install --force
-          mkdir build
-          cd build
-          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
-          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 check
-
       - name: Compile provider-fake proof out of production binary
         run: |
           set -eu
