@@ -88,7 +88,7 @@ jobs:
           set -eu
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
           c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
-            -Iagent/src $(pkg-config --cflags gaudere) \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
             agent/tests/resume_after_wake_provider_fake_test.cpp \
             agent/src/ExplicitWake.cpp \
             agent/src/WakeSourceDecision.cpp \
@@ -96,11 +96,23 @@ jobs:
             agent/src/ResumeAfterWakeCognition.cpp \
             agent/src/ProviderTaskHandler.cpp \
             agent/src/TaskExecutor.cpp \
-            $(pkg-config --libs gaudere) -lsqlite3 \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
             -o /tmp/resume-after-wake-provider-fake-test
 
-      - name: Run provider-fake proof
+      - name: Compile cognition bounds proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere) \
+            agent/tests/resume_after_wake_cognition_bounds_test.cpp \
+            agent/src/ResumeAfterWakeCognition.cpp \
+            $(pkg-config --libs gaudere) \
+            -o /tmp/resume-after-wake-cognition-bounds-test
+
+      - name: Run provider-fake proofs
         run: |
           set -eu
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           /tmp/resume-after-wake-provider-fake-test
+          /tmp/resume-after-wake-cognition-bounds-test
