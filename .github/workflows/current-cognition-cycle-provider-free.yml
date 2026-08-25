@@ -71,7 +71,7 @@ jobs:
             agent/tests/current_cognition_cycle_test.cpp
           grep -q 'cognition.current.v0' agent/src/CurrentCognitionCycle.hpp
           grep -q 'Return exactly one JSON object' agent/src/CurrentCognitionCycle.cpp
-          grep -q 'provider total is 6/12' agent/tests/current_cognition_cycle_test.cpp
+          grep -q 'Provider total is 6/12' agent/tests/current_cognition_cycle_test.cpp
 
       - name: Compile provider-free current cognition proof
         run: |
