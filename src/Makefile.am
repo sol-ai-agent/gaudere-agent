@@ -1,6 +1,6 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake
+bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare
 
 gaudere_agent_SOURCES = \
 	main.cpp \
@@ -81,3 +81,19 @@ gaudere_resume_after_wake_SOURCES = \
 	TaskExecutor.cpp \
 	TaskExecutor.hpp
 gaudere_resume_after_wake_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
+
+gaudere_resume_after_wake_v1_prepare_SOURCES = \
+	resume_after_wake_v1_prepare_main.cpp \
+	ResumeAfterWakeV1Prepare.cpp \
+	ResumeAfterWakeV1Prepare.hpp \
+	ResumeAfterWakeV1.cpp \
+	ResumeAfterWakeV1.hpp \
+	ResumeContextSnapshot.cpp \
+	ResumeContextSnapshot.hpp \
+	WakeSourceDecision.cpp \
+	WakeSourceDecision.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp
+gaudere_resume_after_wake_v1_prepare_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
