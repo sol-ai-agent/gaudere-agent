@@ -1,0 +1,138 @@
+name: Resume-after-wake v1 real-call gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-real-v1-gate:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          binutils
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin and install Gaudere
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in
+            *[!0-9a-f]*|'') exit 1 ;;
+          esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove real v1 authority remains one-shot only
+        run: |
+          set -eu
+          ! grep -q 'gaudere-resume-after-wake-v1' agent/src/main.cpp
+          ! grep -q 'gaudere-resume-after-wake-v1' \
+            agent/deploy/quadlet/gaudere-agent-openai.container.in
+          ! grep -q 'gaudere-resume-after-wake-v1' \
+            agent/scripts/install-openai-user-service.sh
+          grep -q 'execute-after-explicit-resume-v1-go' \
+            agent/src/resume_after_wake_v1_main.cpp
+          grep -q 'StateLock state_lock(options.state_path)' \
+            agent/src/resume_after_wake_v1_main.cpp
+          grep -q 'provider_next=' agent/src/resume_after_wake_v1_main.cpp
+          grep -q 'context_fresh=' agent/src/resume_after_wake_v1_main.cpp
+          grep -q 'ResumeAfterWakeV1TextInputAdapter text_input' \
+            agent/src/resume_after_wake_v1_main.cpp
+          grep -q 'ResumeAfterWakeV1CognitionHandler cognition(text_input)' \
+            agent/src/resume_after_wake_v1_main.cpp
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('agent/src/resume_after_wake_v1_main.cpp').read_text()
+          fresh = text.index('if (!fresh)')
+          budget = text.index('if (budget.next_new_consumption')
+          activation = text.index('OpenAIActivation activation')
+          assert fresh < activation
+          assert budget < activation
+          assert text.index('is_terminal(task->status)') < activation
+
+          makefile = Path('agent/src/Makefile.am').read_text()
+          assert 'gaudere-resume-after-wake-v1' in makefile
+          assert 'ResumeAfterWakeV1TextInputAdapter.cpp' in makefile
+
+          container = Path('agent/Containerfile').read_text()
+          assert 'cp /opt/gaudere-agent/bin/gaudere-resume-after-wake-v1 /opt/runtime/bin/' in container
+          assert 'ENTRYPOINT ["/usr/local/bin/gaudere-agent"]' in container
+          assert 'ENTRYPOINT ["/usr/local/bin/gaudere-resume-after-wake-v1"]' not in container
+          PY
+
+      - name: Build Agent and real v1 one-shot
+        run: |
+          set -eu
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          test -x src/gaudere-resume-after-wake-v1
+          src/gaudere-resume-after-wake-v1 --help \
+            | grep -q 'execute-after-explicit-resume-v1-go'
+
+      - name: Compile provider-boundary adapter proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere) \
+            agent/tests/resume_after_wake_v1_text_input_adapter_test.cpp \
+            agent/src/ResumeAfterWakeV1TextInputAdapter.cpp \
+            $(pkg-config --libs gaudere) \
+            -o /tmp/resume-after-wake-v1-text-input-adapter-test
+
+      - name: Run provider-boundary adapter proof
+        run: /tmp/resume-after-wake-v1-text-input-adapter-test
+
+      - name: Prove real binary keeps provider linkage isolated from service entrypoint
+        run: |
+          set -eu
+          binary="$GITHUB_WORKSPACE/agent/build/src/gaudere-resume-after-wake-v1"
+          service="$GITHUB_WORKSPACE/agent/build/src/gaudere-agent"
+          readelf -h "$binary" >/dev/null
+          readelf -h "$service" >/dev/null
+          ldd "$binary" | grep -qi 'libcurl'
+          nm -C "$binary" | grep -q 'ResumeAfterWakeV1TextInputAdapter'
+          grep -q 'ENTRYPOINT \["/usr/local/bin/gaudere-agent"\]' agent/Containerfile
