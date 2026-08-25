@@ -4,7 +4,18 @@
 #include "ResumeAfterWakeCognition.hpp"
 #include "TaskExecutor.hpp"
 
+#include <cstdint>
+#include <optional>
+
 namespace gaudere_agent {
+
+/** Read-only validation surface shared by the real one-shot preflight. */
+[[nodiscard]] bool valid_resume_after_wake_v1_task(
+    const gaudere::work::Task& task) noexcept;
+
+/** Return the canonical frozen context capture time only for a valid v1 Task. */
+[[nodiscard]] std::optional<std::int64_t> resume_after_wake_v1_captured_at_ms(
+    const gaudere::work::Task& task) noexcept;
 
 /**
  * Guarded provider-facing wrapper for one already-durable ResumeAfterWakeV1 Task.
