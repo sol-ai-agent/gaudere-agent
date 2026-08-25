@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
