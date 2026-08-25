@@ -89,6 +89,7 @@ jobs:
           for forbidden in ('OpenAI', 'Provider', 'CurlHttpTransport', 'SecretSource'):
               assert forbidden not in block, forbidden
           assert 'ResumeAfterWakeV1Prepare.cpp' in block
+          assert 'ResumeContextSnapshotInspection.cpp' in block
           assert 'ResumeContextSnapshotRequest.cpp' in block
           assert 'gaudere_resume_after_wake_v1_prepare_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)' in text
           PY
@@ -135,6 +136,7 @@ jobs:
             agent/src/ExplicitWake.cpp \
             agent/src/WakeSourceDecision.cpp \
             agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotInspection.cpp \
             agent/src/ResumeContextSnapshotRequest.cpp \
             agent/src/ResumeAfterWakeV1.cpp \
             agent/src/ResumeAfterWakeV1Prepare.cpp \
