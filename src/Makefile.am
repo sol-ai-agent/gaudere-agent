@@ -89,6 +89,7 @@ gaudere_resume_after_wake_v1_prepare_SOURCES = \
 	ResumeAfterWakeV1.cpp \
 	ResumeAfterWakeV1.hpp \
 	ResumeContextSnapshot.cpp \
+	ResumeContextSnapshotInspection.cpp \
 	ResumeContextSnapshotRequest.cpp \
 	ResumeContextSnapshot.hpp \
 	WakeSourceDecision.cpp \
