@@ -1,6 +1,6 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare
+bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1
 
 gaudere_agent_SOURCES = \
 	main.cpp \
@@ -99,3 +99,36 @@ gaudere_resume_after_wake_v1_prepare_SOURCES = \
 	TaskExecutor.cpp \
 	TaskExecutor.hpp
 gaudere_resume_after_wake_v1_prepare_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+gaudere_resume_after_wake_v1_SOURCES = \
+	resume_after_wake_v1_main.cpp \
+	ResumeAfterWakeV1.hpp \
+	ResumeAfterWakeCognition.cpp \
+	ResumeAfterWakeCognition.hpp \
+	ResumeAfterWakeV1Cognition.cpp \
+	ResumeAfterWakeV1Cognition.hpp \
+	ResumeAfterWakeV1TextInputAdapter.cpp \
+	ResumeAfterWakeV1TextInputAdapter.hpp \
+	ResumeContextSnapshot.cpp \
+	ResumeContextSnapshotInspection.cpp \
+	ResumeContextSnapshot.hpp \
+	WakeSourceDecision.hpp \
+	CurlHttpTransport.cpp \
+	CurlHttpTransport.hpp \
+	FileSecretSource.cpp \
+	FileSecretSource.hpp \
+	HttpTransport.hpp \
+	OpenAIActivation.cpp \
+	OpenAIActivation.hpp \
+	OpenAIBudget.hpp \
+	OpenAIResponsesProvider.cpp \
+	OpenAIResponsesProvider.hpp \
+	Provider.hpp \
+	ProviderTaskHandler.cpp \
+	ProviderTaskHandler.hpp \
+	SecretSource.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp
+gaudere_resume_after_wake_v1_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
