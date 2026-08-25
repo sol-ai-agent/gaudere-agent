@@ -124,7 +124,10 @@ jobs:
             -o /tmp/resume-after-wake-v1-text-input-adapter-test
 
       - name: Run provider-boundary adapter proof
-        run: /tmp/resume-after-wake-v1-text-input-adapter-test
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/resume-after-wake-v1-text-input-adapter-test
 
       - name: Prove real binary keeps provider linkage isolated from service entrypoint
         run: |
