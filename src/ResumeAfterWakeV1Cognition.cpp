@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -82,7 +83,7 @@ bool unsigned_integer(const Json& value, std::uint64_t& output) noexcept
     return false;
 }
 
-bool canonical_v1_task(const Task& task) noexcept
+std::optional<std::int64_t> canonical_v1_capture(const Task& task) noexcept
 {
     try {
         if (task.kind != resume_after_wake_v1_task_kind
@@ -95,7 +96,7 @@ bool canonical_v1_task(const Task& task) noexcept
             || task.limits.max_runtime != std::chrono::seconds{60}
             || task.limits.max_attempts != 2
             || task.input.empty() || task.input.size() > task.limits.max_input_bytes) {
-            return false;
+            return std::nullopt;
         }
 
         const auto input = parse_strict(task.input);
@@ -108,7 +109,7 @@ bool canonical_v1_task(const Task& task) noexcept
             || !input.at("instructions").is_string()
             || input.at("instructions").get<std::string>() != canonical_v1_instructions
             || input.dump() != task.input) {
-            return false;
+            return std::nullopt;
         }
 
         const auto& historical = input.at("historical");
@@ -117,7 +118,7 @@ bool canonical_v1_task(const Task& task) noexcept
         };
         if (!exact_keys(historical, historical_keys)
             || !historical.at("source_task_id").is_string()) {
-            return false;
+            return std::nullopt;
         }
 
         const auto& decision = historical.at("source_decision");
@@ -131,7 +132,7 @@ bool canonical_v1_task(const Task& task) noexcept
             || !decision.at("schema").is_string()
             || decision.at("schema").get<std::string>()
                 != "gaudere.cognition.decision.v1") {
-            return false;
+            return std::nullopt;
         }
         const auto reason = decision.at("reason").get<std::string>();
         std::uint64_t delay_seconds = 0;
@@ -139,7 +140,7 @@ bool canonical_v1_task(const Task& task) noexcept
             || !unsigned_integer(decision.at("wake_after_seconds"), delay_seconds)
             || delay_seconds < min_wake_after_seconds
             || delay_seconds > max_wake_after_seconds) {
-            return false;
+            return std::nullopt;
         }
 
         const auto& wake = historical.at("wake");
@@ -154,14 +155,14 @@ bool canonical_v1_task(const Task& task) noexcept
             || !integer_ms(wake.at("terminal_at_ms"))
             || !wake.at("terminal_reason").is_string()
             || !wake.at("terminal_reason").get<std::string>().empty()) {
-            return false;
+            return std::nullopt;
         }
         const auto wake_id = wake.at("id").get<std::string>();
         const auto expected_resume_id =
             std::string{resume_after_wake_v1_task_prefix} + wake_id;
         if (task.id != expected_resume_id
             || historical.at("source_task_id").get<std::string>() != wake_id) {
-            return false;
+            return std::nullopt;
         }
         const auto accepted = wake.at("accepted_at_ms").get<std::int64_t>();
         const auto due = wake.at("due_at_ms").get<std::int64_t>();
@@ -169,7 +170,7 @@ bool canonical_v1_task(const Task& task) noexcept
         if (accepted < 0 || due < accepted || terminal < due
             || due - accepted
                 != static_cast<std::int64_t>(delay_seconds * 1000u)) {
-            return false;
+            return std::nullopt;
         }
 
         const auto& current = input.at("current_context");
@@ -179,7 +180,7 @@ bool canonical_v1_task(const Task& task) noexcept
         if (!exact_keys(current, current_keys)
             || !current.at("snapshot_task_id").is_string()
             || !current.at("capsule").is_object()) {
-            return false;
+            return std::nullopt;
         }
         const auto snapshot_id = current.at("snapshot_task_id").get<std::string>();
         const auto capsule = current.at("capsule").dump();
@@ -200,17 +201,17 @@ bool canonical_v1_task(const Task& task) noexcept
             resume_context_snapshot_content_type, capsule, {}, {}};
         const auto inspected = inspect_resume_context_snapshot(synthetic_snapshot);
         if (!inspected.eligible) {
-            return false;
+            return std::nullopt;
         }
 
         const auto captured = Json::parse(inspected.canonical_capsule)
             .at("captured_at_ms").get<std::int64_t>();
         if (captured < terminal) {
-            return false;
+            return std::nullopt;
         }
-        return true;
+        return captured;
     } catch (...) {
-        return false;
+        return std::nullopt;
     }
 }
 
@@ -224,6 +225,17 @@ HandlerResult invalid_context()
 
 } // namespace
 
+bool valid_resume_after_wake_v1_task(const gaudere::work::Task& task) noexcept
+{
+    return canonical_v1_capture(task).has_value();
+}
+
+std::optional<std::int64_t> resume_after_wake_v1_captured_at_ms(
+    const gaudere::work::Task& task) noexcept
+{
+    return canonical_v1_capture(task);
+}
+
 ResumeAfterWakeV1CognitionHandler::ResumeAfterWakeV1CognitionHandler(
     TaskHandler& provider_handler) noexcept
     : normalized_provider_(provider_handler)
@@ -233,7 +245,7 @@ ResumeAfterWakeV1CognitionHandler::ResumeAfterWakeV1CognitionHandler(
 HandlerResult ResumeAfterWakeV1CognitionHandler::execute(
     const TaskContext& context)
 {
-    if (!canonical_v1_task(context.task)) {
+    if (!valid_resume_after_wake_v1_task(context.task)) {
         return invalid_context();
     }
     return normalized_provider_.execute(context);
