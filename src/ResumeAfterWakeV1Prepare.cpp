@@ -19,6 +19,7 @@ using Task = gaudere::work::Task;
 using TaskStatus = gaudere::work::TaskStatus;
 
 constexpr std::size_t max_request_bytes = 32 * 1024;
+constexpr std::size_t max_capsule_bytes = 24 * 1024;
 constexpr std::uint64_t selection_max_bytes = 64 * 1024;
 
 std::int64_t milliseconds(const gaudere::work::TimePoint value)
@@ -291,8 +292,25 @@ ResumeAfterWakeV1Preparation ResumeAfterWakeV1Prepare::prepare(
                 "work runtime is not running"};
     }
 
+    const auto request = inspect_resume_context_snapshot_request(request_json);
+    if (!request.eligible) {
+        return {false, false, {}, {}, {}, request.detail};
+    }
+    const auto capture_now = now_();
+    try {
+        auto prospective_capsule = Json::parse(request.canonical_request);
+        prospective_capsule["captured_at_ms"] = milliseconds(capture_now);
+        if (prospective_capsule.dump().size() > max_capsule_bytes) {
+            return {false, false, {}, {}, {},
+                    "canonical context capsule would exceed 24576 bytes"};
+        }
+    } catch (...) {
+        return {false, false, {}, {}, {},
+                "canonical context request could not be re-parsed"};
+    }
+
     const auto selection = finish_selection(
-        task_store_, work_runtime_, wake_id, request_json, now_());
+        task_store_, work_runtime_, wake_id, request.canonical_request, capture_now);
     if (!selection.ready || !selection.task) {
         return {false, selection.duplicate, selection.task, {}, {}, selection.detail};
     }
@@ -305,7 +323,7 @@ ResumeAfterWakeV1Preparation ResumeAfterWakeV1Prepare::prepare(
         task_store_, work_runtime_, [captured = selection.captured_at] {
             return captured;
         });
-    const auto snapshot = recorder.record(request_json);
+    const auto snapshot = recorder.record(request.canonical_request);
     if ((snapshot.result != ResumeContextSnapshotRecordResult::accepted
          && snapshot.result != ResumeContextSnapshotRecordResult::duplicate)
         || !snapshot.task) {
