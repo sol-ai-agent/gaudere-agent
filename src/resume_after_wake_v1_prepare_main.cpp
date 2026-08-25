@@ -138,6 +138,12 @@ int main(int argc, char* argv[])
         // process obtained exclusive ownership of the state database.
         gaudere_agent::StateLock state_lock(options.state_path);
         const auto request_json = read_context_request(options.context_request_path);
+        const auto request =
+            gaudere_agent::inspect_resume_context_snapshot_request(request_json);
+        if (!request.eligible) {
+            throw std::invalid_argument(
+                "invalid context request: " + request.detail);
+        }
 
         gaudere::persistence::sqlite::TaskStore task_store(options.state_path);
         gaudere::persistence::sqlite::WakeIntentStore wake_store(options.state_path);
@@ -151,7 +157,7 @@ int main(int argc, char* argv[])
             [](const std::string_view phase) {
                 std::cout << "phase=" << phase << '\n';
             });
-        const auto result = prepare.prepare(wake_id, request_json);
+        const auto result = prepare.prepare(wake_id, request.canonical_request);
         if (!result.prepared || !result.selection_task || !result.snapshot_task
             || !result.claim.task) {
             std::cerr << "gaudere-resume-after-wake-v1-prepare: preparation failed: "
