@@ -5,6 +5,7 @@
 #include <gaudere/work/TaskStore.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -16,6 +17,18 @@ inline constexpr const char* current_cognition_task_kind =
 inline constexpr const char* current_cognition_task_prefix =
     "cognition.current.v0:";
 inline constexpr std::chrono::minutes current_cognition_max_snapshot_age{15};
+
+/** Strict read-only validation for one durable cognition.current.v0 Task. */
+[[nodiscard]] bool valid_current_cognition_task(
+    const gaudere::work::Task& task) noexcept;
+
+/**
+ * Return the frozen current-context capture time only for a canonical Task.
+ * Used by later provider gates to re-check freshness immediately before effects.
+ */
+[[nodiscard]] std::optional<std::int64_t>
+current_cognition_snapshot_captured_at_ms(
+    const gaudere::work::Task& task) noexcept;
 
 enum class CurrentCognitionClaimResult {
     accepted,
