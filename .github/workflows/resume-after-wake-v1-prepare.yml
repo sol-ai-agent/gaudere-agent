@@ -84,7 +84,7 @@ jobs:
           from pathlib import Path
           text = Path('agent/src/Makefile.am').read_text()
           start = text.index('gaudere_resume_after_wake_v1_prepare_SOURCES =')
-          end = text.index('\n\ngaudere_resume_after_wake_v1_prepare_LDADD', start)
+          end = text.index('gaudere_resume_after_wake_v1_prepare_LDADD', start)
           block = text[start:end]
           for forbidden in ('OpenAI', 'Provider', 'CurlHttpTransport', 'SecretSource'):
               assert forbidden not in block, forbidden
