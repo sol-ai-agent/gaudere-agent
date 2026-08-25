@@ -57,7 +57,7 @@ Task sample_task()
     task.idempotency_key = task.id;
     task.kind = gaudere_agent::resume_after_wake_v1_task_kind;
     task.input_content_type = gaudere_agent::resume_after_wake_v1_content_type;
-    task.input = "{\"canonical\":\"bytes stay identical\"}";
+    task.input = "{\"canonical\":\"durable bytes remain unchanged\"}";
     task.limits.max_input_bytes = 48 * 1024;
     task.limits.max_output_bytes = 8 * 1024;
     task.limits.max_runtime = std::chrono::seconds{60};
@@ -71,7 +71,7 @@ Task sample_task()
     return task;
 }
 
-void prove_only_content_type_changes()
+void prove_transient_prompt_contract()
 {
     RecordingHandler downstream;
     gaudere_agent::ResumeAfterWakeV1TextInputAdapter adapter(downstream);
@@ -88,22 +88,40 @@ void prove_only_content_type_changes()
     const auto& seen = *downstream.seen;
     require(seen.input_content_type == "text/plain; charset=utf-8",
             "adapter must expose text/plain to provider boundary");
+    require(seen.input != original.input,
+            "provider copy must contain an explicit output contract");
+    require(seen.input.find(
+                "Return exactly one JSON object and no markdown or surrounding text.")
+                != std::string::npos,
+            "provider prompt must forbid prose/markdown wrappers");
+    require(seen.input.find(
+                "{\"schema\":\"gaudere.cognition.resume-decision.v1\",\"decision\":\"stop\",\"reason\":\"...\"}")
+                != std::string::npos,
+            "provider prompt must include the exact stop schema");
+    require(seen.input.find(
+                "{\"schema\":\"gaudere.cognition.resume-decision.v1\",\"decision\":\"continue\",\"reason\":\"...\",\"objective\":\"...\"}")
+                != std::string::npos,
+            "provider prompt must include the exact continue schema");
+    require(seen.input.size() >= original.input.size()
+            && seen.input.compare(seen.input.size() - original.input.size(),
+                                  original.input.size(), original.input) == 0,
+            "provider prompt must append the durable canonical bytes verbatim");
     require(seen.id == original.id
             && seen.idempotency_key == original.idempotency_key
             && seen.kind == original.kind
-            && seen.input == original.input
             && same_limits(seen.limits, original.limits)
             && seen.attempts_started == original.attempts_started
             && seen.status == original.status
             && seen.cancel_reason == original.cancel_reason,
-            "adapter must preserve durable task identity and definition");
+            "adapter must preserve durable task identity and limits in provider copy");
     require(seen.lease.has_value() && original.lease.has_value()
             && seen.lease->owner == original.lease->owner
             && seen.lease->expires_at == original.lease->expires_at,
             "adapter must preserve lease evidence in transient copy");
     require(!seen.result.has_value() && !original.result.has_value(),
             "adapter must preserve result state");
-    require(original.input_content_type == gaudere_agent::resume_after_wake_v1_content_type,
+    require(original.input_content_type == gaudere_agent::resume_after_wake_v1_content_type
+            && original.input == "{\"canonical\":\"durable bytes remain unchanged\"}",
             "adapter must not mutate durable/original task object");
 }
 
@@ -129,13 +147,28 @@ void prove_wrong_shape_fails_before_downstream()
             "already-adapted or wrong durable type must fail closed");
 }
 
+void prove_prompt_limit_fails_before_downstream()
+{
+    RecordingHandler downstream;
+    gaudere_agent::ResumeAfterWakeV1TextInputAdapter adapter(downstream);
+
+    auto oversized = sample_task();
+    oversized.input.assign(oversized.limits.max_input_bytes, 'x');
+    const auto result = adapter.execute(TaskContext{oversized, {}});
+    require(result.outcome == HandlerOutcome::failed
+            && result.failure_code == "cognition_resume_provider_prompt_too_large"
+            && downstream.calls == 0,
+            "transient prompt overflow must fail before provider boundary");
+}
+
 } // namespace
 
 int main()
 {
     try {
-        prove_only_content_type_changes();
+        prove_transient_prompt_contract();
         prove_wrong_shape_fails_before_downstream();
+        prove_prompt_limit_fails_before_downstream();
         std::cout << "resume-after-wake v1 text input adapter: PASS\n";
         return 0;
     } catch (const std::exception& error) {
