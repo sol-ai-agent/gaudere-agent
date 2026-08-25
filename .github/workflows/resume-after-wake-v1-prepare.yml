@@ -1,0 +1,200 @@
+name: Resume-after-wake v1 prepare proof
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-v1-prepare:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          binutils
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+          util-linux
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere dependency
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in
+            *[!0-9a-f]*|'') exit 1 ;;
+          esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+
+      - name: Build and install Gaudere
+        run: |
+          set -eu
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove v1 prepare remains provider-free and outside service authority
+        run: |
+          set -eu
+          ! grep -q 'gaudere-resume-after-wake-v1-prepare' agent/src/main.cpp
+          ! grep -q 'gaudere-resume-after-wake-v1-prepare' \
+            agent/deploy/quadlet/gaudere-agent-openai.container.in
+          ! grep -q 'gaudere-resume-after-wake-v1-prepare' \
+            agent/scripts/install-openai-user-service.sh
+          grep -q 'prepare-after-explicit-resume-v1-go' \
+            agent/src/resume_after_wake_v1_prepare_main.cpp
+          grep -q 'StateLock state_lock(options.state_path)' \
+            agent/src/resume_after_wake_v1_prepare_main.cpp
+          grep -q 'resume_task_executed=false' \
+            agent/src/resume_after_wake_v1_prepare_main.cpp
+          grep -q 'provider_effects=0' \
+            agent/src/resume_after_wake_v1_prepare_main.cpp
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('agent/src/Makefile.am').read_text()
+          start = text.index('gaudere_resume_after_wake_v1_prepare_SOURCES =')
+          end = text.index('\n\ngaudere_resume_after_wake_v1_prepare_LDADD', start)
+          block = text[start:end]
+          for forbidden in ('OpenAI', 'Provider', 'CurlHttpTransport', 'SecretSource'):
+              assert forbidden not in block, forbidden
+          assert 'ResumeAfterWakeV1Prepare.cpp' in block
+          assert 'ResumeContextSnapshotRequest.cpp' in block
+          assert 'gaudere_resume_after_wake_v1_prepare_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)' in text
+          PY
+          grep -q 'cp /opt/gaudere-agent/bin/gaudere-resume-after-wake-v1-prepare /opt/runtime/bin/' \
+            agent/Containerfile
+          grep -q 'test -x /usr/local/bin/gaudere-resume-after-wake-v1-prepare' \
+            agent/Containerfile
+          grep -q 'ENTRYPOINT \["/usr/local/bin/gaudere-agent"\]' agent/Containerfile
+          ! grep -q 'ENTRYPOINT .*gaudere-resume-after-wake-v1-prepare' agent/Containerfile
+
+      - name: Build provider-free v1 prepare binary
+        run: |
+          set -eu
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          ../configure --prefix="$GITHUB_WORKSPACE/agent-prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+          make -C src --jobs=2 gaudere-resume-after-wake-v1-prepare
+
+      - name: Prove binary has no provider or curl linkage
+        run: |
+          set -eu
+          binary="$GITHUB_WORKSPACE/agent/build/src/gaudere-resume-after-wake-v1-prepare"
+          test -x "$binary"
+          ! ldd "$binary" | grep -qi 'libcurl'
+          ! nm -C "$binary" | grep -E 'OpenAI|ProviderTaskHandler|CurlHttpTransport'
+          "$binary" --help | grep -q 'prepare-after-explicit-resume-v1-go'
+
+      - name: Compile v1 prepare provider-free crash proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/resume_after_wake_v1_prepare_test.cpp \
+            agent/src/ExplicitWake.cpp \
+            agent/src/WakeSourceDecision.cpp \
+            agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotRequest.cpp \
+            agent/src/ResumeAfterWakeV1.cpp \
+            agent/src/ResumeAfterWakeV1Prepare.cpp \
+            agent/src/TaskExecutor.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
+            -o /tmp/resume-after-wake-v1-prepare-test
+
+      - name: Run v1 prepare provider-free crash proof
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/resume-after-wake-v1-prepare-test
+
+      - name: Prove CLI rejects bad local inputs before SQLite work
+        run: |
+          set -eu
+          binary="$GITHUB_WORKSPACE/agent/build/src/gaudere-resume-after-wake-v1-prepare"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          work=/tmp/gaudere-v1-prepare-cli
+          rm -rf "$work"
+          mkdir -p "$work"
+
+          printf '{}' > "$work/invalid.json"
+          if "$binary" --state "$work/invalid.db" \
+              --context-request-file "$work/invalid.json" \
+              --prepare-after-explicit-resume-v1-go \
+              >"$work/invalid.out" 2>"$work/invalid.err"; then
+            exit 1
+          fi
+          grep -q 'invalid context request' "$work/invalid.err"
+          test ! -e "$work/invalid.db"
+
+          dd if=/dev/zero of="$work/oversize.json" bs=1024 count=33 status=none
+          if "$binary" --state "$work/oversize.db" \
+              --context-request-file "$work/oversize.json" \
+              --prepare-after-explicit-resume-v1-go \
+              >"$work/oversize.out" 2>"$work/oversize.err"; then
+            exit 1
+          fi
+          grep -q '1..32768 bytes' "$work/oversize.err"
+          test ! -e "$work/oversize.db"
+
+          ln -s "$work/invalid.json" "$work/context-link.json"
+          if "$binary" --state "$work/symlink.db" \
+              --context-request-file "$work/context-link.json" \
+              --prepare-after-explicit-resume-v1-go \
+              >"$work/symlink.out" 2>"$work/symlink.err"; then
+            exit 1
+          fi
+          grep -q 'regular non-symlink file' "$work/symlink.err"
+          test ! -e "$work/symlink.db"
+
+          : > "$work/locked.db"
+          flock "$work/locked.db.lock" -c 'sleep 5' &
+          locker=$!
+          sleep 1
+          if "$binary" --state "$work/locked.db" \
+              --context-request-file "$work/invalid.json" \
+              --prepare-after-explicit-resume-v1-go \
+              >"$work/locked.out" 2>"$work/locked.err"; then
+            kill "$locker" || true
+            exit 1
+          fi
+          grep -q 'already owned by another gaudere-agent process' "$work/locked.err"
+          kill "$locker" || true
+          wait "$locker" 2>/dev/null || true
