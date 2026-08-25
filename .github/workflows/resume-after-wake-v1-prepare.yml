@@ -117,14 +117,13 @@ jobs:
       - name: Prove binary has no provider or curl linkage
         run: |
           set -eu
-          wrapper="$GITHUB_WORKSPACE/agent/build/src/gaudere-resume-after-wake-v1-prepare"
-          binary="$GITHUB_WORKSPACE/agent/build/src/.libs/gaudere-resume-after-wake-v1-prepare"
-          test -x "$wrapper"
+          binary="$GITHUB_WORKSPACE/agent/build/src/gaudere-resume-after-wake-v1-prepare"
           test -x "$binary"
+          readelf -h "$binary" >/dev/null
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           ! ldd "$binary" | grep -qi 'libcurl'
           ! nm -C "$binary" | grep -E 'OpenAI|ProviderTaskHandler|CurlHttpTransport'
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
-          "$wrapper" --help | grep -q 'prepare-after-explicit-resume-v1-go'
+          "$binary" --help | grep -q 'prepare-after-explicit-resume-v1-go'
 
       - name: Compile v1 prepare provider-free crash proof
         run: |
