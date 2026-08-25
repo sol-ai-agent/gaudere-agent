@@ -35,6 +35,20 @@ struct ResumeContextSnapshotRecord {
     std::string detail;
 };
 
+/** Strict read-only interpretation of a caller-supplied snapshot request. */
+struct ResumeContextSnapshotRequestInspection {
+    bool eligible = false;
+    std::string canonical_request;
+    std::string detail;
+};
+
+/**
+ * Validate and canonicalize one caller-supplied snapshot request without mutating
+ * durable state. This is the same schema/bounds validation used by the recorder.
+ */
+[[nodiscard]] ResumeContextSnapshotRequestInspection
+inspect_resume_context_snapshot_request(const std::string& request_json) noexcept;
+
 /** Strict read-only interpretation of one already-durable snapshot Task. */
 struct ResumeContextSnapshotInspection {
     bool eligible = false;
