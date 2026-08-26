@@ -112,17 +112,20 @@ gaudere_resume_after_wake_v1_SOURCES = \
 	ResumeContextSnapshot.cpp \
 	ResumeContextSnapshotInspection.cpp \
 	ResumeContextSnapshot.hpp \
+	ResumeDecisionStructuredOutput.hpp \
 	WakeSourceDecision.hpp \
 	CurlHttpTransport.cpp \
 	CurlHttpTransport.hpp \
 	FileSecretSource.cpp \
 	FileSecretSource.hpp \
 	HttpTransport.hpp \
-	OpenAIActivation.cpp \
-	OpenAIActivation.hpp \
 	OpenAIBudget.hpp \
+	OpenAIJsonSchemaTransport.cpp \
+	OpenAIJsonSchemaTransport.hpp \
 	OpenAIResponsesProvider.cpp \
 	OpenAIResponsesProvider.hpp \
+	OpenAIStructuredActivation.cpp \
+	OpenAIStructuredActivation.hpp \
 	Provider.hpp \
 	ProviderTaskHandler.cpp \
 	ProviderTaskHandler.hpp \
