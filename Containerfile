@@ -3,8 +3,6 @@ ARG GAUDERE_AGENT_REF
 ARG GAUDERE_REF
 FROM ${BUILDER_IMAGE} AS builder
 
-# Deliberately has no default. scripts/build-image.sh and CI must both provide
-# the same pinned commit from gaudere.ref so container and CI builds cannot drift.
 ARG GAUDERE_AGENT_REF
 ARG GAUDERE_REF
 
@@ -65,9 +63,13 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake-v1-prepare /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake-v1 /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-current-cognition-prepare /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-current-cognition /opt/runtime/bin/ \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1-prepare \
-    && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1
+    && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1 \
+    && test -x /opt/runtime/bin/gaudere-current-cognition-prepare \
+    && test -x /opt/runtime/bin/gaudere-current-cognition
 
 FROM registry.fedoraproject.org/fedora:44
 
@@ -88,6 +90,8 @@ COPY --from=builder /opt/runtime/ /usr/local/
 RUN test -x /usr/local/bin/gaudere-resume-after-wake \
     && test -x /usr/local/bin/gaudere-resume-after-wake-v1-prepare \
     && test -x /usr/local/bin/gaudere-resume-after-wake-v1 \
+    && test -x /usr/local/bin/gaudere-current-cognition-prepare \
+    && test -x /usr/local/bin/gaudere-current-cognition \
     && echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
     && ldconfig
 
