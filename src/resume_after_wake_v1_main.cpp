@@ -2,7 +2,7 @@
 #include "OpenAIStructuredActivation.hpp"
 #include "ResumeAfterWakeV1.hpp"
 #include "ResumeAfterWakeV1Cognition.hpp"
-#include "ResumeAfterWakeV1TextInputAdapter.hpp"
+#include "ResumeAfterWakeV1StructuredInputAdapter.hpp"
 #include "ResumeDecisionStructuredOutput.hpp"
 #include "StateLock.hpp"
 #include "TaskExecutor.hpp"
@@ -225,9 +225,10 @@ int main(int argc, char* argv[])
             action_runtime, action_store, budget_store,
             gaudere_agent::resume_decision_structured_output_contract(),
             options.model, options.secret, options.secret_directory);
-        gaudere_agent::ResumeAfterWakeV1TextInputAdapter text_input(
+        gaudere_agent::ResumeAfterWakeV1StructuredInputAdapter structured_input(
             activation.handler());
-        gaudere_agent::ResumeAfterWakeV1CognitionHandler cognition(text_input);
+        gaudere_agent::ResumeAfterWakeV1CognitionHandler cognition(
+            structured_input);
         gaudere_agent::TaskExecutor executor(work_runtime, task_store);
 
         const auto execution = executor.execute(
