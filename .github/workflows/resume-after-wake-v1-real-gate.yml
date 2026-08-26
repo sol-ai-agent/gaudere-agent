@@ -77,9 +77,9 @@ jobs:
             agent/src/resume_after_wake_v1_main.cpp
           grep -q 'resume_decision_structured_output_contract()' \
             agent/src/resume_after_wake_v1_main.cpp
-          grep -q 'ResumeAfterWakeV1TextInputAdapter text_input' \
+          grep -q 'ResumeAfterWakeV1StructuredInputAdapter structured_input' \
             agent/src/resume_after_wake_v1_main.cpp
-          grep -q 'ResumeAfterWakeV1CognitionHandler cognition(text_input)' \
+          grep -q 'ResumeAfterWakeV1CognitionHandler cognition' \
             agent/src/resume_after_wake_v1_main.cpp
           python3 - <<'PY'
           from pathlib import Path
@@ -88,17 +88,22 @@ jobs:
           budget = text.index('if (budget.next_new_consumption')
           activation = text.index('OpenAIStructuredActivation activation')
           contract = text.index('resume_decision_structured_output_contract()')
+          adapter = text.index('ResumeAfterWakeV1StructuredInputAdapter structured_input')
           assert fresh < activation
           assert budget < activation
           assert text.index('is_terminal(task->status)') < activation
-          assert contract > activation
+          assert activation < contract < adapter
 
           makefile = Path('agent/src/Makefile.am').read_text()
           assert 'gaudere-resume-after-wake-v1' in makefile
-          assert 'ResumeAfterWakeV1TextInputAdapter.cpp' in makefile
+          assert 'ResumeAfterWakeV1StructuredInputAdapter.cpp' in makefile
           assert 'OpenAIJsonSchemaTransport.cpp' in makefile
           assert 'OpenAIStructuredActivation.cpp' in makefile
           assert 'ResumeDecisionStructuredOutput.hpp' in makefile
+
+          adapter_text = Path('agent/src/ResumeAfterWakeV1StructuredInputAdapter.cpp').read_text()
+          assert 'adapted.input_content_type = "text/plain; charset=utf-8"' in adapter_text
+          assert 'adapted.input =' not in adapter_text
 
           structured = Path('agent/src/OpenAIJsonSchemaTransport.cpp').read_text()
           assert '{"type", "json_schema"}' in structured
@@ -127,7 +132,7 @@ jobs:
           src/gaudere-resume-after-wake-v1 --help \
             | grep -q 'execute-after-explicit-resume-v1-go'
 
-      - name: Compile provider-boundary adapter proof
+      - name: Compile historical prompt-boundary proof
         run: |
           set -eu
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
@@ -138,13 +143,13 @@ jobs:
             $(pkg-config --libs gaudere) \
             -o /tmp/resume-after-wake-v1-text-input-adapter-test
 
-      - name: Run provider-boundary adapter proof
+      - name: Run historical prompt-boundary proof
         run: |
           set -eu
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           /tmp/resume-after-wake-v1-text-input-adapter-test
 
-      - name: Prove real binary keeps provider linkage isolated from service entrypoint
+      - name: Prove real binary keeps structured provider linkage isolated from service entrypoint
         run: |
           set -eu
           binary="$GITHUB_WORKSPACE/agent/build/src/gaudere-resume-after-wake-v1"
@@ -152,7 +157,7 @@ jobs:
           readelf -h "$binary" >/dev/null
           readelf -h "$service" >/dev/null
           ldd "$binary" | grep -qi 'libcurl'
-          nm -C "$binary" | grep -q 'ResumeAfterWakeV1TextInputAdapter'
+          nm -C "$binary" | grep -q 'ResumeAfterWakeV1StructuredInputAdapter'
           nm -C "$binary" | grep -q 'OpenAIJsonSchemaTransport'
           ! nm -C "$service" | grep -q 'OpenAIJsonSchemaTransport'
           grep -q 'ENTRYPOINT \["/usr/local/bin/gaudere-agent"\]' agent/Containerfile
