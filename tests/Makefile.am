@@ -10,11 +10,13 @@ check_PROGRAMS = \
 	live_control_processor_test \
 	local_wait_handler_test \
 	openai_activation_test \
+	openai_json_schema_transport_test \
 	openai_one_shot_test \
 	openai_responses_hardening_test \
 	openai_responses_provider_test \
 	provider_task_handler_test \
 	provider_usage_durability_test \
+	resume_after_wake_structured_normalization_test \
 	resume_after_wake_test \
 	state_lock_test \
 	task_dispatcher_test \
@@ -135,6 +137,18 @@ openai_activation_test_SOURCES = \
 	../src/TaskExecutor.hpp
 openai_activation_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
 
+openai_json_schema_transport_test_SOURCES = \
+	openai_json_schema_transport_test.cpp \
+	../src/HttpTransport.hpp \
+	../src/OpenAIJsonSchemaTransport.cpp \
+	../src/OpenAIJsonSchemaTransport.hpp \
+	../src/OpenAIResponsesProvider.cpp \
+	../src/OpenAIResponsesProvider.hpp \
+	../src/Provider.hpp \
+	../src/ResumeDecisionStructuredOutput.hpp \
+	../src/SecretSource.hpp
+openai_json_schema_transport_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
 openai_one_shot_test_SOURCES = \
 	openai_one_shot_test.cpp \
 	../src/OpenAIOneShot.cpp \
@@ -186,6 +200,14 @@ provider_usage_durability_test_SOURCES = \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
 provider_usage_durability_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+resume_after_wake_structured_normalization_test_SOURCES = \
+	resume_after_wake_structured_normalization_test.cpp \
+	../src/ResumeAfterWakeCognition.cpp \
+	../src/ResumeAfterWakeCognition.hpp \
+	../src/ResumeAfterWake.hpp \
+	../src/TaskExecutor.hpp
+resume_after_wake_structured_normalization_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 resume_after_wake_test_SOURCES = \
 	resume_after_wake_test.cpp \
