@@ -1,0 +1,184 @@
+name: Current cognition real-call gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-current-cognition-real-gate:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin and build Gaudere
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in *[!0-9a-f]*|'') exit 1 ;; esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Build current cognition one-shots
+        run: |
+          set -eu
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+          ../configure --prefix="$GITHUB_WORKSPACE/agent-prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+          make --jobs=2
+          make install
+
+      - name: Prove authority remains one-shot and production-unwired
+        run: |
+          set -eu
+          ! grep -q 'gaudere-current-cognition' agent/src/main.cpp
+          ! grep -R -q 'gaudere-current-cognition' agent/deploy/quadlet
+          grep -q -- '--prepare-after-explicit-current-cognition-go' \
+            agent/src/current_cognition_prepare_main.cpp
+          grep -q -- '--execute-after-explicit-current-cognition-go' \
+            agent/src/current_cognition_main.cpp
+          grep -q -- '--task-id' agent/src/current_cognition_main.cpp
+          grep -q 'valid_current_cognition_task' agent/src/current_cognition_main.cpp
+          grep -q 'current_cognition_snapshot_captured_at_ms' \
+            agent/src/current_cognition_main.cpp
+          grep -q 'openai_bootstrap_budget_policy' agent/src/current_cognition_main.cpp
+          grep -q 'OpenAIStructuredActivation' agent/src/current_cognition_main.cpp
+          grep -q 'resume_decision_structured_output_contract' \
+            agent/src/current_cognition_main.cpp
+          grep -q 'CurrentCognitionHandler' agent/src/current_cognition_main.cpp
+          ! grep -Eq 'OpenAI|ProviderTaskHandler|CurlHttpTransport|SecretSource' \
+            agent/src/current_cognition_prepare_main.cpp
+
+      - name: Prove prepare binary has no provider linkage
+        run: |
+          set -eu
+          prepare="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-current-cognition-prepare"
+          real="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-current-cognition"
+          test -x "$prepare"
+          test -x "$real"
+          ! ldd "$prepare" | grep -q 'libcurl'
+          ldd "$real" | grep -q 'libcurl'
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          "$prepare" --help | grep -q 'predecessor-task-id'
+          "$real" --help | grep -q -- '--task-id ID --check'
+
+      - name: Build durable predecessor fixture
+        run: |
+          set -eu
+          cat > /tmp/current-predecessor-fixture.cpp <<'CPP'
+          #include <gaudere/persistence/sqlite/TaskStore.hpp>
+          #include <gaudere/work/Task.hpp>
+          #include <chrono>
+          #include <string>
+          int main(int argc, char** argv) {
+              if (argc != 2) return 2;
+              gaudere::persistence::sqlite::TaskStore store(argv[1]);
+              gaudere::work::Task task;
+              task.id = "cognition.resume-after-wake.v0:production-reflection-wake-source-first";
+              task.idempotency_key = task.id;
+              task.kind = "cognition.resume-after-wake.v0";
+              task.input_content_type = "text/plain; charset=utf-8";
+              task.input = "historical successful cognition fixture";
+              task.limits.max_input_bytes = 48 * 1024;
+              task.limits.max_output_bytes = 8 * 1024;
+              task.limits.max_runtime = std::chrono::seconds{60};
+              task.limits.max_attempts = 2;
+              task.attempts_started = 1;
+              task.status = gaudere::work::TaskStatus::succeeded;
+              task.result = gaudere::work::TaskResult{
+                  "application/vnd.gaudere.cognition-resume-decision+json",
+                  "{\"decision\":\"continue\",\"objective\":\"Choose the next objective from fresh facts.\",\"reason\":\"Historical continuity remains valid.\",\"schema\":\"gaudere.cognition.resume-decision.v1\"}",
+                  {}, {}};
+              store.save(task);
+              return 0;
+          }
+          CPP
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            /tmp/current-predecessor-fixture.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) \
+            -o /tmp/current-predecessor-fixture
+
+      - name: Prove provider-free prepare then read-only real preflight
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          db=/tmp/current-cognition-real-gate.db
+          /tmp/current-predecessor-fixture "$db"
+          cat > /tmp/current-context.json <<'JSON'
+          {"schema":"gaudere.resume-current-context.v1","content_type":"text/markdown; charset=utf-8","content":"Provider call #6 happened exactly once and is terminal failed. Structured Outputs is now the required real provider boundary. This is provider-free gate evidence only.","provenance":[{"kind":"runtime-snapshot","ref":"current-real-gate-ci","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]}
+          JSON
+          prepare="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-current-cognition-prepare"
+          real="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-current-cognition"
+          "$prepare" \
+            --state "$db" \
+            --predecessor-task-id cognition.resume-after-wake.v0:production-reflection-wake-source-first \
+            --context-request-file /tmp/current-context.json \
+            --prepare-after-explicit-current-cognition-go \
+            | tee /tmp/prepare.out
+          grep -q '^provider_effects=0$' /tmp/prepare.out
+          task_id=$(sed -n 's/^current_task_id=//p' /tmp/prepare.out)
+          test -n "$task_id"
+          "$real" --state "$db" --task-id "$task_id" --check \
+            | tee /tmp/check.out
+          grep -q '^context_fresh=true$' /tmp/check.out
+          grep -q '^provider_total_used=0$' /tmp/check.out
+          grep -q '^provider_next=accepted$' /tmp/check.out
+          grep -q '^provider_effects=0$' /tmp/check.out
+          test "$(sqlite3 "$db" 'SELECT COUNT(*) FROM actions;')" = 0
+          test "$(sqlite3 "$db" 'SELECT COUNT(*) FROM budget_consumptions;')" = 0
+          test "$(sqlite3 "$db" 'SELECT COUNT(*) FROM wake_intents;')" = 0
+          test "$(sqlite3 "$db" "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = 1
+
+      - name: Assert CI cannot perform a real provider call
+        run: |
+          set -eu
+          ! grep -q 'gaudere-openai-api-key' /tmp/prepare.out
+          test ! -e /run/secrets/gaudere-openai-api-key
+          echo 'Current cognition real-call gate is provider-free in CI'
