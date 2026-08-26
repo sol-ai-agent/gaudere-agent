@@ -171,9 +171,17 @@ jobs:
           grep -q '^provider_total_used=0$' /tmp/check.out
           grep -q '^provider_next=accepted$' /tmp/check.out
           grep -q '^provider_effects=0$' /tmp/check.out
-          test "$(sqlite3 "$db" 'SELECT COUNT(*) FROM actions;')" = 0
-          test "$(sqlite3 "$db" 'SELECT COUNT(*) FROM budget_consumptions;')" = 0
-          test "$(sqlite3 "$db" 'SELECT COUNT(*) FROM wake_intents;')" = 0
+          table_rows_or_zero() {
+            table=$1
+            if test "$(sqlite3 "$db" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='$table';")" = 0; then
+              echo 0
+            else
+              sqlite3 "$db" "SELECT COUNT(*) FROM $table;"
+            fi
+          }
+          test "$(table_rows_or_zero actions)" = 0
+          test "$(table_rows_or_zero budget_consumptions)" = 0
+          test "$(table_rows_or_zero wake_intents)" = 0
           test "$(sqlite3 "$db" "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = 1
 
       - name: Assert CI cannot perform a real provider call
