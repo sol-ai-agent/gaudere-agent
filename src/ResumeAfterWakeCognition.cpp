@@ -101,10 +101,15 @@ HandlerResult normalize_resume_decision(HandlerResult result)
 
     Json normalized;
     if (action == "stop") {
-        if (decision.size() != 3 || decision.contains("objective")) {
+        const bool historical_shape =
+            decision.size() == 3 && !decision.contains("objective");
+        const bool structured_shape =
+            decision.size() == 4 && decision.contains("objective")
+            && decision.at("objective").is_null();
+        if (!historical_shape && !structured_shape) {
             return invalid_decision(
                 std::move(result),
-                "stop resume decision must not contain an objective");
+                "stop resume decision objective must be absent or null");
         }
         normalized = Json{{"schema", resume_after_wake_decision_schema},
                           {"decision", "stop"},
@@ -120,8 +125,7 @@ HandlerResult normalize_resume_decision(HandlerResult result)
         if (objective.empty() || objective.size() > max_objective_bytes
             || !allowed_text_controls(objective)) {
             return invalid_decision(
-                std::move(result),
-                "resume objective must be 1..4096 safe UTF-8 bytes");
+                std::move(result), "resume objective must be 1..4096 safe UTF-8 bytes");
         }
         normalized = Json{{"schema", resume_after_wake_decision_schema},
                           {"decision", "continue"},
