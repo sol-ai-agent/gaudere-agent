@@ -73,6 +73,10 @@ jobs:
             agent/src/resume_after_wake_v1_main.cpp
           grep -q 'provider_next=' agent/src/resume_after_wake_v1_main.cpp
           grep -q 'context_fresh=' agent/src/resume_after_wake_v1_main.cpp
+          grep -q 'OpenAIStructuredActivation activation' \
+            agent/src/resume_after_wake_v1_main.cpp
+          grep -q 'resume_decision_structured_output_contract()' \
+            agent/src/resume_after_wake_v1_main.cpp
           grep -q 'ResumeAfterWakeV1TextInputAdapter text_input' \
             agent/src/resume_after_wake_v1_main.cpp
           grep -q 'ResumeAfterWakeV1CognitionHandler cognition(text_input)' \
@@ -82,14 +86,25 @@ jobs:
           text = Path('agent/src/resume_after_wake_v1_main.cpp').read_text()
           fresh = text.index('if (!fresh)')
           budget = text.index('if (budget.next_new_consumption')
-          activation = text.index('OpenAIActivation activation')
+          activation = text.index('OpenAIStructuredActivation activation')
+          contract = text.index('resume_decision_structured_output_contract()')
           assert fresh < activation
           assert budget < activation
           assert text.index('is_terminal(task->status)') < activation
+          assert contract > activation
 
           makefile = Path('agent/src/Makefile.am').read_text()
           assert 'gaudere-resume-after-wake-v1' in makefile
           assert 'ResumeAfterWakeV1TextInputAdapter.cpp' in makefile
+          assert 'OpenAIJsonSchemaTransport.cpp' in makefile
+          assert 'OpenAIStructuredActivation.cpp' in makefile
+          assert 'ResumeDecisionStructuredOutput.hpp' in makefile
+
+          structured = Path('agent/src/OpenAIJsonSchemaTransport.cpp').read_text()
+          assert '{"type", "json_schema"}' in structured
+          assert '{"strict", true}' in structured
+          generic = Path('agent/src/OpenAIResponsesProvider.cpp').read_text()
+          assert 'json_schema' not in generic
 
           container = Path('agent/Containerfile').read_text()
           assert 'cp /opt/gaudere-agent/bin/gaudere-resume-after-wake-v1 /opt/runtime/bin/' in container
@@ -138,4 +153,6 @@ jobs:
           readelf -h "$service" >/dev/null
           ldd "$binary" | grep -qi 'libcurl'
           nm -C "$binary" | grep -q 'ResumeAfterWakeV1TextInputAdapter'
+          nm -C "$binary" | grep -q 'OpenAIJsonSchemaTransport'
+          ! nm -C "$service" | grep -q 'OpenAIJsonSchemaTransport'
           grep -q 'ENTRYPOINT \["/usr/local/bin/gaudere-agent"\]' agent/Containerfile
