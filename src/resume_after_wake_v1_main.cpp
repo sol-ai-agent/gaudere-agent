@@ -1,8 +1,9 @@
-#include "OpenAIActivation.hpp"
 #include "OpenAIBudget.hpp"
+#include "OpenAIStructuredActivation.hpp"
 #include "ResumeAfterWakeV1.hpp"
 #include "ResumeAfterWakeV1Cognition.hpp"
 #include "ResumeAfterWakeV1TextInputAdapter.hpp"
+#include "ResumeDecisionStructuredOutput.hpp"
 #include "StateLock.hpp"
 #include "TaskExecutor.hpp"
 #include "WakeSourceDecision.hpp"
@@ -153,9 +154,6 @@ int main(int argc, char* argv[])
         const auto options = parse_options(argc, argv);
         std::cout << std::unitbuf;
 
-        // Both modes require exclusive state ownership. In production the service
-        // must therefore be deliberately stopped before this one-shot can inspect
-        // or mutate the database.
         gaudere_agent::StateLock state_lock(options.state_path);
         gaudere::persistence::sqlite::TaskStore task_store(options.state_path);
         gaudere::persistence::sqlite::WakeIntentStore wake_store(options.state_path);
@@ -219,10 +217,13 @@ int main(int argc, char* argv[])
         gaudere::scheduling::wake::Runtime action_runtime(action_store, clock);
         action_runtime.recover();
 
-        // Construction performs secret/preflight work only. The provider budget and
-        // durable Action boundary are still owned by ProviderTaskHandler.
-        gaudere_agent::OpenAIActivation activation(
+        // The Structured Output contract is immutable construction-time provider
+        // configuration. Budget/Action/no-replay authority remains unchanged in
+        // ProviderTaskHandler, and the cognition normalizer still validates the
+        // model proposal after the API-level shape guarantee.
+        gaudere_agent::OpenAIStructuredActivation activation(
             action_runtime, action_store, budget_store,
+            gaudere_agent::resume_decision_structured_output_contract(),
             options.model, options.secret, options.secret_directory);
         gaudere_agent::ResumeAfterWakeV1TextInputAdapter text_input(
             activation.handler());
