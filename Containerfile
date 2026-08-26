@@ -3,6 +3,8 @@ ARG GAUDERE_AGENT_REF
 ARG GAUDERE_REF
 FROM ${BUILDER_IMAGE} AS builder
 
+# Deliberately has no default. scripts/build-image.sh and CI must both provide
+# the same pinned commit from gaudere.ref so container and CI builds cannot drift.
 ARG GAUDERE_AGENT_REF
 ARG GAUDERE_REF
 
