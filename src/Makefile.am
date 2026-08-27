@@ -1,6 +1,6 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1
+bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1 gaudere-current-cognition-prepare gaudere-current-cognition
 
 gaudere_agent_SOURCES = \
 	main.cpp \
@@ -135,3 +135,50 @@ gaudere_resume_after_wake_v1_SOURCES = \
 	TaskExecutor.cpp \
 	TaskExecutor.hpp
 gaudere_resume_after_wake_v1_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
+
+gaudere_current_cognition_prepare_SOURCES = \
+	current_cognition_prepare_main.cpp \
+	CurrentCognitionCycle.cpp \
+	CurrentCognitionCycle.hpp \
+	ResumeContextSnapshot.cpp \
+	ResumeContextSnapshotInspection.cpp \
+	ResumeContextSnapshotRequest.cpp \
+	ResumeContextSnapshot.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp
+gaudere_current_cognition_prepare_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+gaudere_current_cognition_SOURCES = \
+	current_cognition_main.cpp \
+	CurrentCognitionCycle.cpp \
+	CurrentCognitionCycle.hpp \
+	CurrentCognitionHandler.cpp \
+	CurrentCognitionHandler.hpp \
+	ResumeAfterWakeCognition.cpp \
+	ResumeAfterWakeCognition.hpp \
+	ResumeContextSnapshotInspection.cpp \
+	ResumeContextSnapshot.hpp \
+	ResumeDecisionStructuredOutput.hpp \
+	CurlHttpTransport.cpp \
+	CurlHttpTransport.hpp \
+	FileSecretSource.cpp \
+	FileSecretSource.hpp \
+	HttpTransport.hpp \
+	OpenAIBudget.hpp \
+	OpenAIJsonSchemaTransport.cpp \
+	OpenAIJsonSchemaTransport.hpp \
+	OpenAIResponsesProvider.cpp \
+	OpenAIResponsesProvider.hpp \
+	OpenAIStructuredActivation.cpp \
+	OpenAIStructuredActivation.hpp \
+	Provider.hpp \
+	ProviderTaskHandler.cpp \
+	ProviderTaskHandler.hpp \
+	SecretSource.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp
+gaudere_current_cognition_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
