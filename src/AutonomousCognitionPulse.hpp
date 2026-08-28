@@ -37,6 +37,8 @@ enum class AutonomousCognitionPulseResult {
     unavailable
 };
 
+using PulseResult = AutonomousCognitionPulseResult;
+
 struct AutonomousCognitionPulseObservation {
     AutonomousCognitionPulseResult result =
         AutonomousCognitionPulseResult::unavailable;
