@@ -1,0 +1,105 @@
+name: Autonomous cognition pulse provider-free proof
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-autonomous-pulse:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere dependency
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in
+            *[!0-9a-f]*|'') exit 1 ;;
+          esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+
+      - name: Build and install Gaudere
+        run: |
+          set -eu
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove isolated provider-free authority
+        run: |
+          set -eu
+          grep -q 'cognition.autonomous-pulse.v0' agent/src/AutonomousCognitionPulseStore.hpp
+          grep -q 'autonomous_cognition_continue_cadence{6}' agent/src/AutonomousCognitionPulse.hpp
+          grep -q 'autonomous_cognition_quiescent_cadence{24}' agent/src/AutonomousCognitionPulse.hpp
+          grep -q 'CurrentCognitionCycle cognition' agent/src/AutonomousCognitionPulse.cpp
+          grep -q 'budget_store_.snapshot' agent/src/AutonomousCognitionPulse.cpp
+          ! grep -Eq '#include .*OpenAI|ProviderTaskHandler|CurlHttpTransport|SecretSource' \
+            agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseStore.cpp \
+            agent/src/CanonicalCognitionDecision.cpp \
+            agent/tests/autonomous_cognition_pulse_test.cpp
+          ! grep -q 'AutonomousCognitionPulse' agent/src/main.cpp
+          ! grep -q 'AutonomousCognitionPulse' agent/src/Makefile.am
+          ! grep -R -q 'AutonomousCognitionPulse' agent/deploy/quadlet
+          test "$(tr -d '\r\n' < agent/gaudere.ref)" = \
+            '1316cf68db93e4c91a7bd79fbd289b8f382f8659'
+
+      - name: Compile autonomous pulse proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_pulse_test.cpp \
+            agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseStore.cpp \
+            agent/src/CanonicalCognitionDecision.cpp \
+            agent/src/Sha256.cpp \
+            agent/src/CurrentCognitionCycle.cpp \
+            agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotInspection.cpp \
+            agent/src/TaskExecutor.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
+            -o /tmp/autonomous-cognition-pulse-test
+
+      - name: Run provider-free autonomy proof
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/autonomous-cognition-pulse-test
