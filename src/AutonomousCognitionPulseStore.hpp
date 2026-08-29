@@ -39,6 +39,22 @@ struct AutonomousCognitionPulseCursor {
 [[nodiscard]] bool valid_autonomous_cognition_pulse_cursor(
     const AutonomousCognitionPulseCursor& cursor) noexcept;
 
+struct AutonomousCognitionPulseSidecarInspection {
+    bool eligible = false;
+    std::optional<AutonomousCognitionPulseCursor> cursor;
+    std::string detail;
+};
+
+/**
+ * Inspect an existing sidecar strictly read-only.
+ *
+ * The file must already exist, be schema v1, contain exactly one canonical fixed-
+ * scope cursor and contain no extra cursor rows. No schema creation, WAL activation
+ * or durable mutation occurs through this function.
+ */
+[[nodiscard]] AutonomousCognitionPulseSidecarInspection
+inspect_autonomous_cognition_pulse_sidecar(const std::string& path) noexcept;
+
 enum class AutonomousCognitionPulseStoreResult {
     accepted,
     duplicate,

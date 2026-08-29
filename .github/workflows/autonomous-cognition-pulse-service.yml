@@ -1,0 +1,264 @@
+name: Autonomous cognition pulse service gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-autonomous-pulse-service:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin build dependency
+        run: |
+          set -eu
+          ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          test "${#ref}" -eq 40
+          git -C gaudere checkout --detach "$ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$ref"
+
+      - name: Build Gaudere and Agent
+        run: |
+          set -eu
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+          cd "$GITHUB_WORKSPACE/agent"
+          autoreconf --install --force
+          mkdir build
+          cd build
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+            ../configure --prefix="$GITHUB_WORKSPACE/agent-prefix" \
+              CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" make --jobs=2 check
+          make install
+
+      - name: Build deterministic current-cognition fixture
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_pulse_runtime_fixture.cpp \
+            agent/src/Sha256.cpp \
+            agent/src/CurrentCognitionCycle.cpp \
+            agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotInspection.cpp \
+            agent/src/TaskExecutor.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) \
+            -o /tmp/autonomous-pulse-runtime-fixture
+
+      - name: Prove explicit activation and fail-closed sidecar inspection
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          agent_bin="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-agent"
+          root=$(mktemp -d)
+          trap 'rm -rf "$root"' EXIT
+          predecessor=$(/tmp/autonomous-pulse-runtime-fixture "$root/state.db")
+          test -n "$predecessor"
+
+          test ! -e "$root/absent.db"
+          "$agent_bin" --state "$root/state.db" >"$root/historical.log" 2>&1 &
+          pid=$!
+          sleep 0.5
+          kill -TERM "$pid"
+          wait "$pid"
+          test ! -e "$root/absent.db"
+          ! grep -q 'autonomous cognition pulse enabled' "$root/historical.log"
+
+          : >"$root/empty.db"
+          empty_before=$(sha256sum "$root/empty.db" | awk '{print $1}')
+          if "$agent_bin" --state "$root/state.db" \
+              --autonomous-pulse-sidecar "$root/empty.db"; then
+            echo 'unseeded sidecar was accepted' >&2
+            exit 1
+          fi
+          test "$empty_before" = "$(sha256sum "$root/empty.db" | awk '{print $1}')"
+
+          if "$agent_bin" --state "$root/state.db" \
+              --autonomous-pulse-sidecar "$root/state.db"; then
+            echo 'state/sidecar alias was accepted' >&2
+            exit 1
+          fi
+
+      - name: Prove due pulse prepares exactly one unhandled cognition
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          agent_bin="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-agent"
+          pulse_bin="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-autonomous-cognition-pulse"
+          root=$(mktemp -d)
+          trap 'rm -rf "$root"' EXIT
+          predecessor=$(/tmp/autonomous-pulse-runtime-fixture "$root/state.db")
+          "$pulse_bin" --state "$root/state.db" --sidecar "$root/pulse.db" \
+            --predecessor-task-id "$predecessor" --seed-after-explicit-pulse-go \
+            >"$root/seed.log"
+          sqlite3 "$root/pulse.db" \
+            'UPDATE autonomous_cognition_pulse_cursor SET due_at_ms=anchor_at_ms;'
+
+          actions_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')
+          budget_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')
+          wakes_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM wake_intents;')
+          current_before=$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")
+          pending_before=$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")
+
+          "$agent_bin" --state "$root/state.db" \
+            --autonomous-pulse-sidecar "$root/pulse.db" \
+            >"$root/service.log" 2>&1 &
+          pid=$!
+          sleep 1
+          kill -TERM "$pid"
+          wait "$pid"
+          cat "$root/service.log"
+
+          grep -q 'autonomous cognition pulse enabled' "$root/service.log"
+          grep -q 'provider_execution=false' "$root/service.log"
+          test "$(sqlite3 "$root/pulse.db" \
+            "SELECT state FROM autonomous_cognition_pulse_cursor;")" = 2
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = $((current_before + 1))
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")" = $((pending_before + 1))
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')" = "$actions_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')" = "$budget_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM wake_intents;')" = "$wakes_before"
+
+          current_id=$(sqlite3 "$root/state.db" \
+            "SELECT id FROM tasks WHERE kind='cognition.current.v0' AND status=0 AND id <> '$predecessor' LIMIT 1;")
+          test -n "$current_id"
+
+          "$agent_bin" --state "$root/state.db" \
+            --autonomous-pulse-sidecar "$root/pulse.db" \
+            >"$root/restart.log" 2>&1 &
+          pid=$!
+          sleep 1
+          kill -TERM "$pid"
+          wait "$pid"
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = $((current_before + 1))
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")" = $((pending_before + 1))
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT status FROM tasks WHERE id='$current_id';")" = 0
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')" = "$actions_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')" = "$budget_before"
+
+      - name: Prove budget deferral never hot-loops or consumes
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          agent_bin="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-agent"
+          pulse_bin="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-autonomous-cognition-pulse"
+
+          run_case() {
+            name=$1
+            expected=$2
+            root=$(mktemp -d)
+            predecessor=$(/tmp/autonomous-pulse-runtime-fixture "$root/state.db")
+            "$pulse_bin" --state "$root/state.db" --sidecar "$root/pulse.db" \
+              --predecessor-task-id "$predecessor" --seed-after-explicit-pulse-go \
+              >/dev/null
+            sqlite3 "$root/pulse.db" \
+              'UPDATE autonomous_cognition_pulse_cursor SET due_at_ms=anchor_at_ms;'
+            now_ms=$(date +%s%3N)
+
+            case "$name" in
+              cooldown)
+                sqlite3 "$root/state.db" \
+                  "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('provider.call:openai.responses','cooldown-1',$now_ms);"
+                ;;
+              window)
+                for n in 1 2 3 4; do
+                  t=$((now_ms - n * 3600000))
+                  sqlite3 "$root/state.db" \
+                    "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('provider.call:openai.responses','window-$n',$t);"
+                done
+                ;;
+              lifetime)
+                for n in $(seq 1 12); do
+                  t=$((now_ms - (25 + n) * 3600000))
+                  sqlite3 "$root/state.db" \
+                    "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('provider.call:openai.responses','lifetime-$n',$t);"
+                done
+                ;;
+              *)
+                echo "unknown budget fixture: $name" >&2
+                exit 1
+                ;;
+            esac
+
+            before=$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM budget_consumptions WHERE scope='provider.call:openai.responses';")
+            current_before=$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")
+            pending_before=$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")
+            "$agent_bin" --state "$root/state.db" \
+              --autonomous-pulse-sidecar "$root/pulse.db" \
+              >"$root/$name.log" 2>&1 &
+            pid=$!
+            sleep 0.7
+            kill -TERM "$pid"
+            wait "$pid"
+            cat "$root/$name.log"
+            grep -q "$expected" "$root/$name.log"
+            test "$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = "$current_before"
+            test "$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")" = "$pending_before"
+            test "$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM budget_consumptions WHERE scope='provider.call:openai.responses';")" = "$before"
+            rm -rf "$root"
+          }
+
+          run_case cooldown 'provider cooldown defers autonomous pulse'
+          run_case window 'provider rolling window defers autonomous pulse'
+          run_case lifetime 'provider lifetime budget exhausted; autonomous pulse dormant'
+
+      - name: Prove deployment remains disabled by default
+        run: |
+          set -eu
+          ! grep -R -q -- '--autonomous-pulse-sidecar' agent/deploy/quadlet
+          ! grep -q 'current_cognition_task_kind' agent/src/main.cpp
+          grep -q 'provider_execution=false' agent/src/main.cpp

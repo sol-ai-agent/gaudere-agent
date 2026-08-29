@@ -4,10 +4,21 @@ bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-r
 
 gaudere_agent_SOURCES = \
 	main.cpp \
+	AutonomousCognitionPulse.cpp \
+	AutonomousCognitionPulse.hpp \
+	AutonomousCognitionPulseService.cpp \
+	AutonomousCognitionPulseService.hpp \
+	AutonomousCognitionPulseSidecarInspection.cpp \
+	AutonomousCognitionPulseStore.cpp \
+	AutonomousCognitionPulseStore.hpp \
 	BoundedReflection.cpp \
 	BoundedReflection.hpp \
+	CanonicalCognitionDecision.cpp \
+	CanonicalCognitionDecision.hpp \
 	CurlHttpTransport.cpp \
 	CurlHttpTransport.hpp \
+	CurrentCognitionCycle.cpp \
+	CurrentCognitionCycle.hpp \
 	ExplicitWake.cpp \
 	ExplicitWake.hpp \
 	WakeSourceDecision.cpp \
@@ -35,7 +46,12 @@ gaudere_agent_SOURCES = \
 	Provider.hpp \
 	ProviderTaskHandler.cpp \
 	ProviderTaskHandler.hpp \
+	ResumeContextSnapshot.cpp \
+	ResumeContextSnapshotInspection.cpp \
+	ResumeContextSnapshot.hpp \
 	SecretSource.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
 	StateLock.cpp \
 	StateLock.hpp \
 	TaskDispatcher.cpp \
@@ -46,7 +62,7 @@ gaudere_agent_SOURCES = \
 	TaskReport.hpp \
 	WorkController.cpp \
 	WorkController.hpp
-gaudere_agent_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
+gaudere_agent_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS) -lsqlite3
 
 gaudere_control_SOURCES = \
 	control_main.cpp \
