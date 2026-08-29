@@ -78,7 +78,12 @@ jobs:
             agent/src/autonomous_cognition_pulse_main.cpp \
             agent/src/AutonomousCognitionPulse.cpp \
             agent/src/AutonomousCognitionPulseStore.cpp
-          ! grep -q 'AutonomousCognitionPulse' agent/src/main.cpp
+          grep -q -- '--autonomous-pulse-sidecar' agent/src/main.cpp
+          ! grep -q 'current_cognition_task_kind' agent/src/main.cpp
+          ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource' \
+            agent/src/AutonomousCognitionPulseService.cpp \
+            agent/src/AutonomousCognitionPulseSidecarInspection.cpp
+          ! grep -R -q -- '--autonomous-pulse-sidecar' agent/deploy/quadlet
           ! grep -R -q 'gaudere-autonomous-cognition-pulse' agent/deploy/quadlet
           grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-agent"]' agent/Containerfile
           grep -q 'gaudere-autonomous-cognition-pulse' agent/Containerfile
