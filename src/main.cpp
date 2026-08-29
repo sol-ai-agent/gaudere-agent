@@ -1,3 +1,6 @@
+#include "AutonomousCognitionPulse.hpp"
+#include "AutonomousCognitionPulseService.hpp"
+#include "AutonomousCognitionPulseStore.hpp"
 #include "BoundedReflection.hpp"
 #include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
@@ -26,6 +29,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -53,6 +57,7 @@ struct Options {
     std::string openai_secret = "openai-api-key";
     std::string secret_directory = "/run/secrets";
     std::string control_socket;
+    std::string autonomous_pulse_sidecar;
 };
 
 void usage(const char* program)
@@ -64,6 +69,7 @@ void usage(const char* program)
         << "--cancel ID REASON] "
         << "[--control-socket PATH] "
         << "[--wake-intents] "
+        << "[--autonomous-pulse-sidecar PATH] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -101,6 +107,8 @@ Options parse_options(const int argc, char* argv[])
             options.text = argv[++index];
         } else if (argument == "--control-socket" && index + 1 < argc) {
             options.control_socket = argv[++index];
+        } else if (argument == "--autonomous-pulse-sidecar" && index + 1 < argc) {
+            options.autonomous_pulse_sidecar = argv[++index];
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -137,6 +145,10 @@ Options parse_options(const int argc, char* argv[])
     }
     if (!options.control_socket.empty() && modes != 0) {
         throw std::invalid_argument("--control-socket is only valid in service mode");
+    }
+    if (!options.autonomous_pulse_sidecar.empty() && modes != 0) {
+        throw std::invalid_argument(
+            "--autonomous-pulse-sidecar is only valid in service mode");
     }
     if (options.wake_intents_enabled && modes != 0 && !options.check_only) {
         throw std::invalid_argument(
@@ -185,6 +197,49 @@ Options parse_options(const int argc, char* argv[])
     }
 
     return options;
+}
+
+void require_distinct_regular_pulse_sidecar(const Options& options)
+{
+    if (options.autonomous_pulse_sidecar.empty()) return;
+
+    const auto state_status = std::filesystem::symlink_status(options.state_path);
+    const auto sidecar_status =
+        std::filesystem::symlink_status(options.autonomous_pulse_sidecar);
+    if (!std::filesystem::is_regular_file(state_status)) {
+        throw std::invalid_argument(
+            "autonomous pulse requires state database to be a regular non-symlink file");
+    }
+    if (!std::filesystem::is_regular_file(sidecar_status)) {
+        throw std::invalid_argument(
+            "autonomous pulse sidecar must already exist as a regular non-symlink file");
+    }
+
+    const auto state = std::filesystem::weakly_canonical(options.state_path);
+    const auto sidecar =
+        std::filesystem::weakly_canonical(options.autonomous_pulse_sidecar);
+    if (state == sidecar) {
+        throw std::invalid_argument(
+            "autonomous pulse sidecar resolves to the state database");
+    }
+    std::error_code equivalent_error;
+    if (std::filesystem::equivalent(options.state_path,
+                                    options.autonomous_pulse_sidecar,
+                                    equivalent_error)) {
+        throw std::invalid_argument(
+            "autonomous pulse sidecar aliases the state database");
+    }
+    if (equivalent_error) {
+        throw std::runtime_error(
+            "could not compare autonomous pulse sidecar identity");
+    }
+
+    const auto inspection = gaudere_agent::inspect_autonomous_cognition_pulse_sidecar(
+        options.autonomous_pulse_sidecar);
+    if (!inspection.eligible || !inspection.cursor) {
+        throw std::invalid_argument(
+            "autonomous pulse sidecar is not eligible: " + inspection.detail);
+    }
 }
 
 sigset_t block_control_signals()
@@ -298,6 +353,7 @@ int main(int argc, char* argv[])
     try {
         const auto options = parse_options(argc, argv);
         std::cout << std::unitbuf;
+        require_distinct_regular_pulse_sidecar(options);
 
         sigset_t signals{};
         if (!options.openai_once) {
@@ -357,13 +413,22 @@ int main(int argc, char* argv[])
         std::unique_ptr<gaudere::persistence::sqlite::BudgetStore> provider_budget_store;
         std::unique_ptr<gaudere_agent::OpenAIActivation> openai_activation;
         std::unique_ptr<gaudere_agent::BoundedReflectionHandler> reflection_handler;
+        std::unique_ptr<gaudere::persistence::sqlite::WakeIntentStore>
+            pulse_wake_store;
+        std::unique_ptr<gaudere_agent::AutonomousCognitionPulseStore>
+            pulse_store;
+        std::unique_ptr<gaudere_agent::AutonomousCognitionPulse> pulse;
+        std::unique_ptr<gaudere_agent::AutonomousCognitionPulseService>
+            pulse_service;
+        bool pulse_monitoring = false;
 
         if (!task_dispatcher.register_handler("local.echo", echo_handler)
             || !task_dispatcher.register_handler("local.wait", wait_handler)) {
             throw std::runtime_error("cannot register local task handlers");
         }
 
-        if (options.openai_enabled || !options.control_socket.empty()) {
+        if (options.openai_enabled || !options.control_socket.empty()
+            || !options.autonomous_pulse_sidecar.empty()) {
             provider_budget_store =
                 std::make_unique<gaudere::persistence::sqlite::BudgetStore>(
                     options.state_path);
@@ -409,10 +474,59 @@ int main(int argc, char* argv[])
                       << " automatic_successor=false\n";
         }
 
+        if (!options.autonomous_pulse_sidecar.empty()) {
+            if (!provider_budget_store) {
+                throw std::runtime_error(
+                    "autonomous pulse provider budget reader is unavailable");
+            }
+            gaudere::scheduling::wake::WakeIntentStore* pulse_wakes =
+                wake_intent_store.get();
+            if (!pulse_wakes) {
+                pulse_wake_store =
+                    std::make_unique<gaudere::persistence::sqlite::WakeIntentStore>(
+                        options.state_path);
+                pulse_wakes = pulse_wake_store.get();
+            }
+            pulse_store =
+                std::make_unique<gaudere_agent::AutonomousCognitionPulseStore>(
+                    options.autonomous_pulse_sidecar);
+            if (!pulse_store->find(gaudere_agent::autonomous_cognition_pulse_scope)) {
+                throw std::runtime_error(
+                    "autonomous pulse sidecar lost its seeded cursor after inspection");
+            }
+            pulse = std::make_unique<gaudere_agent::AutonomousCognitionPulse>(
+                *pulse_store, task_store, *provider_budget_store, *pulse_wakes,
+                work_runtime, now, true);
+            pulse_service =
+                std::make_unique<gaudere_agent::AutonomousCognitionPulseService>(
+                    *pulse, *provider_budget_store, work_scheduler, now);
+            std::cout << "gaudere-agent: autonomous cognition pulse enabled sidecar="
+                      << options.autonomous_pulse_sidecar
+                      << " provider_execution=false automatic_seed=false\n";
+        }
+
         action_runtime.recover();
         work_runtime.recover();
         if (!work_controller.start()) {
             throw std::runtime_error("cannot start work controller");
+        }
+
+        if (pulse_service) {
+            const auto initial = pulse_service->step();
+            if (!initial.plan.healthy) {
+                throw std::runtime_error(
+                    "autonomous pulse startup failed: " + initial.plan.detail);
+            }
+            pulse_monitoring = initial.plan.monitoring;
+            if (initial.observation.task) {
+                std::cout << "gaudere-agent: autonomous pulse prepared task="
+                          << initial.observation.task->id
+                          << " provider_execution=false\n";
+            }
+            if (!initial.plan.detail.empty()) {
+                std::cout << "gaudere-agent: autonomous pulse: "
+                          << initial.plan.detail << '\n';
+            }
         }
 
         if (options.echo) {
@@ -512,6 +626,25 @@ int main(int argc, char* argv[])
                         if (pthread_kill(signal_waiter.native_handle(), SIGUSR1) != 0) {
                             signal_wait_failed.store(true);
                         }
+                    }
+                    continue;
+                }
+
+                if (pulse_service && pulse_monitoring) {
+                    const auto pulse_step = pulse_service->step();
+                    pulse_monitoring =
+                        pulse_step.plan.healthy && pulse_step.plan.monitoring;
+                    if (pulse_step.observation.task) {
+                        std::cout << "gaudere-agent: autonomous pulse task="
+                                  << pulse_step.observation.task->id
+                                  << " provider_execution=false\n";
+                    }
+                    if (!pulse_step.plan.detail.empty()) {
+                        std::cout << "gaudere-agent: autonomous pulse: "
+                                  << pulse_step.plan.detail << '\n';
+                    }
+                    if (!pulse_step.plan.healthy) {
+                        std::cerr << "gaudere-agent: autonomous pulse monitoring disabled\n";
                     }
                 }
             }
