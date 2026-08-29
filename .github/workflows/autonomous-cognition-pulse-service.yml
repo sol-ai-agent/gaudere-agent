@@ -193,8 +193,7 @@ jobs:
 
           run_case() {
             name=$1
-            inserts=$2
-            expected=$3
+            expected=$2
             root=$(mktemp -d)
             predecessor=$(/tmp/autonomous-pulse-runtime-fixture "$root/state.db")
             "$pulse_bin" --state "$root/state.db" --sidecar "$root/pulse.db" \
@@ -203,7 +202,32 @@ jobs:
             sqlite3 "$root/pulse.db" \
               'UPDATE autonomous_cognition_pulse_cursor SET due_at_ms=anchor_at_ms;'
             now_ms=$(date +%s%3N)
-            eval "$inserts"
+
+            case "$name" in
+              cooldown)
+                sqlite3 "$root/state.db" \
+                  "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('provider.call:openai.responses','cooldown-1',$now_ms);"
+                ;;
+              window)
+                for n in 1 2 3 4; do
+                  t=$((now_ms - n * 3600000))
+                  sqlite3 "$root/state.db" \
+                    "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('provider.call:openai.responses','window-$n',$t);"
+                done
+                ;;
+              lifetime)
+                for n in $(seq 1 12); do
+                  t=$((now_ms - (25 + n) * 3600000))
+                  sqlite3 "$root/state.db" \
+                    "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('provider.call:openai.responses','lifetime-$n',$t);"
+                done
+                ;;
+              *)
+                echo "unknown budget fixture: $name" >&2
+                exit 1
+                ;;
+            esac
+
             before=$(sqlite3 "$root/state.db" \
               "SELECT COUNT(*) FROM budget_consumptions WHERE scope='provider.call:openai.responses';")
             current_before=$(sqlite3 "$root/state.db" \
@@ -228,17 +252,9 @@ jobs:
             rm -rf "$root"
           }
 
-          run_case cooldown \
-            'sqlite3 "$root/state.db" "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('"'"'provider.call:openai.responses'"'"','"'"'cooldown-1'"'"',$now_ms);"' \
-            'provider cooldown defers autonomous pulse'
-
-          run_case window \
-            'for n in 1 2 3 4; do t=$((now_ms - n * 3600000)); sqlite3 "$root/state.db" "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('"'"'provider.call:openai.responses'"'"','"'"'window-'"'"'$n'"'"',$t);"; done' \
-            'provider rolling window defers autonomous pulse'
-
-          run_case lifetime \
-            'for n in $(seq 1 12); do t=$((now_ms - (25 + n) * 3600000)); sqlite3 "$root/state.db" "INSERT INTO budget_consumptions(scope,idempotency_key,consumed_at_ms) VALUES('"'"'provider.call:openai.responses'"'"','"'"'lifetime-'"'"'$n'"'"',$t);"; done' \
-            'provider lifetime budget exhausted; autonomous pulse dormant'
+          run_case cooldown 'provider cooldown defers autonomous pulse'
+          run_case window 'provider rolling window defers autonomous pulse'
+          run_case lifetime 'provider lifetime budget exhausted; autonomous pulse dormant'
 
       - name: Prove deployment remains disabled by default
         run: |
