@@ -3,7 +3,10 @@
 #include "ResumeContextSnapshot.hpp"
 #include "Sha256.hpp"
 
+#include <gaudere/persistence/sqlite/ActionStore.hpp>
+#include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
+#include <gaudere/persistence/sqlite/WakeIntentStore.hpp>
 #include <gaudere/work/Runtime.hpp>
 
 #include <nlohmann/json.hpp>
@@ -73,6 +76,12 @@ int main(int argc, char* argv[])
         const std::string state_path = argv[1];
         const auto now = [] { return std::chrono::system_clock::now(); };
         gaudere::persistence::sqlite::TaskStore tasks(state_path);
+        gaudere::persistence::sqlite::ActionStore actions(state_path);
+        gaudere::persistence::sqlite::BudgetStore budgets(state_path);
+        gaudere::persistence::sqlite::WakeIntentStore wakes(state_path);
+        (void)actions;
+        (void)budgets;
+        (void)wakes;
         gaudere::work::Runtime runtime(tasks, now);
         runtime.recover();
 
