@@ -1,6 +1,6 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1 gaudere-current-cognition-prepare gaudere-current-cognition
+bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1 gaudere-current-cognition-prepare gaudere-current-cognition gaudere-autonomous-cognition-pulse
 
 gaudere_agent_SOURCES = \
 	main.cpp \
@@ -182,3 +182,25 @@ gaudere_current_cognition_SOURCES = \
 	TaskExecutor.cpp \
 	TaskExecutor.hpp
 gaudere_current_cognition_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS)
+
+gaudere_autonomous_cognition_pulse_SOURCES = \
+	autonomous_cognition_pulse_main.cpp \
+	AutonomousCognitionPulse.cpp \
+	AutonomousCognitionPulse.hpp \
+	AutonomousCognitionPulseStore.cpp \
+	AutonomousCognitionPulseStore.hpp \
+	CanonicalCognitionDecision.cpp \
+	CanonicalCognitionDecision.hpp \
+	CurrentCognitionCycle.cpp \
+	CurrentCognitionCycle.hpp \
+	ResumeContextSnapshot.cpp \
+	ResumeContextSnapshotInspection.cpp \
+	ResumeContextSnapshot.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp \
+	WakeSourceDecision.hpp
+gaudere_autonomous_cognition_pulse_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
