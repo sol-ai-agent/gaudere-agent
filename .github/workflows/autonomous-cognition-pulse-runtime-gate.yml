@@ -1,0 +1,141 @@
+name: Autonomous cognition pulse runtime gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-autonomous-pulse-runtime:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          file
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere dependency
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in
+            *[!0-9a-f]*|'') exit 1 ;;
+          esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+
+      - name: Build and install Gaudere
+        run: |
+          set -eu
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove static authority boundary
+        run: |
+          set -eu
+          grep -q -- '--check' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q -- '--seed-after-explicit-pulse-go' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q -- '--observe-after-explicit-pulse-go' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'StateLock state_lock' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'provider_effects=0' agent/src/autonomous_cognition_pulse_main.cpp
+          ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource' \
+            agent/src/autonomous_cognition_pulse_main.cpp \
+            agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseStore.cpp
+          ! grep -q 'AutonomousCognitionPulse' agent/src/main.cpp
+          ! grep -R -q 'gaudere-autonomous-cognition-pulse' agent/deploy/quadlet
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-agent"]' agent/Containerfile
+          grep -q 'gaudere-autonomous-cognition-pulse' agent/Containerfile
+
+      - name: Build Agent and runtime gate
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/agent-prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove real binary has no provider linkage
+        run: |
+          set -eu
+          binary="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-autonomous-cognition-pulse"
+          test -x "$binary"
+          file "$binary" | grep -q ELF
+          ! ldd "$binary" | grep -qi 'libcurl'
+          ! nm -C "$binary" | grep -E 'OpenAI|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource'
+
+      - name: Prove check mode does not create absent sidecar
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          binary="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-autonomous-cognition-pulse"
+          root=$(mktemp -d)
+          trap 'rm -rf "$root"' EXIT
+          touch "$root/state.db"
+          test ! -e "$root/pulse.db"
+          output=$("$binary" --state "$root/state.db" --sidecar "$root/pulse.db" --check)
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -q '^mode=check$'
+          printf '%s\n' "$output" | grep -q '^pulse_state=unseeded$'
+          printf '%s\n' "$output" | grep -q '^sidecar_exists=false$'
+          printf '%s\n' "$output" | grep -q '^provider_effects=0$'
+          test ! -e "$root/pulse.db"
+
+      - name: Re-run provider-free pulse behavior proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_pulse_test.cpp \
+            agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseStore.cpp \
+            agent/src/CanonicalCognitionDecision.cpp \
+            agent/src/Sha256.cpp \
+            agent/src/CurrentCognitionCycle.cpp \
+            agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotInspection.cpp \
+            agent/src/TaskExecutor.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
+            -o /tmp/autonomous-cognition-pulse-test
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/autonomous-cognition-pulse-test
