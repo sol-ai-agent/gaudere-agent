@@ -74,9 +74,14 @@ jobs:
             agent/src/AutonomousCognitionPulseStore.cpp \
             agent/src/CanonicalCognitionDecision.cpp \
             agent/tests/autonomous_cognition_pulse_test.cpp
-          ! grep -q 'AutonomousCognitionPulse' agent/src/main.cpp
-          ! grep -q 'AutonomousCognitionPulse' agent/src/Makefile.am
-          ! grep -R -q 'AutonomousCognitionPulse' agent/deploy/quadlet
+          grep -q -- '--autonomous-pulse-sidecar' agent/src/main.cpp
+          grep -q 'provider_execution=false' agent/src/main.cpp
+          ! grep -q 'current_cognition_task_kind' agent/src/main.cpp
+          ! grep -Eq 'OpenAIActivation|ProviderTaskHandler|CurlHttpTransport|SecretSource' \
+            agent/src/AutonomousCognitionPulseService.cpp \
+            agent/src/AutonomousCognitionPulseService.hpp \
+            agent/src/AutonomousCognitionPulseSidecarInspection.cpp
+          ! grep -R -q -- '--autonomous-pulse-sidecar' agent/deploy/quadlet
           test "$(tr -d '\r\n' < agent/gaudere.ref)" = \
             '1316cf68db93e4c91a7bd79fbd289b8f382f8659'
 
