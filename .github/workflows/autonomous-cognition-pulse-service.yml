@@ -138,6 +138,10 @@ jobs:
           actions_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')
           budget_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')
           wakes_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM wake_intents;')
+          current_before=$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")
+          pending_before=$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")
 
           "$agent_bin" --state "$root/state.db" \
             --autonomous-pulse-sidecar "$root/pulse.db" \
@@ -153,15 +157,15 @@ jobs:
           test "$(sqlite3 "$root/pulse.db" \
             "SELECT state FROM autonomous_cognition_pulse_cursor;")" = 2
           test "$(sqlite3 "$root/state.db" \
-            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = 1
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = $((current_before + 1))
           test "$(sqlite3 "$root/state.db" \
-            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")" = 1
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")" = $((pending_before + 1))
           test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')" = "$actions_before"
           test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')" = "$budget_before"
           test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM wake_intents;')" = "$wakes_before"
 
           current_id=$(sqlite3 "$root/state.db" \
-            "SELECT id FROM tasks WHERE kind='cognition.current.v0' LIMIT 1;")
+            "SELECT id FROM tasks WHERE kind='cognition.current.v0' AND status=0 AND id <> '$predecessor' LIMIT 1;")
           test -n "$current_id"
 
           "$agent_bin" --state "$root/state.db" \
@@ -172,7 +176,9 @@ jobs:
           kill -TERM "$pid"
           wait "$pid"
           test "$(sqlite3 "$root/state.db" \
-            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = 1
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = $((current_before + 1))
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")" = $((pending_before + 1))
           test "$(sqlite3 "$root/state.db" \
             "SELECT status FROM tasks WHERE id='$current_id';")" = 0
           test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')" = "$actions_before"
@@ -200,6 +206,10 @@ jobs:
             eval "$inserts"
             before=$(sqlite3 "$root/state.db" \
               "SELECT COUNT(*) FROM budget_consumptions WHERE scope='provider.call:openai.responses';")
+            current_before=$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")
+            pending_before=$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")
             "$agent_bin" --state "$root/state.db" \
               --autonomous-pulse-sidecar "$root/pulse.db" \
               >"$root/$name.log" 2>&1 &
@@ -210,7 +220,9 @@ jobs:
             cat "$root/$name.log"
             grep -q "$expected" "$root/$name.log"
             test "$(sqlite3 "$root/state.db" \
-              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = 0
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = "$current_before"
+            test "$(sqlite3 "$root/state.db" \
+              "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0' AND status=0;")" = "$pending_before"
             test "$(sqlite3 "$root/state.db" \
               "SELECT COUNT(*) FROM budget_consumptions WHERE scope='provider.call:openai.responses';")" = "$before"
             rm -rf "$root"
