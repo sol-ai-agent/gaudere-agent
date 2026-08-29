@@ -1,0 +1,210 @@
+name: Autonomous cognition pulse runtime gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-autonomous-pulse-runtime:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          file
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere dependency
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in
+            *[!0-9a-f]*|'') exit 1 ;;
+          esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+
+      - name: Build and install Gaudere
+        run: |
+          set -eu
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove static authority boundary
+        run: |
+          set -eu
+          grep -q -- '--check' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q -- '--seed-after-explicit-pulse-go' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q -- '--observe-after-explicit-pulse-go' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'StateLock state_lock' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'provider_effects=0' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'weakly_canonical' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'filesystem::equivalent' agent/src/autonomous_cognition_pulse_main.cpp
+          ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource' \
+            agent/src/autonomous_cognition_pulse_main.cpp \
+            agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseStore.cpp
+          ! grep -q 'AutonomousCognitionPulse' agent/src/main.cpp
+          ! grep -R -q 'gaudere-autonomous-cognition-pulse' agent/deploy/quadlet
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-agent"]' agent/Containerfile
+          grep -q 'gaudere-autonomous-cognition-pulse' agent/Containerfile
+
+      - name: Build Agent and runtime gate
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/agent-prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove real binary has no provider linkage
+        run: |
+          set -eu
+          binary="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-autonomous-cognition-pulse"
+          test -x "$binary"
+          file "$binary" | grep -q ELF
+          ! ldd "$binary" | grep -qi 'libcurl'
+          ! nm -C "$binary" | grep -E 'OpenAI|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource'
+
+      - name: Prove check mode is non-creating and identity-safe
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          binary="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-autonomous-cognition-pulse"
+          root=$(mktemp -d)
+          trap 'rm -rf "$root"' EXIT
+          touch "$root/state.db"
+          test ! -e "$root/pulse.db"
+          output=$("$binary" --state "$root/state.db" --sidecar "$root/pulse.db" --check)
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -q '^mode=check$'
+          printf '%s\n' "$output" | grep -q '^pulse_state=unseeded$'
+          printf '%s\n' "$output" | grep -q '^sidecar_exists=false$'
+          printf '%s\n' "$output" | grep -q '^provider_effects=0$'
+          test ! -e "$root/pulse.db"
+
+          if "$binary" --state "$root/state.db" --sidecar "$root/./state.db" --check; then
+            echo 'canonical path alias was accepted' >&2
+            exit 1
+          fi
+          ln "$root/state.db" "$root/state-hardlink.db"
+          if "$binary" --state "$root/state.db" --sidecar "$root/state-hardlink.db" --check; then
+            echo 'hard-link alias was accepted' >&2
+            exit 1
+          fi
+
+      - name: Exercise installed seed check and not-due observe
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_pulse_runtime_fixture.cpp \
+            agent/src/Sha256.cpp \
+            agent/src/CurrentCognitionCycle.cpp \
+            agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotInspection.cpp \
+            agent/src/TaskExecutor.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) \
+            -o /tmp/autonomous-pulse-runtime-fixture
+
+          binary="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-autonomous-cognition-pulse"
+          root=$(mktemp -d)
+          trap 'rm -rf "$root"' EXIT
+          predecessor=$(/tmp/autonomous-pulse-runtime-fixture "$root/state.db")
+          test -n "$predecessor"
+          actions_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')
+          budget_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')
+          wakes_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM wake_intents;')
+          tasks_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM tasks;')
+
+          seed=$("$binary" --state "$root/state.db" --sidecar "$root/pulse.db" \
+            --predecessor-task-id "$predecessor" --seed-after-explicit-pulse-go)
+          printf '%s\n' "$seed"
+          printf '%s\n' "$seed" | grep -q '^pulse_result=seeded$'
+          printf '%s\n' "$seed" | grep -q '^provider_effects=0$'
+          test -s "$root/pulse.db"
+
+          sidecar_hash_before=$(sha256sum "$root/pulse.db" | awk '{print $1}')
+          check=$("$binary" --state "$root/state.db" --sidecar "$root/pulse.db" --check)
+          sidecar_hash_after=$(sha256sum "$root/pulse.db" | awk '{print $1}')
+          test "$sidecar_hash_before" = "$sidecar_hash_after"
+          printf '%s\n' "$check" | grep -q '^pulse_state=idle$'
+          printf '%s\n' "$check" | grep -q "^predecessor_task_id=$predecessor$"
+
+          duplicate=$("$binary" --state "$root/state.db" --sidecar "$root/pulse.db" \
+            --predecessor-task-id "$predecessor" --seed-after-explicit-pulse-go)
+          printf '%s\n' "$duplicate" | grep -q '^pulse_result=duplicate$'
+
+          observe=$("$binary" --state "$root/state.db" --sidecar "$root/pulse.db" \
+            --observe-after-explicit-pulse-go)
+          printf '%s\n' "$observe"
+          printf '%s\n' "$observe" | grep -q '^pulse_result=not_due$'
+          printf '%s\n' "$observe" | grep -q '^provider_effects=0$'
+
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')" = "$actions_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')" = "$budget_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM wake_intents;')" = "$wakes_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM tasks;')" = "$tasks_before"
+          test "$(sqlite3 "$root/pulse.db" 'SELECT COUNT(*) FROM autonomous_cognition_pulse_cursor;')" = 1
+
+      - name: Re-run provider-free pulse behavior proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_pulse_test.cpp \
+            agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseStore.cpp \
+            agent/src/CanonicalCognitionDecision.cpp \
+            agent/src/Sha256.cpp \
+            agent/src/CurrentCognitionCycle.cpp \
+            agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotInspection.cpp \
+            agent/src/TaskExecutor.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
+            -o /tmp/autonomous-cognition-pulse-test
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/autonomous-cognition-pulse-test
