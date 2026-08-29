@@ -8,10 +8,15 @@
 #include <gaudere/persistence/sqlite/WakeIntentStore.hpp>
 #include <gaudere/work/Runtime.hpp>
 
+#include <sqlite3.h>
+
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -27,6 +32,51 @@ struct Options {
     bool seed = false;
     bool observe = false;
 };
+
+class ReadOnlyDatabase {
+public:
+    explicit ReadOnlyDatabase(const std::string& path)
+    {
+        if (sqlite3_open_v2(path.c_str(), &database_,
+                            SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX,
+                            nullptr) != SQLITE_OK) {
+            const std::string message = database_ ? sqlite3_errmsg(database_)
+                                                  : "cannot open SQLite read-only";
+            sqlite3_close(database_);
+            database_ = nullptr;
+            throw std::runtime_error(message);
+        }
+    }
+    ~ReadOnlyDatabase() { sqlite3_close(database_); }
+    ReadOnlyDatabase(const ReadOnlyDatabase&) = delete;
+    ReadOnlyDatabase& operator=(const ReadOnlyDatabase&) = delete;
+    [[nodiscard]] sqlite3* get() const noexcept { return database_; }
+private:
+    sqlite3* database_ = nullptr;
+};
+
+class Statement {
+public:
+    Statement(sqlite3* database, const char* sql) : database_(database)
+    {
+        if (sqlite3_prepare_v2(database, sql, -1, &statement_, nullptr) != SQLITE_OK)
+            throw std::runtime_error(sqlite3_errmsg(database));
+    }
+    ~Statement() { sqlite3_finalize(statement_); }
+    [[nodiscard]] sqlite3_stmt* get() const noexcept { return statement_; }
+private:
+    sqlite3* database_ = nullptr;
+    sqlite3_stmt* statement_ = nullptr;
+};
+
+std::string column_text(sqlite3_stmt* statement, const int column)
+{
+    const auto* value = sqlite3_column_text(statement, column);
+    const int bytes = sqlite3_column_bytes(statement, column);
+    if (!value || bytes <= 0) return {};
+    return std::string(reinterpret_cast<const char*>(value),
+                       static_cast<std::size_t>(bytes));
+}
 
 void usage(const char* program)
 {
@@ -144,25 +194,82 @@ void print_cursor(const gaudere_agent::AutonomousCognitionPulseCursor& cursor)
         std::cout << "blocked_reason=" << cursor.blocked_reason << '\n';
 }
 
+std::optional<gaudere_agent::AutonomousCognitionPulseCursor>
+read_sidecar_cursor(const std::string& path)
+{
+    ReadOnlyDatabase database(path);
+    {
+        Statement version(database.get(), "PRAGMA user_version");
+        if (sqlite3_step(version.get()) != SQLITE_ROW
+            || sqlite3_column_int(version.get(), 0)
+                != gaudere_agent::autonomous_cognition_pulse_sidecar_schema) {
+            throw std::runtime_error("pulse sidecar schema is not canonical v1");
+        }
+    }
+    {
+        Statement count(database.get(),
+            "SELECT COUNT(*) FROM autonomous_cognition_pulse_cursor");
+        if (sqlite3_step(count.get()) != SQLITE_ROW)
+            throw std::runtime_error(sqlite3_errmsg(database.get()));
+        const auto rows = sqlite3_column_int64(count.get(), 0);
+        if (rows < 0 || rows > 1)
+            throw std::runtime_error("pulse sidecar contains ambiguous cursor rows");
+        if (rows == 0) return std::nullopt;
+    }
+
+    Statement statement(database.get(),
+        "SELECT scope,revision,generation,state,predecessor_task_id,"
+        "predecessor_result_sha256,anchor_at_ms,due_at_ms,observed_at_ms,"
+        "snapshot_task_id,current_task_id,blocked_reason "
+        "FROM autonomous_cognition_pulse_cursor LIMIT 1");
+    if (sqlite3_step(statement.get()) != SQLITE_ROW)
+        throw std::runtime_error("pulse sidecar cursor row is unavailable");
+
+    const auto revision = sqlite3_column_int64(statement.get(), 1);
+    const auto generation = sqlite3_column_int64(statement.get(), 2);
+    const auto state = sqlite3_column_int(statement.get(), 3);
+    if (revision < 0 || generation < 0 || state < 0 || state > 4)
+        throw std::runtime_error("pulse sidecar cursor numeric fields are invalid");
+
+    gaudere_agent::AutonomousCognitionPulseCursor cursor;
+    cursor.scope = column_text(statement.get(), 0);
+    cursor.revision = static_cast<std::uint64_t>(revision);
+    cursor.generation = static_cast<std::uint64_t>(generation);
+    cursor.state = static_cast<gaudere_agent::AutonomousCognitionPulseState>(state);
+    cursor.predecessor_task_id = column_text(statement.get(), 4);
+    cursor.predecessor_result_sha256 = column_text(statement.get(), 5);
+    cursor.anchor_at_ms = sqlite3_column_int64(statement.get(), 6);
+    cursor.due_at_ms = sqlite3_column_int64(statement.get(), 7);
+    if (sqlite3_column_type(statement.get(), 8) != SQLITE_NULL)
+        cursor.observed_at_ms = sqlite3_column_int64(statement.get(), 8);
+    cursor.snapshot_task_id = column_text(statement.get(), 9);
+    cursor.current_task_id = column_text(statement.get(), 10);
+    cursor.blocked_reason = column_text(statement.get(), 11);
+
+    if (!gaudere_agent::valid_autonomous_cognition_pulse_cursor(cursor))
+        throw std::runtime_error("pulse sidecar cursor is non-canonical");
+    return cursor;
+}
+
 int check_sidecar(const Options& options)
 {
-    if (!std::filesystem::exists(options.state_path))
-        throw std::runtime_error("state database does not exist");
+    const auto state_status = std::filesystem::symlink_status(options.state_path);
+    if (!std::filesystem::is_regular_file(state_status))
+        throw std::runtime_error("state database must be a regular non-symlink file");
 
-    // Important: an absent sidecar is an observable unseeded state. Do not construct
-    // AutonomousCognitionPulseStore here because its SQLite open is allowed to create.
-    if (!std::filesystem::exists(options.sidecar_path)) {
+    // An absent sidecar is an observable unseeded state. No SQLite open occurs.
+    const auto sidecar_status = std::filesystem::symlink_status(options.sidecar_path);
+    if (!std::filesystem::exists(sidecar_status)) {
         std::cout << "mode=check\n"
                   << "pulse_state=unseeded\n"
                   << "sidecar_exists=false\n"
                   << "provider_effects=0\n";
         return 0;
     }
-    if (!std::filesystem::is_regular_file(options.sidecar_path))
-        throw std::runtime_error("pulse sidecar must be a regular file");
+    if (!std::filesystem::is_regular_file(sidecar_status))
+        throw std::runtime_error("pulse sidecar must be a regular non-symlink file");
 
-    gaudere_agent::AutonomousCognitionPulseStore pulse_store(options.sidecar_path);
-    const auto cursor = pulse_store.find(gaudere_agent::autonomous_cognition_pulse_scope);
+    const auto cursor = read_sidecar_cursor(options.sidecar_path);
     std::cout << "mode=check\nsidecar_exists=true\nprovider_effects=0\n";
     if (!cursor) {
         std::cout << "pulse_state=unseeded\n";
@@ -174,8 +281,14 @@ int check_sidecar(const Options& options)
 
 int mutate(const Options& options)
 {
-    if (!std::filesystem::exists(options.state_path))
-        throw std::runtime_error("state database does not exist");
+    const auto state_status = std::filesystem::symlink_status(options.state_path);
+    if (!std::filesystem::is_regular_file(state_status))
+        throw std::runtime_error("state database must be a regular non-symlink file");
+    const auto sidecar_status = std::filesystem::symlink_status(options.sidecar_path);
+    if (std::filesystem::exists(sidecar_status)
+        && !std::filesystem::is_regular_file(sidecar_status)) {
+        throw std::runtime_error("pulse sidecar must be absent or a regular non-symlink file");
+    }
 
     gaudere_agent::StateLock state_lock(options.state_path);
     const auto now = [] { return std::chrono::system_clock::now(); };
