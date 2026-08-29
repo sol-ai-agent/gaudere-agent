@@ -71,6 +71,8 @@ jobs:
           grep -q -- '--observe-after-explicit-pulse-go' agent/src/autonomous_cognition_pulse_main.cpp
           grep -q 'StateLock state_lock' agent/src/autonomous_cognition_pulse_main.cpp
           grep -q 'provider_effects=0' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'weakly_canonical' agent/src/autonomous_cognition_pulse_main.cpp
+          grep -q 'filesystem::equivalent' agent/src/autonomous_cognition_pulse_main.cpp
           ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource' \
             agent/src/autonomous_cognition_pulse_main.cpp \
             agent/src/AutonomousCognitionPulse.cpp \
@@ -103,7 +105,7 @@ jobs:
           ! ldd "$binary" | grep -qi 'libcurl'
           ! nm -C "$binary" | grep -E 'OpenAI|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource'
 
-      - name: Prove check mode does not create absent sidecar
+      - name: Prove check mode is non-creating and identity-safe
         run: |
           set -eu
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
@@ -119,6 +121,16 @@ jobs:
           printf '%s\n' "$output" | grep -q '^sidecar_exists=false$'
           printf '%s\n' "$output" | grep -q '^provider_effects=0$'
           test ! -e "$root/pulse.db"
+
+          if "$binary" --state "$root/state.db" --sidecar "$root/./state.db" --check; then
+            echo 'canonical path alias was accepted' >&2
+            exit 1
+          fi
+          ln "$root/state.db" "$root/state-hardlink.db"
+          if "$binary" --state "$root/state.db" --sidecar "$root/state-hardlink.db" --check; then
+            echo 'hard-link alias was accepted' >&2
+            exit 1
+          fi
 
       - name: Re-run provider-free pulse behavior proof
         run: |
