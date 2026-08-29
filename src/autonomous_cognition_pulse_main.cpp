@@ -118,8 +118,6 @@ Options parse_options(const int argc, char* argv[])
         throw std::invalid_argument("--state PATH is required");
     if (options.sidecar_path.empty())
         throw std::invalid_argument("--sidecar PATH is required");
-    if (std::filesystem::path(options.state_path) == std::filesystem::path(options.sidecar_path))
-        throw std::invalid_argument("--state and --sidecar must be different paths");
 
     const int modes = static_cast<int>(options.check)
         + static_cast<int>(options.seed) + static_cast<int>(options.observe);
@@ -137,6 +135,30 @@ Options parse_options(const int argc, char* argv[])
             "--predecessor-task-id is accepted only in seed mode");
     }
     return options;
+}
+
+void require_distinct_databases(const Options& options)
+{
+    const auto state = std::filesystem::weakly_canonical(options.state_path);
+    const auto sidecar = std::filesystem::weakly_canonical(options.sidecar_path);
+    if (state == sidecar)
+        throw std::invalid_argument("--state and --sidecar resolve to the same path");
+
+    std::error_code state_error;
+    const bool state_exists = std::filesystem::exists(options.state_path, state_error);
+    if (state_error) throw std::runtime_error("could not inspect state path");
+    std::error_code sidecar_error;
+    const bool sidecar_exists = std::filesystem::exists(options.sidecar_path, sidecar_error);
+    if (sidecar_error) throw std::runtime_error("could not inspect sidecar path");
+    if (state_exists && sidecar_exists) {
+        std::error_code equivalent_error;
+        const bool equivalent = std::filesystem::equivalent(
+            options.state_path, options.sidecar_path, equivalent_error);
+        if (equivalent_error)
+            throw std::runtime_error("could not compare state and sidecar identity");
+        if (equivalent)
+            throw std::invalid_argument("--state and --sidecar resolve to the same file");
+    }
 }
 
 const char* result_name(const gaudere_agent::AutonomousCognitionPulseResult result) noexcept
@@ -342,6 +364,7 @@ int main(int argc, char* argv[])
 {
     try {
         const auto options = parse_options(argc, argv);
+        require_distinct_databases(options);
         std::cout << std::unitbuf;
         return options.check ? check_sidecar(options) : mutate(options);
     } catch (const std::exception& error) {
