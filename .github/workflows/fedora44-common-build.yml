@@ -1,0 +1,38 @@
+name: Fedora 44 common build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  common-fedora44-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate shared build scripts
+        run: |
+          sh -n scripts/run-fedora44-build.sh
+          sh -n scripts/fedora44-build-inside.sh
+
+      - name: Build and test with the shared Fedora 44 image
+        env:
+          CONTAINER_ENGINE: docker
+          GAUDERE_FEDORA44_BUILD_IMAGE: localhost/gaudere-fedora44-build:44-ci
+        run: sh scripts/run-fedora44-build.sh
+
+      - name: Prove workspace-local installation
+        run: |
+          set -eu
+          test -d .gaudere-local/fedora44
+          test -x .gaudere-local/fedora44/bin/gaudere-agent
+          test -f .gaudere-local/fedora44/lib/pkgconfig/gaudere.pc
+          test ! -e /usr/local/bin/gaudere-agent
+          echo "fedora44_common_build=PASS"
