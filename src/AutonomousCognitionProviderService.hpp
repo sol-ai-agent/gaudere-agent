@@ -7,6 +7,7 @@
 
 #include <gaudere/scheduling/wake/Scheduler.hpp>
 
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -34,12 +35,15 @@ struct AutonomousCognitionProviderServiceStep {
  */
 class AutonomousCognitionProviderService final {
 public:
+    using Now = std::function<gaudere::scheduling::wake::Scheduler::TimePoint()>;
+
     AutonomousCognitionProviderService(
         AutonomousCognitionProviderGate& gate,
         TaskExecutor& executor,
         TaskHandler& handler,
         AutonomousCognitionPulseService& pulse_service,
-        gaudere::scheduling::wake::Scheduler& scheduler);
+        gaudere::scheduling::wake::Scheduler& scheduler,
+        Now now);
 
     [[nodiscard]] AutonomousCognitionProviderServiceStep step(
         const AutonomousCognitionPulseCursor& cursor);
@@ -50,6 +54,7 @@ private:
     TaskHandler& handler_;
     AutonomousCognitionPulseService& pulse_service_;
     gaudere::scheduling::wake::Scheduler& scheduler_;
+    Now now_;
 };
 
 } // namespace gaudere_agent
