@@ -244,6 +244,18 @@ AutonomousCognitionProviderGate::evaluate(
         if (age_ms > max_age_ms)
             return blocked("pulse-prepared current context is stale at provider boundary");
 
+        // Durable effect evidence dominates budget availability. A previous Action
+        // must never be hidden by cooldown/window/total classification because that
+        // could later turn into an accidental replay when the budget opens again.
+        const auto expected_action_key = std::string{openai_budget_scope()}
+            + ":" + task->idempotency_key;
+        const auto expected_action_id = std::string{openai_budget_scope()}
+            + ":" + task->id;
+        if (action_store_.find_by_idempotency_key(expected_action_key)
+            || action_store_.find(expected_action_id)) {
+            return blocked("provider Action already exists for non-terminal cognition; replay forbidden");
+        }
+
         const auto policy = openai_bootstrap_budget_policy();
         const auto budget = budget_store_.snapshot(
             std::string{openai_budget_scope()}, now, policy);
@@ -265,15 +277,6 @@ AutonomousCognitionProviderGate::evaluate(
             return blocked("provider budget detected clock rollback");
         case gaudere::budget::ConsumeResult::duplicate:
             return blocked("read-only provider budget snapshot returned duplicate");
-        }
-
-        const auto expected_action_key = std::string{openai_budget_scope()}
-            + ":" + task->idempotency_key;
-        const auto expected_action_id = std::string{openai_budget_scope()}
-            + ":" + task->id;
-        if (action_store_.find_by_idempotency_key(expected_action_key)
-            || action_store_.find(expected_action_id)) {
-            return blocked("provider Action already exists for non-terminal cognition; replay forbidden");
         }
 
         return {GateResult::eligible, task->id, {}, {}};
