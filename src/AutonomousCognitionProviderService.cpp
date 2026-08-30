@@ -1,19 +1,41 @@
 #include "AutonomousCognitionProviderService.hpp"
 
+#include "OpenAIBudget.hpp"
+
+#include <chrono>
 #include <stdexcept>
 #include <utility>
 
 namespace gaudere_agent {
+namespace {
+
+using TimePoint = gaudere::scheduling::wake::Scheduler::TimePoint;
+
+std::optional<TimePoint> provider_window_retry(
+    const TimePoint now) noexcept
+{
+    const auto policy = openai_bootstrap_budget_policy();
+    const auto delay = std::chrono::duration_cast<TimePoint::duration>(policy.window);
+    if (delay.count() < 0 || delay > TimePoint::max() - now) return std::nullopt;
+    return now + delay;
+}
+
+} // namespace
 
 AutonomousCognitionProviderService::AutonomousCognitionProviderService(
     AutonomousCognitionProviderGate& gate,
     TaskExecutor& executor,
     TaskHandler& handler,
     AutonomousCognitionPulseService& pulse_service,
-    gaudere::scheduling::wake::Scheduler& scheduler)
+    gaudere::scheduling::wake::Scheduler& scheduler,
+    Now now)
     : gate_(gate), executor_(executor), handler_(handler),
-      pulse_service_(pulse_service), scheduler_(scheduler)
+      pulse_service_(pulse_service), scheduler_(scheduler), now_(std::move(now))
 {
+    if (!now_) {
+        throw std::invalid_argument(
+            "autonomous cognition provider service clock is required");
+    }
 }
 
 AutonomousCognitionProviderServiceStep
@@ -47,14 +69,25 @@ AutonomousCognitionProviderService::step(
         return result;
     }
 
-    case GateResult::waiting:
+    case GateResult::waiting: {
         result.detail = result.gate.detail;
-        if (result.gate.retry_at) {
-            static_cast<void>(scheduler_.request_at(*result.gate.retry_at));
+        auto retry = result.gate.retry_at;
+        if (!retry
+            && result.gate.detail == "provider rolling-window budget is exhausted") {
+            retry = provider_window_retry(now_());
+            if (!retry) {
+                result.healthy = false;
+                result.detail = "provider rolling-window retry deadline overflows";
+                return result;
+            }
+        }
+        if (retry) {
+            static_cast<void>(scheduler_.request_at(*retry));
             result.monitoring = true;
-            result.next_at = result.gate.retry_at;
+            result.next_at = retry;
         }
         return result;
+    }
 
     case GateResult::dormant:
         result.detail = result.gate.detail;
