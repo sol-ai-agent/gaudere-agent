@@ -25,7 +25,10 @@ CurrentCognitionTaskInspection inspect_current_cognition_task(
     }
 
     try {
-        const auto marker = task.input.rfind(linkage_marker);
+        // The canonical prompt prefix contains this marker exactly once before all
+        // caller-controlled lineage data. Use the first occurrence so snapshot text
+        // cannot redirect extraction by repeating the marker later in the prompt.
+        const auto marker = task.input.find(linkage_marker);
         if (marker == std::string::npos) {
             return {false, {}, {}, {}, {}, -1,
                     "canonical current cognition linkage marker is missing"};
