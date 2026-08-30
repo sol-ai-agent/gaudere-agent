@@ -2,6 +2,7 @@
 set -eu
 
 engine=${CONTAINER_ENGINE:-podman}
+engine_name=$(basename "$engine")
 image=${GAUDERE_FEDORA44_BUILD_IMAGE:-localhost/gaudere-fedora44-build:44}
 repo=$(git rev-parse --show-toplevel)
 prefix_rel=${GAUDERE_LOCAL_PREFIX_REL:-.gaudere-local/fedora44}
@@ -21,17 +22,27 @@ done
     --tag "$image" \
     "$repo"
 
-volume="$repo:/workspace/agent"
-if [ "$(basename "$engine")" = podman ]; then
-    volume="$volume:Z"
+if [ "$engine_name" = podman ]; then
+    # Rootless Podman must map the host user into the container rather than
+    # passing a raw host uid/gid pair. This keeps the SELinux-labelled bind
+    # mount readable/writable while all build outputs remain host-owned.
+    "$engine" run --rm \
+        --userns=keep-id \
+        --env HOME=/tmp \
+        --env GAUDERE_LOCAL_PREFIX="/workspace/agent/$prefix_rel" \
+        --env GAUDERE_BUILD_ROOT="/workspace/agent/$build_rel" \
+        --volume "$repo:/workspace/agent:Z" \
+        --workdir /workspace/agent \
+        "$image" \
+        /bin/sh /workspace/agent/scripts/fedora44-build-inside.sh
+else
+    "$engine" run --rm \
+        --user "$(id -u):$(id -g)" \
+        --env HOME=/tmp \
+        --env GAUDERE_LOCAL_PREFIX="/workspace/agent/$prefix_rel" \
+        --env GAUDERE_BUILD_ROOT="/workspace/agent/$build_rel" \
+        --volume "$repo:/workspace/agent" \
+        --workdir /workspace/agent \
+        "$image" \
+        /bin/sh /workspace/agent/scripts/fedora44-build-inside.sh
 fi
-
-"$engine" run --rm \
-    --user "$(id -u):$(id -g)" \
-    --env HOME=/tmp \
-    --env GAUDERE_LOCAL_PREFIX="/workspace/agent/$prefix_rel" \
-    --env GAUDERE_BUILD_ROOT="/workspace/agent/$build_rel" \
-    --volume "$volume" \
-    --workdir /workspace/agent \
-    "$image" \
-    /bin/sh /workspace/agent/scripts/fedora44-build-inside.sh
