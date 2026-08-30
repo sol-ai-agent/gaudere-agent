@@ -7,12 +7,14 @@ repo=$(git rev-parse --show-toplevel)
 prefix_rel=${GAUDERE_LOCAL_PREFIX_REL:-.gaudere-local/fedora44}
 build_rel=${GAUDERE_BUILD_ROOT_REL:-.build-fedora44}
 
-case "$prefix_rel:$build_rel" in
-    /*:*|*:/ *)
-        echo "local prefix/build root must be repository-relative" >&2
-        exit 1
-        ;;
-esac
+for relative in "$prefix_rel" "$build_rel"; do
+    case "$relative" in
+        /*|..|../*|*/../*|*/..)
+            echo "local prefix/build root must stay inside the repository" >&2
+            exit 1
+            ;;
+    esac
+done
 
 "$engine" build \
     --file "$repo/Containerfile.fedora44-build" \
