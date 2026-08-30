@@ -34,4 +34,4 @@ fi
     --volume "$volume" \
     --workdir /workspace/agent \
     "$image" \
-    /workspace/agent/scripts/fedora44-build-inside.sh
+    /bin/sh /workspace/agent/scripts/fedora44-build-inside.sh
