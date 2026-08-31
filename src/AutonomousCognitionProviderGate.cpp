@@ -268,8 +268,12 @@ AutonomousCognitionProviderGate::evaluate(
                 retry = *budget.last_consumed_at + policy.min_interval;
             return waiting("provider budget is in cooldown", retry);
         }
-        case gaudere::budget::ConsumeResult::window_exhausted:
-            return waiting("provider rolling-window budget is exhausted");
+        case gaudere::budget::ConsumeResult::window_exhausted: {
+            if (policy.window > gaudere::work::TimePoint::max() - now)
+                return blocked("provider rolling-window retry deadline overflows");
+            return waiting("provider rolling-window budget is exhausted",
+                           now + policy.window);
+        }
         case gaudere::budget::ConsumeResult::total_exhausted:
             return {GateResult::dormant, {}, {},
                     "provider lifetime budget is exhausted"};
