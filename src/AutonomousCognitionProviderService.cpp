@@ -95,9 +95,12 @@ AutonomousCognitionProviderService::step()
     case GateResult::dormant:
         return {true, false, false, {}, {}, gate.detail};
     case GateResult::blocked:
-        return {false, false, false, {}, {}, gate.detail};
+        // A durable safety block is not a process-health failure. Keep the host
+        // service alive, but remove autonomous provider monitoring so systemd does
+        // not turn a fail-closed condition into a hot restart loop.
+        return {true, false, false, {}, {}, gate.detail};
     case GateResult::unavailable:
-        return {false, false, false, {}, {}, gate.detail};
+        return {true, false, false, {}, {}, gate.detail};
     }
     return {false, false, false, {}, {},
             "unknown autonomous provider gate result"};
