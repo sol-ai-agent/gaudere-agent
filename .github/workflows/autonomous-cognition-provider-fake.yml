@@ -68,24 +68,23 @@ jobs:
           grep -q 'openai.responses' agent/tests/autonomous_cognition_provider_fake_test.cpp
           grep -q 'provider_response_not_durable' agent/tests/autonomous_cognition_provider_fake_test.cpp
           grep -q 'settled_continue' agent/tests/autonomous_cognition_provider_fake_test.cpp
+          grep -q 'AutonomousCognitionProviderService' agent/tests/autonomous_cognition_provider_service_test.cpp
           ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|CurlHttpTransport|FileSecretSource|SecretSource' \
-            agent/tests/autonomous_cognition_provider_fake_test.cpp
+            agent/tests/autonomous_cognition_provider_fake_test.cpp \
+            agent/tests/autonomous_cognition_provider_service_test.cpp
           grep -q -- '--autonomous-pulse-provider' agent/src/main.cpp
           grep -q 'AutonomousCognitionProviderService' agent/src/main.cpp
           grep -q 'OpenAIStructuredActivation' agent/src/main.cpp
           grep -q 'CurrentCognitionHandler' agent/src/main.cpp
-          grep -q 'ProviderTaskHandler' agent/src/AutonomousCognitionProviderService.hpp || true
           ! grep -R -q -- '--autonomous-pulse-provider' agent/deploy/quadlet
           test "$(tr -d '\r\n' < agent/gaudere.ref)" = \
             '1316cf68db93e4c91a7bd79fbd289b8f382f8659'
 
-      - name: Compile fake-provider pulse proof with service boundary
+      - name: Compile fake-provider pulse proofs
         run: |
           set -eu
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
-          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
-            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
-            agent/tests/autonomous_cognition_provider_fake_test.cpp \
+          common_sources='\
             agent/src/AutonomousCognitionProviderGate.cpp \
             agent/src/AutonomousCognitionProviderService.cpp \
             agent/src/AutonomousCognitionPulse.cpp \
@@ -100,12 +99,23 @@ jobs:
             agent/src/ResumeContextSnapshot.cpp \
             agent/src/ResumeContextSnapshotInspection.cpp \
             agent/src/Sha256.cpp \
-            agent/src/TaskExecutor.cpp \
+            agent/src/TaskExecutor.cpp'
+          eval c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_provider_fake_test.cpp \
+            $common_sources \
             $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
             -o /tmp/autonomous-cognition-provider-fake-test
+          eval c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_provider_service_test.cpp \
+            $common_sources \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
+            -o /tmp/autonomous-cognition-provider-service-test
 
-      - name: Run fake-provider pulse proof
+      - name: Run fake-provider pulse proofs
         run: |
           set -eu
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           /tmp/autonomous-cognition-provider-fake-test
+          /tmp/autonomous-cognition-provider-service-test
