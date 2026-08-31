@@ -4,6 +4,10 @@ bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-r
 
 gaudere_agent_SOURCES = \
 	main.cpp \
+	AutonomousCognitionProviderGate.cpp \
+	AutonomousCognitionProviderGate.hpp \
+	AutonomousCognitionProviderService.cpp \
+	AutonomousCognitionProviderService.hpp \
 	AutonomousCognitionPulse.cpp \
 	AutonomousCognitionPulse.hpp \
 	AutonomousCognitionPulseService.cpp \
@@ -19,6 +23,10 @@ gaudere_agent_SOURCES = \
 	CurlHttpTransport.hpp \
 	CurrentCognitionCycle.cpp \
 	CurrentCognitionCycle.hpp \
+	CurrentCognitionHandler.cpp \
+	CurrentCognitionHandler.hpp \
+	CurrentCognitionTaskInspection.cpp \
+	CurrentCognitionTaskInspection.hpp \
 	ExplicitWake.cpp \
 	ExplicitWake.hpp \
 	WakeSourceDecision.cpp \
@@ -37,18 +45,25 @@ gaudere_agent_SOURCES = \
 	OpenAIActivation.cpp \
 	OpenAIActivation.hpp \
 	OpenAIBudget.hpp \
+	OpenAIJsonSchemaTransport.cpp \
+	OpenAIJsonSchemaTransport.hpp \
 	OpenAIOneShot.cpp \
 	OpenAIOneShot.hpp \
 	OpenAIResponsesProvider.cpp \
 	OpenAIResponsesProvider.hpp \
+	OpenAIStructuredActivation.cpp \
+	OpenAIStructuredActivation.hpp \
 	OpenAITask.cpp \
 	OpenAITask.hpp \
 	Provider.hpp \
 	ProviderTaskHandler.cpp \
 	ProviderTaskHandler.hpp \
+	ResumeAfterWakeCognition.cpp \
+	ResumeAfterWakeCognition.hpp \
 	ResumeContextSnapshot.cpp \
 	ResumeContextSnapshotInspection.cpp \
 	ResumeContextSnapshot.hpp \
+	ResumeDecisionStructuredOutput.hpp \
 	SecretSource.hpp \
 	Sha256.cpp \
 	Sha256.hpp \
