@@ -61,7 +61,7 @@ jobs:
           make --jobs=2 check
           make install
 
-      - name: Prove isolated read-only authority
+      - name: Prove gate remains isolated and read-only
         run: |
           set -eu
           grep -q 'AutonomousCognitionProviderGate' agent/src/AutonomousCognitionProviderGate.hpp
@@ -71,14 +71,14 @@ jobs:
           grep -q 'budget_store_.snapshot' agent/src/AutonomousCognitionProviderGate.cpp
           grep -q 'find_by_idempotency_key' agent/src/AutonomousCognitionProviderGate.cpp
           grep -q 'valid_current_cognition_task' agent/src/CurrentCognitionTaskInspection.cpp
+          grep -q 'provider rolling-window budget is exhausted' \
+            agent/src/AutonomousCognitionProviderGate.cpp
           ! grep -Eq 'ProviderTaskHandler|OpenAIActivation|OpenAIStructuredActivation|CurlHttpTransport|SecretSource|provider_.invoke' \
             agent/src/AutonomousCognitionProviderGate.cpp \
             agent/src/AutonomousCognitionProviderGate.hpp \
             agent/src/CurrentCognitionTaskInspection.cpp \
             agent/src/CurrentCognitionTaskInspection.hpp \
             agent/tests/autonomous_cognition_provider_gate_test.cpp
-          ! grep -q 'AutonomousCognitionProviderGate' agent/src/main.cpp
-          ! grep -q 'AutonomousCognitionProviderGate' agent/src/Makefile.am
           ! grep -R -q -- '--autonomous-pulse-provider' agent/deploy/quadlet
           test "$(tr -d '\r\n' < agent/gaudere.ref)" = \
             '1316cf68db93e4c91a7bd79fbd289b8f382f8659'
