@@ -61,7 +61,7 @@ jobs:
           make --jobs=2 check
           make install
 
-      - name: Prove fake-only authority boundary
+      - name: Prove fake-only effect semantics and explicit service wiring
         run: |
           set -eu
           grep -q 'AutonomousCognitionProviderGate' agent/tests/autonomous_cognition_provider_fake_test.cpp
@@ -70,13 +70,16 @@ jobs:
           grep -q 'settled_continue' agent/tests/autonomous_cognition_provider_fake_test.cpp
           ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|CurlHttpTransport|FileSecretSource|SecretSource' \
             agent/tests/autonomous_cognition_provider_fake_test.cpp
-          ! grep -q 'AutonomousCognitionProviderGate' agent/src/main.cpp
-          ! grep -q 'AutonomousCognitionProviderGate' agent/src/Makefile.am
+          grep -q -- '--autonomous-pulse-provider' agent/src/main.cpp
+          grep -q 'AutonomousCognitionProviderService' agent/src/main.cpp
+          grep -q 'OpenAIStructuredActivation' agent/src/main.cpp
+          grep -q 'CurrentCognitionHandler' agent/src/main.cpp
+          grep -q 'ProviderTaskHandler' agent/src/AutonomousCognitionProviderService.hpp || true
           ! grep -R -q -- '--autonomous-pulse-provider' agent/deploy/quadlet
           test "$(tr -d '\r\n' < agent/gaudere.ref)" = \
             '1316cf68db93e4c91a7bd79fbd289b8f382f8659'
 
-      - name: Compile fake-provider pulse proof
+      - name: Compile fake-provider pulse proof with service boundary
         run: |
           set -eu
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
@@ -84,7 +87,9 @@ jobs:
             -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
             agent/tests/autonomous_cognition_provider_fake_test.cpp \
             agent/src/AutonomousCognitionProviderGate.cpp \
+            agent/src/AutonomousCognitionProviderService.cpp \
             agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseService.cpp \
             agent/src/AutonomousCognitionPulseStore.cpp \
             agent/src/CanonicalCognitionDecision.cpp \
             agent/src/CurrentCognitionCycle.cpp \
