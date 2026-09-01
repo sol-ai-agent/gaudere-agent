@@ -1,0 +1,183 @@
+name: Provider-capable runtime promotion OFF gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-provider-off-promotion:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install proof dependencies
+        run: dnf install -y git python3 diffutils coreutils grep sed
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+
+      - name: Prove promotion mutates only Image and preserves provider OFF
+        run: |
+          set -eu
+          root=$(mktemp -d)
+          trap 'rm -rf "$root"' EXIT
+          mkdir -p "$root/bin" "$root/config/containers/systemd"
+          target="$root/config/containers/systemd/gaudere-agent.container"
+          before="$root/before.container"
+          image_id='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+          agent_ref='892f8c8d6c07b751b740563bfa2b8279d6b10009'
+          core_ref='1316cf68db93e4c91a7bd79fbd289b8f382f8659'
+
+          cat >"$root/bin/podman" <<'SH'
+          #!/bin/sh
+          set -eu
+          if [ "$1" = image ] && [ "$2" = exists ]; then
+              exit 0
+          fi
+          if [ "$1" = image ] && [ "$2" = inspect ]; then
+              case "$4" in
+                  '{{.Id}}')
+                      echo 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                      ;;
+                  *org.opencontainers.image.revision*)
+                      echo '892f8c8d6c07b751b740563bfa2b8279d6b10009'
+                      ;;
+                  *io.gaudere.agent.revision*)
+                      echo '892f8c8d6c07b751b740563bfa2b8279d6b10009'
+                      ;;
+                  *io.gaudere.core.revision*)
+                      echo '1316cf68db93e4c91a7bd79fbd289b8f382f8659'
+                      ;;
+                  *) exit 90 ;;
+              esac
+              exit 0
+          fi
+          if [ "$1" = run ]; then
+              echo 'Usage: gaudere-agent --state PATH [--autonomous-pulse-provider]'
+              exit 0
+          fi
+          exit 91
+          SH
+          chmod +x "$root/bin/podman"
+
+          cat >"$root/bin/systemctl" <<'SH'
+          #!/bin/sh
+          set -eu
+          if [ "$1" = --user ] && [ "$2" = is-active ]; then
+              echo "${FAKE_SERVICE_STATE:-inactive}"
+              exit 0
+          fi
+          if [ "$1" = --user ] && [ "$2" = daemon-reload ]; then
+              [ "${FAIL_DAEMON_RELOAD:-0}" != 1 ] || exit 1
+              exit 0
+          fi
+          exit 92
+          SH
+          chmod +x "$root/bin/systemctl"
+
+          make_profile()
+          {
+              cat >"$target" <<'EOF'
+          [Unit]
+          Description=Gaudere test pulse profile
+          [Container]
+          Image=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          Exec=--state /var/lib/gaudere/state.db --control-socket /tmp/gaudere-control.sock --openai-model gpt-5.6-sol --openai-secret gaudere-openai-api-key --autonomous-pulse-sidecar /var/lib/gaudere/autonomous-cognition-pulse.db
+          Secret=gaudere-openai-api-key,target=gaudere-openai-api-key
+          Volume=%h/.local/share/gaudere/state:/var/lib/gaudere:Z
+          [Service]
+          Restart=on-failure
+          EOF
+          }
+
+          run_promotion()
+          {
+              PATH="$root/bin:$PATH" \
+              XDG_CONFIG_HOME="$root/config" \
+              PODMAN="$root/bin/podman" \
+              SYSTEMCTL="$root/bin/systemctl" \
+              FAKE_SERVICE_STATE="${FAKE_SERVICE_STATE:-}" \
+              FAIL_DAEMON_RELOAD="${FAIL_DAEMON_RELOAD:-0}" \
+              GAUDERE_IMAGE="${GAUDERE_IMAGE_OVERRIDE:-localhost/gaudere-agent:provider-capable-test}" \
+              GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
+              GAUDERE_EXPECTED_CORE_REF="$core_ref" \
+              sh agent/scripts/promote-pulse-image-provider-off.sh
+          }
+
+          make_profile
+          cp "$target" "$before"
+          run_promotion >"$root/success.out"
+
+          grep -q "^Image=$image_id$" "$target"
+          grep -q -- '--autonomous-pulse-sidecar /var/lib/gaudere/autonomous-cognition-pulse.db' "$target"
+          ! grep -q -- '--autonomous-pulse-provider' "$target"
+          ! grep -q -- '--wake-intents' "$target"
+          grep -q '^gaudere provider-off pulse promotion: autonomous_provider_authority=OFF$' "$root/success.out"
+          grep -q '^gaudere provider-off pulse promotion: wake_intent_authority=OFF$' "$root/success.out"
+          grep -q '^gaudere provider-off pulse promotion: service remains stopped$' "$root/success.out"
+          grep -v '^Image=' "$before" >"$root/before.no-image"
+          grep -v '^Image=' "$target" >"$root/after.no-image"
+          cmp "$root/before.no-image" "$root/after.no-image"
+
+          make_profile
+          python3 - "$target" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
+          text = text.replace(
+              '--autonomous-pulse-sidecar /var/lib/gaudere/autonomous-cognition-pulse.db',
+              '--autonomous-pulse-sidecar /var/lib/gaudere/autonomous-cognition-pulse.db --autonomous-pulse-provider')
+          path.write_text(text)
+          PY
+          if run_promotion >/dev/null 2>&1; then
+              echo 'provider-enabled profile was not rejected' >&2
+              exit 1
+          fi
+
+          make_profile
+          sed -i '/^Exec=/ s/$/ --wake-intents/' "$target"
+          if run_promotion >/dev/null 2>&1; then
+              echo 'WakeIntent-enabled profile was not rejected' >&2
+              exit 1
+          fi
+
+          make_profile
+          sed -i 's/ --autonomous-pulse-sidecar [^ ]*//' "$target"
+          if run_promotion >/dev/null 2>&1; then
+              echo 'profile without pulse sidecar was not rejected' >&2
+              exit 1
+          fi
+
+          make_profile
+          if FAKE_SERVICE_STATE=active run_promotion >/dev/null 2>&1; then
+              echo 'active service was not rejected' >&2
+              exit 1
+          fi
+
+          make_profile
+          cp "$target" "$before"
+          if FAIL_DAEMON_RELOAD=1 run_promotion >/dev/null 2>&1; then
+              echo 'daemon-reload failure unexpectedly succeeded' >&2
+              exit 1
+          fi
+          cmp "$before" "$target"
+          echo provider_capable_runtime_promotion_off_gate=PASS
+
+      - name: Prove script cannot start service or grant provider flag
+        run: |
+          set -eu
+          ! grep -Eq 'systemctl_command.*start|systemctl.*start' \
+            agent/scripts/promote-pulse-image-provider-off.sh
+          ! grep -Eq 'provider\.invoke|ProviderTaskHandler|OpenAIActivation|OpenAIStructuredActivation' \
+            agent/scripts/promote-pulse-image-provider-off.sh
+          grep -q 'autonomous_provider_authority=OFF' \
+            agent/scripts/promote-pulse-image-provider-off.sh
+          grep -q 'wake_intent_authority=OFF' \
+            agent/scripts/promote-pulse-image-provider-off.sh
+          grep -q 'provider-off promotion attempted to change more than Image=' \
+            agent/scripts/promote-pulse-image-provider-off.sh
