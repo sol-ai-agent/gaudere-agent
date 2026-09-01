@@ -1,6 +1,7 @@
 AM_CPPFLAGS = -I$(top_srcdir)/src $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
 check_PROGRAMS = \
+	autonomous_cognition_stale_refresh_test \
 	bounded_reflection_test \
 	curl_http_transport_test \
 	explicit_wake_integration_test \
@@ -33,6 +34,26 @@ EXTRA_DIST = \
 	schema_v4_staged_deployment_test.sh \
 	schema_v4_migration_copy_validator_test.sh \
 	smoke.sh
+
+autonomous_cognition_stale_refresh_test_SOURCES = \
+	autonomous_cognition_stale_refresh_test.cpp \
+	../src/AutonomousCognitionStaleRefresh.cpp \
+	../src/AutonomousCognitionStaleRefresh.hpp \
+	../src/AutonomousCognitionProviderGate.cpp \
+	../src/AutonomousCognitionProviderGate.hpp \
+	../src/AutonomousCognitionPulseStore.cpp \
+	../src/AutonomousCognitionPulseStore.hpp \
+	../src/CurrentCognitionCycle.cpp \
+	../src/CurrentCognitionCycle.hpp \
+	../src/CurrentCognitionTaskInspection.cpp \
+	../src/CurrentCognitionTaskInspection.hpp \
+	../src/ResumeContextSnapshot.cpp \
+	../src/ResumeContextSnapshotInspection.cpp \
+	../src/ResumeContextSnapshot.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+autonomous_cognition_stale_refresh_test_LDADD = \
+	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 bounded_reflection_test_SOURCES = \
 	bounded_reflection_test.cpp \
