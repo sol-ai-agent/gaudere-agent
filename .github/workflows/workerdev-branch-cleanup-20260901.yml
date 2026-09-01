@@ -86,7 +86,7 @@ jobs:
             if [[ "${proof[$branch]}" == merged ]]; then
               merged_count="$(gh api -X GET "repos/$REPO/pulls" \
                 -f state=closed -f "head=$OWNER:$branch" -f per_page=100 |
-                jq --arg sha "${expected[$branch]}"
+                jq --arg sha "${expected[$branch]}" \
                   '[.[] | select(.head.sha == $sha and .merged_at != null)] | length')"
               [[ "$merged_count" -ge 1 ]]
             elif [[ "${proof[$branch]}" == absorbed ]]; then
