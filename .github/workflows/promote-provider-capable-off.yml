@@ -101,6 +101,8 @@ jobs:
               XDG_CONFIG_HOME="$root/config" \
               PODMAN="$root/bin/podman" \
               SYSTEMCTL="$root/bin/systemctl" \
+              FAKE_SERVICE_STATE="${FAKE_SERVICE_STATE:-}" \
+              FAIL_DAEMON_RELOAD="${FAIL_DAEMON_RELOAD:-0}" \
               GAUDERE_IMAGE="${GAUDERE_IMAGE_OVERRIDE:-localhost/gaudere-agent:provider-capable-test}" \
               GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
               GAUDERE_EXPECTED_CORE_REF="$core_ref" \
@@ -138,7 +140,7 @@ jobs:
           fi
 
           make_profile
-          sed -i 's/$/ --wake-intents/' "$target"
+          sed -i '/^Exec=/ s/$/ --wake-intents/' "$target"
           if run_promotion >/dev/null 2>&1; then
               echo 'WakeIntent-enabled profile was not rejected' >&2
               exit 1
