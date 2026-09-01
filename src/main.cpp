@@ -1,7 +1,10 @@
+#include "AutonomousCognitionProviderGate.hpp"
+#include "AutonomousCognitionProviderService.hpp"
 #include "AutonomousCognitionPulse.hpp"
 #include "AutonomousCognitionPulseService.hpp"
 #include "AutonomousCognitionPulseStore.hpp"
 #include "BoundedReflection.hpp"
+#include "CurrentCognitionHandler.hpp"
 #include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
 #include "LiveControlProcessor.hpp"
@@ -9,6 +12,8 @@
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
 #include "OpenAIOneShot.hpp"
+#include "OpenAIStructuredActivation.hpp"
+#include "ResumeDecisionStructuredOutput.hpp"
 #include "StateLock.hpp"
 #include "TaskDispatcher.hpp"
 #include "TaskExecutor.hpp"
@@ -49,6 +54,7 @@ struct Options {
     bool cancel_task = false;
     bool openai_enabled = false;
     bool wake_intents_enabled = false;
+    bool autonomous_pulse_provider = false;
     bool openai_secret_explicit = false;
     bool secret_directory_explicit = false;
     std::string task_id;
@@ -70,6 +76,7 @@ void usage(const char* program)
         << "[--control-socket PATH] "
         << "[--wake-intents] "
         << "[--autonomous-pulse-sidecar PATH] "
+        << "[--autonomous-pulse-provider] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -109,6 +116,8 @@ Options parse_options(const int argc, char* argv[])
             options.control_socket = argv[++index];
         } else if (argument == "--autonomous-pulse-sidecar" && index + 1 < argc) {
             options.autonomous_pulse_sidecar = argv[++index];
+        } else if (argument == "--autonomous-pulse-provider") {
+            options.autonomous_pulse_provider = true;
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -150,6 +159,10 @@ Options parse_options(const int argc, char* argv[])
         throw std::invalid_argument(
             "--autonomous-pulse-sidecar is only valid in service mode");
     }
+    if (options.autonomous_pulse_provider && modes != 0) {
+        throw std::invalid_argument(
+            "--autonomous-pulse-provider is only valid in service mode");
+    }
     if (options.wake_intents_enabled && modes != 0 && !options.check_only) {
         throw std::invalid_argument(
             "--wake-intents is only valid in service mode or with --check");
@@ -179,6 +192,15 @@ Options parse_options(const int argc, char* argv[])
     }
     if (options.openai_once && !options.openai_enabled) {
         throw std::invalid_argument("--openai-once requires --openai-model");
+    }
+    if (options.autonomous_pulse_provider
+        && options.autonomous_pulse_sidecar.empty()) {
+        throw std::invalid_argument(
+            "--autonomous-pulse-provider requires --autonomous-pulse-sidecar PATH");
+    }
+    if (options.autonomous_pulse_provider && !options.openai_enabled) {
+        throw std::invalid_argument(
+            "--autonomous-pulse-provider requires --openai-model MODEL");
     }
     if (options.openai_enabled && options.openai_model.empty()) {
         throw std::invalid_argument("OpenAI model must not be empty");
@@ -420,6 +442,14 @@ int main(int argc, char* argv[])
         std::unique_ptr<gaudere_agent::AutonomousCognitionPulse> pulse;
         std::unique_ptr<gaudere_agent::AutonomousCognitionPulseService>
             pulse_service;
+        std::unique_ptr<gaudere_agent::OpenAIStructuredActivation>
+            pulse_provider_activation;
+        std::unique_ptr<gaudere_agent::CurrentCognitionHandler>
+            pulse_cognition_handler;
+        std::unique_ptr<gaudere_agent::AutonomousCognitionProviderGate>
+            pulse_provider_gate;
+        std::unique_ptr<gaudere_agent::AutonomousCognitionProviderService>
+            pulse_provider_service;
         bool pulse_monitoring = false;
 
         if (!task_dispatcher.register_handler("local.echo", echo_handler)
@@ -452,10 +482,10 @@ int main(int argc, char* argv[])
             std::cout << "gaudere-agent: OpenAI provider enabled model="
                       << options.openai_model << " secret="
                       << options.openai_secret << '\n';
+            const auto& budget = openai_activation->budget_policy();
             std::cout << "gaudere-agent: bounded reflection enabled kind="
                       << gaudere_agent::bounded_reflection_task_kind
                       << " automatic_scheduling=false\n";
-            const auto& budget = openai_activation->budget_policy();
             std::cout << "gaudere-agent: OpenAI budget max_total="
                       << budget.max_total << " max_window="
                       << budget.max_in_window << " window_seconds="
@@ -500,9 +530,35 @@ int main(int argc, char* argv[])
             pulse_service =
                 std::make_unique<gaudere_agent::AutonomousCognitionPulseService>(
                     *pulse, *provider_budget_store, work_scheduler, now);
-            std::cout << "gaudere-agent: autonomous cognition pulse enabled sidecar="
-                      << options.autonomous_pulse_sidecar
-                      << " provider_execution=false automatic_seed=false\n";
+
+            if (options.autonomous_pulse_provider) {
+                pulse_provider_activation =
+                    std::make_unique<gaudere_agent::OpenAIStructuredActivation>(
+                        action_runtime, action_store, *provider_budget_store,
+                        gaudere_agent::resume_decision_structured_output_contract(),
+                        options.openai_model, options.openai_secret,
+                        options.secret_directory);
+                pulse_cognition_handler =
+                    std::make_unique<gaudere_agent::CurrentCognitionHandler>(
+                        pulse_provider_activation->handler());
+                pulse_provider_gate =
+                    std::make_unique<gaudere_agent::AutonomousCognitionProviderGate>(
+                        options.state_path, task_store, *provider_budget_store,
+                        action_store, now);
+                pulse_provider_service =
+                    std::make_unique<gaudere_agent::AutonomousCognitionProviderService>(
+                        *pulse_service, *pulse_provider_gate, task_executor,
+                        *pulse_cognition_handler, task_store, work_scheduler, now);
+                std::cout
+                    << "gaudere-agent: autonomous cognition pulse enabled sidecar="
+                    << options.autonomous_pulse_sidecar
+                    << " provider_execution=true automatic_seed=false\n";
+            } else {
+                std::cout
+                    << "gaudere-agent: autonomous cognition pulse enabled sidecar="
+                    << options.autonomous_pulse_sidecar
+                    << " provider_execution=false automatic_seed=false\n";
+            }
         }
 
         action_runtime.recover();
@@ -511,22 +567,46 @@ int main(int argc, char* argv[])
             throw std::runtime_error("cannot start work controller");
         }
 
-        if (pulse_service) {
-            const auto initial = pulse_service->step();
-            if (!initial.plan.healthy) {
-                throw std::runtime_error(
-                    "autonomous pulse startup failed: " + initial.plan.detail);
+        const auto step_autonomous_pulse = [&]() {
+            if (!pulse_service) return true;
+            if (pulse_provider_service) {
+                const auto step = pulse_provider_service->step();
+                pulse_monitoring = step.healthy && step.monitoring;
+                if (step.provider_executed && step.task_id) {
+                    std::cout << "gaudere-agent: autonomous provider executed task="
+                              << *step.task_id << '\n';
+                }
+                if (!step.detail.empty()) {
+                    std::cout << "gaudere-agent: autonomous pulse provider: "
+                              << step.detail << '\n';
+                }
+                if (!step.healthy) {
+                    std::cerr
+                        << "gaudere-agent: autonomous pulse provider monitoring disabled\n";
+                }
+                return step.healthy;
             }
-            pulse_monitoring = initial.plan.monitoring;
-            if (initial.observation.task) {
-                std::cout << "gaudere-agent: autonomous pulse prepared task="
-                          << initial.observation.task->id
+
+            const auto step = pulse_service->step();
+            pulse_monitoring = step.plan.healthy && step.plan.monitoring;
+            if (step.observation.task) {
+                std::cout << "gaudere-agent: autonomous pulse task="
+                          << step.observation.task->id
                           << " provider_execution=false\n";
             }
-            if (!initial.plan.detail.empty()) {
+            if (!step.plan.detail.empty()) {
                 std::cout << "gaudere-agent: autonomous pulse: "
-                          << initial.plan.detail << '\n';
+                          << step.plan.detail << '\n';
             }
+            if (!step.plan.healthy) {
+                std::cerr
+                    << "gaudere-agent: autonomous pulse monitoring disabled\n";
+            }
+            return step.plan.healthy;
+        };
+
+        if (pulse_service && !step_autonomous_pulse()) {
+            throw std::runtime_error("autonomous pulse startup failed");
         }
 
         if (options.echo) {
@@ -561,7 +641,8 @@ int main(int argc, char* argv[])
             std::unique_ptr<gaudere_agent::LiveControlServer> control_server;
             if (!options.control_socket.empty()) {
                 if (!provider_budget_store) {
-                    throw std::runtime_error("live control provider budget store is unavailable");
+                    throw std::runtime_error(
+                        "live control provider budget store is unavailable");
                 }
                 control_mailbox = std::make_unique<gaudere_agent::LiveControlMailbox>();
                 control_processor = std::make_unique<gaudere_agent::LiveControlProcessor>(
@@ -631,21 +712,7 @@ int main(int argc, char* argv[])
                 }
 
                 if (pulse_service && pulse_monitoring) {
-                    const auto pulse_step = pulse_service->step();
-                    pulse_monitoring =
-                        pulse_step.plan.healthy && pulse_step.plan.monitoring;
-                    if (pulse_step.observation.task) {
-                        std::cout << "gaudere-agent: autonomous pulse task="
-                                  << pulse_step.observation.task->id
-                                  << " provider_execution=false\n";
-                    }
-                    if (!pulse_step.plan.detail.empty()) {
-                        std::cout << "gaudere-agent: autonomous pulse: "
-                                  << pulse_step.plan.detail << '\n';
-                    }
-                    if (!pulse_step.plan.healthy) {
-                        std::cerr << "gaudere-agent: autonomous pulse monitoring disabled\n";
-                    }
+                    static_cast<void>(step_autonomous_pulse());
                 }
             }
 

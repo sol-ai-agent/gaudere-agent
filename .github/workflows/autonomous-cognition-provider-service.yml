@@ -1,0 +1,50 @@
+name: Autonomous cognition provider service gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  autonomous-provider-service-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove disabled-by-default authority wiring
+        run: |
+          set -eu
+          grep -q -- '--autonomous-pulse-provider' src/main.cpp
+          grep -q 'autonomous_pulse_provider = false' src/main.cpp
+          grep -q -- '--autonomous-pulse-provider is only valid in service mode' src/main.cpp
+          grep -q -- '--autonomous-pulse-provider requires --autonomous-pulse-sidecar PATH' src/main.cpp
+          grep -q -- '--autonomous-pulse-provider requires --openai-model MODEL' src/main.cpp
+          grep -q 'OpenAIStructuredActivation' src/main.cpp
+          grep -q 'resume_decision_structured_output_contract' src/main.cpp
+          grep -q 'CurrentCognitionHandler' src/main.cpp
+          grep -q 'AutonomousCognitionProviderGate' src/main.cpp
+          grep -q 'AutonomousCognitionProviderService' src/main.cpp
+          grep -q 'provider_execution=true automatic_seed=false' src/main.cpp
+          grep -q 'provider_execution=false automatic_seed=false' src/main.cpp
+          ! grep -R -q -- '--autonomous-pulse-provider' deploy/quadlet
+
+      - name: Prove orchestration adds no independent effect authority
+        run: |
+          set -eu
+          grep -q 'provider_gate_.evaluate' src/AutonomousCognitionProviderService.cpp
+          grep -q 'executor_.execute' src/AutonomousCognitionProviderService.cpp
+          grep -q 'pulse_service_.step' src/AutonomousCognitionProviderService.cpp
+          grep -q 'scheduler_.request_at' src/AutonomousCognitionProviderService.cpp
+          ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource|provider_.invoke|WakeIntentRuntime|system\(|popen\(|fork\(|execl\(|execle\(|execlp\(|execv\(|execve\(|execvp\(|execvpe\(' \
+            src/AutonomousCognitionProviderService.cpp \
+            src/AutonomousCognitionProviderService.hpp
+
+      - name: Prove no production provider call in this slice
+        run: |
+          set -eu
+          ! grep -R -q -- '--autonomous-pulse-provider' deploy
+          ! grep -R -q 'provider_total_used_after=10' .
+          echo autonomous_provider_service_gate=PASS
