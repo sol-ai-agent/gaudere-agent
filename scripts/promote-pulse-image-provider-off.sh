@@ -25,7 +25,7 @@ fail()
 [ -x "$provenance_verifier" ] \
     || fail "image provenance verifier is required: $provenance_verifier"
 
-for command in "$podman_command" "$systemctl_command" python3 install mktemp rm; do
+for command in "$podman_command" "$systemctl_command" python3 install mktemp rm grep sed wc; do
     command -v "$command" >/dev/null 2>&1 \
         || fail "required command not found: $command"
 done
