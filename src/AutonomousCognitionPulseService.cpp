@@ -11,6 +11,7 @@ namespace {
 
 using PulseResult = AutonomousCognitionPulseResult;
 using PulseState = AutonomousCognitionPulseState;
+using RefreshResult = AutonomousCognitionStaleRefreshResult;
 using TimePoint = gaudere::scheduling::wake::Scheduler::TimePoint;
 
 TimePoint from_milliseconds(const std::int64_t value)
@@ -148,15 +149,44 @@ AutonomousCognitionPulseService::AutonomousCognitionPulseService(
     AutonomousCognitionPulse& pulse,
     gaudere::budget::Store& budget_store,
     gaudere::scheduling::wake::Scheduler& scheduler,
-    Now now)
+    Now now,
+    AutonomousCognitionStaleRefresh* stale_refresh)
     : pulse_(pulse), budget_store_(budget_store), scheduler_(scheduler),
-      now_(std::move(now))
+      now_(std::move(now)), stale_refresh_(stale_refresh)
 {
     if (!now_) throw std::invalid_argument("autonomous pulse service clock is required");
 }
 
 AutonomousCognitionPulseServiceStep AutonomousCognitionPulseService::step()
 {
+    bool retired_stale = false;
+    std::string refresh_detail;
+    if (stale_refresh_) {
+        const auto refresh = stale_refresh_->step();
+        switch (refresh.result) {
+        case RefreshResult::retired:
+            retired_stale = true;
+            refresh_detail = refresh.detail;
+            break;
+        case RefreshResult::blocked: {
+            auto observation = pulse_.observe();
+            return {std::move(observation),
+                    {true, false, {}, refresh.detail.empty()
+                        ? "stale cognition refresh blocked"
+                        : refresh.detail}};
+        }
+        case RefreshResult::unavailable: {
+            auto observation = pulse_.observe();
+            return {std::move(observation),
+                    {true, false, {}, refresh.detail.empty()
+                        ? "stale cognition refresh unavailable"
+                        : refresh.detail}};
+        }
+        case RefreshResult::not_applicable:
+            break;
+        }
+    }
+
     const auto now = now_();
     auto observation = pulse_.observe();
     std::optional<gaudere::budget::Snapshot> budget;
@@ -167,6 +197,11 @@ AutonomousCognitionPulseServiceStep AutonomousCognitionPulseService::step()
     }
     auto plan = plan_autonomous_cognition_pulse_service(
         observation, budget, now, policy);
+    if (retired_stale && plan.detail.empty()) {
+        plan.detail = refresh_detail.empty()
+            ? "stale unspent cognition retired before fresh pulse observation"
+            : refresh_detail;
+    }
     if (plan.monitoring && plan.next_at) {
         static_cast<void>(scheduler_.request_at(*plan.next_at));
     }
