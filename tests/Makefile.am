@@ -51,7 +51,9 @@ autonomous_cognition_stale_refresh_test_SOURCES = \
 	../src/ResumeContextSnapshotInspection.cpp \
 	../src/ResumeContextSnapshot.hpp \
 	../src/Sha256.cpp \
-	../src/Sha256.hpp
+	../src/Sha256.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp
 autonomous_cognition_stale_refresh_test_LDADD = \
 	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
