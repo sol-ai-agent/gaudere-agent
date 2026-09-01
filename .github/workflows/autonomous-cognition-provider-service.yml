@@ -38,7 +38,7 @@ jobs:
           grep -q 'executor_.execute' src/AutonomousCognitionProviderService.cpp
           grep -q 'pulse_service_.step' src/AutonomousCognitionProviderService.cpp
           grep -q 'scheduler_.request_at' src/AutonomousCognitionProviderService.cpp
-          ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource|provider_.invoke|WakeIntentRuntime|system\(|popen\(|fork\(|exec' \
+          ! grep -Eq 'OpenAIActivation|OpenAIStructuredActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource|provider_.invoke|WakeIntentRuntime|system\(|popen\(|fork\(|execl\(|execle\(|execlp\(|execv\(|execve\(|execvp\(|execvpe\(' \
             src/AutonomousCognitionProviderService.cpp \
             src/AutonomousCognitionProviderService.hpp
 
