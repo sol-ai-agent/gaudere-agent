@@ -95,21 +95,28 @@ jobs:
           EOF
           }
 
+          run_promotion()
+          {
+              PATH="$root/bin:$PATH" \
+              XDG_CONFIG_HOME="$root/config" \
+              PODMAN="$root/bin/podman" \
+              SYSTEMCTL="$root/bin/systemctl" \
+              GAUDERE_IMAGE="${GAUDERE_IMAGE_OVERRIDE:-localhost/gaudere-agent:provider-capable-test}" \
+              GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
+              GAUDERE_EXPECTED_CORE_REF="$core_ref" \
+              sh agent/scripts/promote-pulse-image-provider-off.sh
+          }
+
           make_profile
           cp "$target" "$before"
-          PATH="$root/bin:$PATH" \
-          XDG_CONFIG_HOME="$root/config" \
-          PODMAN="$root/bin/podman" \
-          SYSTEMCTL="$root/bin/systemctl" \
-          GAUDERE_IMAGE='localhost/gaudere-agent:provider-capable-test' \
-          GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
-          GAUDERE_EXPECTED_CORE_REF="$core_ref" \
-          sh agent/scripts/promote-pulse-image-provider-off.sh >"$root/success.out"
+          run_promotion >"$root/success.out"
 
           grep -q "^Image=$image_id$" "$target"
           grep -q -- '--autonomous-pulse-sidecar /var/lib/gaudere/autonomous-cognition-pulse.db' "$target"
           ! grep -q -- '--autonomous-pulse-provider' "$target"
+          ! grep -q -- '--wake-intents' "$target"
           grep -q '^gaudere provider-off pulse promotion: autonomous_provider_authority=OFF$' "$root/success.out"
+          grep -q '^gaudere provider-off pulse promotion: wake_intent_authority=OFF$' "$root/success.out"
           grep -q '^gaudere provider-off pulse promotion: service remains stopped$' "$root/success.out"
           grep -v '^Image=' "$before" >"$root/before.no-image"
           grep -v '^Image=' "$target" >"$root/after.no-image"
@@ -125,45 +132,34 @@ jobs:
               '--autonomous-pulse-sidecar /var/lib/gaudere/autonomous-cognition-pulse.db --autonomous-pulse-provider')
           path.write_text(text)
           PY
-          if PATH="$root/bin:$PATH" XDG_CONFIG_HOME="$root/config" \
-             PODMAN="$root/bin/podman" SYSTEMCTL="$root/bin/systemctl" \
-             GAUDERE_IMAGE=x GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
-             GAUDERE_EXPECTED_CORE_REF="$core_ref" \
-             sh agent/scripts/promote-pulse-image-provider-off.sh >/dev/null 2>&1; then
+          if run_promotion >/dev/null 2>&1; then
               echo 'provider-enabled profile was not rejected' >&2
               exit 1
           fi
 
           make_profile
+          sed -i 's/$/ --wake-intents/' "$target"
+          if run_promotion >/dev/null 2>&1; then
+              echo 'WakeIntent-enabled profile was not rejected' >&2
+              exit 1
+          fi
+
+          make_profile
           sed -i 's/ --autonomous-pulse-sidecar [^ ]*//' "$target"
-          if PATH="$root/bin:$PATH" XDG_CONFIG_HOME="$root/config" \
-             PODMAN="$root/bin/podman" SYSTEMCTL="$root/bin/systemctl" \
-             GAUDERE_IMAGE=x GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
-             GAUDERE_EXPECTED_CORE_REF="$core_ref" \
-             sh agent/scripts/promote-pulse-image-provider-off.sh >/dev/null 2>&1; then
+          if run_promotion >/dev/null 2>&1; then
               echo 'profile without pulse sidecar was not rejected' >&2
               exit 1
           fi
 
           make_profile
-          if PATH="$root/bin:$PATH" XDG_CONFIG_HOME="$root/config" \
-             PODMAN="$root/bin/podman" SYSTEMCTL="$root/bin/systemctl" \
-             FAKE_SERVICE_STATE=active GAUDERE_IMAGE=x \
-             GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
-             GAUDERE_EXPECTED_CORE_REF="$core_ref" \
-             sh agent/scripts/promote-pulse-image-provider-off.sh >/dev/null 2>&1; then
+          if FAKE_SERVICE_STATE=active run_promotion >/dev/null 2>&1; then
               echo 'active service was not rejected' >&2
               exit 1
           fi
 
           make_profile
           cp "$target" "$before"
-          if PATH="$root/bin:$PATH" XDG_CONFIG_HOME="$root/config" \
-             PODMAN="$root/bin/podman" SYSTEMCTL="$root/bin/systemctl" \
-             FAIL_DAEMON_RELOAD=1 GAUDERE_IMAGE=x \
-             GAUDERE_EXPECTED_AGENT_REF="$agent_ref" \
-             GAUDERE_EXPECTED_CORE_REF="$core_ref" \
-             sh agent/scripts/promote-pulse-image-provider-off.sh >/dev/null 2>&1; then
+          if FAIL_DAEMON_RELOAD=1 run_promotion >/dev/null 2>&1; then
               echo 'daemon-reload failure unexpectedly succeeded' >&2
               exit 1
           fi
@@ -178,6 +174,8 @@ jobs:
           ! grep -Eq 'provider\.invoke|ProviderTaskHandler|OpenAIActivation|OpenAIStructuredActivation' \
             agent/scripts/promote-pulse-image-provider-off.sh
           grep -q 'autonomous_provider_authority=OFF' \
+            agent/scripts/promote-pulse-image-provider-off.sh
+          grep -q 'wake_intent_authority=OFF' \
             agent/scripts/promote-pulse-image-provider-off.sh
           grep -q 'provider-off promotion attempted to change more than Image=' \
             agent/scripts/promote-pulse-image-provider-off.sh
