@@ -122,14 +122,18 @@ AutonomousCognitionStaleRefresh::step()
         }
 
         const auto gate = provider_gate_.evaluate(cursor);
-        if (gate.result != AutonomousCognitionProviderGateResult::blocked
-            || gate.detail != autonomous_cognition_provider_stale_detail) {
-            if (gate.result == AutonomousCognitionProviderGateResult::unavailable) {
-                return {RefreshResult::unavailable, cursor, task, gate.detail};
-            }
+        if (gate.result == AutonomousCognitionProviderGateResult::unavailable) {
+            return {RefreshResult::unavailable, cursor, task, gate.detail};
+        }
+        if (gate.result == AutonomousCognitionProviderGateResult::blocked
+            && gate.detail != autonomous_cognition_provider_stale_detail) {
+            return {RefreshResult::blocked, cursor, task, gate.detail};
+        }
+        if (gate.result != AutonomousCognitionProviderGateResult::blocked) {
             return {RefreshResult::not_applicable, cursor, task, gate.detail};
         }
-        if (!gate.task_id && task->id != cursor.current_task_id) {
+
+        if (task->id != cursor.current_task_id) {
             return {RefreshResult::blocked, cursor, task,
                     "stale gate did not preserve exact pulse Task identity"};
         }
