@@ -2,6 +2,7 @@
 #define GAUDERE_AGENT_AUTONOMOUS_COGNITION_PULSE_SERVICE_HPP
 
 #include "AutonomousCognitionPulse.hpp"
+#include "AutonomousCognitionStaleRefresh.hpp"
 
 #include <gaudere/budget/Store.hpp>
 #include <gaudere/scheduling/wake/Scheduler.hpp>
@@ -49,7 +50,8 @@ public:
         AutonomousCognitionPulse& pulse,
         gaudere::budget::Store& budget_store,
         gaudere::scheduling::wake::Scheduler& scheduler,
-        Now now);
+        Now now,
+        AutonomousCognitionStaleRefresh* stale_refresh = nullptr);
 
     [[nodiscard]] AutonomousCognitionPulseServiceStep step();
 
@@ -58,6 +60,7 @@ private:
     gaudere::budget::Store& budget_store_;
     gaudere::scheduling::wake::Scheduler& scheduler_;
     Now now_;
+    AutonomousCognitionStaleRefresh* stale_refresh_ = nullptr;
 };
 
 } // namespace gaudere_agent
