@@ -167,8 +167,9 @@ struct Fixture {
         if (!claim.task)
             throw std::runtime_error("could not create current cognition claim");
 
+        constexpr std::uint64_t target_revision = 7;
         AutonomousCognitionPulseCursor cursor;
-        cursor.revision = 7;
+        cursor.revision = 0;
         cursor.generation = 4;
         cursor.state = AutonomousCognitionPulseState::prepared;
         cursor.predecessor_task_id = predecessor.id;
@@ -183,6 +184,18 @@ struct Fixture {
         const auto seeded = pulse_store.seed(cursor);
         if (seeded.result != AutonomousCognitionPulseStoreResult::accepted)
             throw std::runtime_error("could not seed prepared pulse cursor");
+
+        // Keep this fixture at a non-trivial durable revision while respecting the
+        // store contract that seed() always starts at revision zero. Repeated exact
+        // CAS replacements exercise the same high-revision path as a lived pulse.
+        for (std::uint64_t revision = 0; revision < target_revision; ++revision) {
+            auto next = cursor;
+            ++next.revision;
+            const auto advanced = pulse_store.replace(cursor, next);
+            if (advanced.result != AutonomousCognitionPulseStoreResult::accepted)
+                throw std::runtime_error("could not advance prepared pulse revision");
+            cursor = std::move(next);
+        }
         return {cursor, claim.task->id};
     }
 
