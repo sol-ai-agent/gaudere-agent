@@ -3,6 +3,7 @@
 #include "AutonomousCognitionPulse.hpp"
 #include "AutonomousCognitionPulseService.hpp"
 #include "AutonomousCognitionPulseStore.hpp"
+#include "AutonomousCognitionStaleRefresh.hpp"
 #include "BoundedReflection.hpp"
 #include "CurrentCognitionHandler.hpp"
 #include "ExplicitWake.hpp"
@@ -440,14 +441,16 @@ int main(int argc, char* argv[])
         std::unique_ptr<gaudere_agent::AutonomousCognitionPulseStore>
             pulse_store;
         std::unique_ptr<gaudere_agent::AutonomousCognitionPulse> pulse;
+        std::unique_ptr<gaudere_agent::AutonomousCognitionProviderGate>
+            pulse_provider_gate;
+        std::unique_ptr<gaudere_agent::AutonomousCognitionStaleRefresh>
+            pulse_stale_refresh;
         std::unique_ptr<gaudere_agent::AutonomousCognitionPulseService>
             pulse_service;
         std::unique_ptr<gaudere_agent::OpenAIStructuredActivation>
             pulse_provider_activation;
         std::unique_ptr<gaudere_agent::CurrentCognitionHandler>
             pulse_cognition_handler;
-        std::unique_ptr<gaudere_agent::AutonomousCognitionProviderGate>
-            pulse_provider_gate;
         std::unique_ptr<gaudere_agent::AutonomousCognitionProviderService>
             pulse_provider_service;
         bool pulse_monitoring = false;
@@ -527,9 +530,22 @@ int main(int argc, char* argv[])
             pulse = std::make_unique<gaudere_agent::AutonomousCognitionPulse>(
                 *pulse_store, task_store, *provider_budget_store, *pulse_wakes,
                 work_runtime, now, true);
+            // The provider gate is provider-free until execution: it only validates
+            // durable lineage, Action evidence, freshness and budget eligibility.
+            // Construct it even while provider authority is OFF so stale prepared
+            // cognition can be retired without granting network/secret authority.
+            pulse_provider_gate =
+                std::make_unique<gaudere_agent::AutonomousCognitionProviderGate>(
+                    options.state_path, task_store, *provider_budget_store,
+                    action_store, now);
+            pulse_stale_refresh =
+                std::make_unique<gaudere_agent::AutonomousCognitionStaleRefresh>(
+                    *pulse_store, task_store, action_store, work_runtime,
+                    *pulse_provider_gate);
             pulse_service =
                 std::make_unique<gaudere_agent::AutonomousCognitionPulseService>(
-                    *pulse, *provider_budget_store, work_scheduler, now);
+                    *pulse, *provider_budget_store, work_scheduler, now,
+                    pulse_stale_refresh.get());
 
             if (options.autonomous_pulse_provider) {
                 pulse_provider_activation =
@@ -541,10 +557,6 @@ int main(int argc, char* argv[])
                 pulse_cognition_handler =
                     std::make_unique<gaudere_agent::CurrentCognitionHandler>(
                         pulse_provider_activation->handler());
-                pulse_provider_gate =
-                    std::make_unique<gaudere_agent::AutonomousCognitionProviderGate>(
-                        options.state_path, task_store, *provider_budget_store,
-                        action_store, now);
                 pulse_provider_service =
                     std::make_unique<gaudere_agent::AutonomousCognitionProviderService>(
                         *pulse_service, *pulse_provider_gate, task_executor,
