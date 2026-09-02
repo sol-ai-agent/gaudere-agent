@@ -8,6 +8,8 @@ gaudere_agent_SOURCES = \
 	AutonomousCognitionProviderGate.hpp \
 	AutonomousCognitionProviderService.cpp \
 	AutonomousCognitionProviderService.hpp \
+	AutonomousCognitionStaleRefresh.cpp \
+	AutonomousCognitionStaleRefresh.hpp \
 	AutonomousCognitionPulse.cpp \
 	AutonomousCognitionPulse.hpp \
 	AutonomousCognitionPulseService.cpp \

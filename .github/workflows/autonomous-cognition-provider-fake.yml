@@ -87,6 +87,7 @@ jobs:
           common_sources='
           agent/src/AutonomousCognitionProviderGate.cpp
           agent/src/AutonomousCognitionProviderService.cpp
+          agent/src/AutonomousCognitionStaleRefresh.cpp
           agent/src/AutonomousCognitionPulse.cpp
           agent/src/AutonomousCognitionPulseService.cpp
           agent/src/AutonomousCognitionPulseStore.cpp
