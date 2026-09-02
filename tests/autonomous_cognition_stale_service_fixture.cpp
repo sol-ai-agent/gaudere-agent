@@ -5,6 +5,7 @@
 #include "ResumeContextSnapshot.hpp"
 #include "Sha256.hpp"
 
+#include <gaudere/persistence/sqlite/ActionStore.hpp>
 #include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/persistence/sqlite/WakeIntentStore.hpp>
@@ -85,8 +86,10 @@ int main(int argc, char* argv[])
         const auto now = [&fixture_now] { return fixture_now; };
 
         gaudere::persistence::sqlite::TaskStore tasks(state_path);
+        gaudere::persistence::sqlite::ActionStore actions(state_path);
         gaudere::persistence::sqlite::BudgetStore budgets(state_path);
         gaudere::persistence::sqlite::WakeIntentStore wakes(state_path);
+        (void)actions;
         gaudere::work::Runtime runtime(tasks, now);
         runtime.recover();
 
