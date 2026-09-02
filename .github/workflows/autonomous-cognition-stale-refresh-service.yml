@@ -1,0 +1,173 @@
+name: Autonomous cognition stale refresh service gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-stale-refresh-service:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin and install Gaudere
+        run: |
+          set -eu
+          ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          test "${#ref}" -eq 40
+          git -C gaudere checkout --detach "$ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Build Agent and stale prepared fixture
+        run: |
+          set -eu
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+            ../configure --prefix="$GITHUB_WORKSPACE/agent-prefix" \
+              CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" make --jobs=2 check
+          make install
+
+          cd "$GITHUB_WORKSPACE"
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere-persistence-sqlite gaudere) \
+            agent/tests/autonomous_cognition_stale_service_fixture.cpp \
+            agent/src/AutonomousCognitionPulse.cpp \
+            agent/src/AutonomousCognitionPulseStore.cpp \
+            agent/src/CanonicalCognitionDecision.cpp \
+            agent/src/CurrentCognitionCycle.cpp \
+            agent/src/CurrentCognitionTaskInspection.cpp \
+            agent/src/ResumeContextSnapshot.cpp \
+            agent/src/ResumeContextSnapshotInspection.cpp \
+            agent/src/Sha256.cpp \
+            agent/src/TaskExecutor.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
+            -o /tmp/autonomous-cognition-stale-service-fixture
+
+      - name: Prove provider-free stale retirement immediately prepares fresh cognition
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          agent_bin="$GITHUB_WORKSPACE/agent-prefix/bin/gaudere-agent"
+          root=$(mktemp -d)
+          trap 'rm -rf "$root"' EXIT
+
+          /tmp/autonomous-cognition-stale-service-fixture \
+            "$root/state.db" "$root/pulse.db" >"$root/fixture.env"
+          cat "$root/fixture.env"
+          stale_task_id=$(sed -n 's/^stale_task_id=//p' "$root/fixture.env")
+          generation=$(sed -n 's/^generation=//p' "$root/fixture.env")
+          test -n "$stale_task_id"
+          test -n "$generation"
+
+          actions_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')
+          budget_before=$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')
+          current_before=$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT attempts_started FROM tasks WHERE id='$stale_task_id';")" = 0
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT status FROM tasks WHERE id='$stale_task_id';")" = 0
+
+          "$agent_bin" --state "$root/state.db" \
+            --autonomous-pulse-sidecar "$root/pulse.db" \
+            >"$root/service.log" 2>&1 &
+          pid=$!
+          sleep 1
+          kill -TERM "$pid"
+          wait "$pid"
+          cat "$root/service.log"
+
+          grep -q 'provider_execution=false' "$root/service.log"
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT cancel_reason FROM tasks WHERE id='$stale_task_id';")" = \
+            'autonomous pulse retired stale current cognition before provider effect'
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT attempts_started FROM tasks WHERE id='$stale_task_id';")" = 0
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT result_failure_code FROM tasks WHERE id='$stale_task_id';")" = cancelled
+          test "$(sqlite3 "$root/pulse.db" \
+            'SELECT state FROM autonomous_cognition_pulse_cursor;')" = 2
+          test "$(sqlite3 "$root/pulse.db" \
+            'SELECT generation FROM autonomous_cognition_pulse_cursor;')" = "$generation"
+          fresh_task_id=$(sqlite3 "$root/pulse.db" \
+            'SELECT current_task_id FROM autonomous_cognition_pulse_cursor;')
+          test -n "$fresh_task_id"
+          test "$fresh_task_id" != "$stale_task_id"
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT status FROM tasks WHERE id='$fresh_task_id';")" = 0
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT attempts_started FROM tasks WHERE id='$fresh_task_id';")" = 0
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = $((current_before + 1))
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')" = "$actions_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')" = "$budget_before"
+
+          "$agent_bin" --state "$root/state.db" \
+            --autonomous-pulse-sidecar "$root/pulse.db" \
+            >"$root/restart.log" 2>&1 &
+          pid=$!
+          sleep 1
+          kill -TERM "$pid"
+          wait "$pid"
+          test "$(sqlite3 "$root/pulse.db" \
+            'SELECT current_task_id FROM autonomous_cognition_pulse_cursor;')" = "$fresh_task_id"
+          test "$(sqlite3 "$root/pulse.db" \
+            'SELECT generation FROM autonomous_cognition_pulse_cursor;')" = "$generation"
+          test "$(sqlite3 "$root/state.db" \
+            "SELECT COUNT(*) FROM tasks WHERE kind='cognition.current.v0';")" = $((current_before + 1))
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM actions;')" = "$actions_before"
+          test "$(sqlite3 "$root/state.db" 'SELECT COUNT(*) FROM budget_consumptions;')" = "$budget_before"
+
+      - name: Prove wiring grants no provider authority by itself
+        run: |
+          set -eu
+          grep -q 'AutonomousCognitionStaleRefresh' agent/src/main.cpp
+          grep -q 'pulse_stale_refresh.get()' agent/src/main.cpp
+          grep -q 'if (options.autonomous_pulse_provider)' agent/src/main.cpp
+          ! grep -R -q -- '--autonomous-pulse-provider' agent/deploy/quadlet
+          ! grep -R -q -- '--autonomous-pulse-sidecar' agent/deploy/quadlet
