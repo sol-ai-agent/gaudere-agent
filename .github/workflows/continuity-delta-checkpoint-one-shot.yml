@@ -1,0 +1,143 @@
+name: Continuity delta checkpoint one-shot
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-continuity-delta-one-shot:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          file
+          gcc-c++
+          git
+          gzip
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          python3
+          sqlite-devel
+          tar
+          util-linux
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin and build Gaudere
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          test "${#gaudere_ref}" -eq 40
+          test -z "$(printf '%s' "$gaudere_ref" | tr -d '0-9a-f')"
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove one-shot authority boundary
+        run: |
+          set -eu
+          grep -q -- '--checkpoint-after-explicit-go' \
+            agent/src/continuity_delta_checkpoint_main.cpp
+          grep -q 'StateLock state_lock' \
+            agent/src/continuity_delta_checkpoint_main.cpp
+          ! grep -Eq 'OpenAIActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource|SecretSource' \
+            agent/src/continuity_delta_checkpoint_main.cpp
+          ! grep -q 'gaudere-continuity-delta-checkpoint' agent/src/main.cpp
+          ! grep -R -q 'gaudere-continuity-delta-checkpoint' agent/deploy/quadlet
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("agent/src/Makefile.am").read_text()
+          start = text.index("gaudere_continuity_delta_checkpoint_SOURCES")
+          block = text[start:]
+          assert "$(CURL_LIBS)" not in block
+          for forbidden in ("OpenAIActivation.cpp", "ProviderTaskHandler.cpp",
+                            "CurlHttpTransport.cpp", "FileSecretSource.cpp"):
+              assert forbidden not in block
+          PY
+
+      - name: Build Gaudere Agent
+        run: |
+          set -eu
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+            ../configure --prefix="$GITHUB_WORKSPACE/agent-prefix" \
+              CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig" \
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+            make --jobs=2 check
+          make install
+
+      - name: Inspect actual one-shot ELF
+        run: |
+          set -eu
+          binary="$GITHUB_WORKSPACE/agent/build/src/gaudere-continuity-delta-checkpoint"
+          test -x "$binary"
+          file "$binary"
+          ! ldd "$binary" | grep -q 'libcurl'
+          ! nm -C "$binary" | grep -Eq 'OpenAIActivation|ProviderTaskHandler|CurlHttpTransport|FileSecretSource'
+          LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" "$binary" --help \
+            | grep -q -- '--checkpoint-after-explicit-go'
+
+      - name: Prove fail-closed CLI without provider effects
+        run: |
+          set -eu
+          binary="$GITHUB_WORKSPACE/agent/build/src/gaudere-continuity-delta-checkpoint"
+          state=/tmp/gaudere-continuity-delta-empty.db
+          rm -f "$state" "$state.lock" "$state-wal" "$state-shm"
+
+          set +e
+          missing=$(
+            LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+              "$binary" --state "$state" --audited-task-id missing 2>&1
+          )
+          missing_rc=$?
+          set -e
+          test "$missing_rc" -ne 0
+          printf '%s\n' "$missing" | grep -q -- '--checkpoint-after-explicit-go is required'
+
+          set +e
+          output=$(
+            LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib" \
+              "$binary" --state "$state" --audited-task-id missing \
+                --checkpoint-after-explicit-go 2>&1
+          )
+          rc=$?
+          set -e
+          test "$rc" -eq 3
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -q '^result=ineligible$'
+          printf '%s\n' "$output" | grep -q '^provider_total_before=0$'
+          printf '%s\n' "$output" | grep -q '^provider_total_after=0$'
+          printf '%s\n' "$output" | grep -q '^provider_effects=0$'
