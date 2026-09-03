@@ -12,6 +12,7 @@ jobs:
   fedora-44-autonomous-pulse-service:
     runs-on: ubuntu-latest
     container: fedora:44
+    timeout-minutes: 15
 
     steps:
       - name: Install build dependencies
@@ -21,13 +22,17 @@ jobs:
           automake
           gcc-c++
           git
+          gzip
           json-devel
           libcurl-devel
           libtool
           make
           pkgconf-pkg-config
+          python3
           sqlite
           sqlite-devel
+          tar
+          util-linux
 
       - uses: actions/checkout@v4
         with:
