@@ -23,12 +23,16 @@ jobs:
           file
           gcc-c++
           git
+          gzip
           json-devel
           libcurl-devel
           libtool
           make
           pkgconf-pkg-config
+          python3
           sqlite-devel
+          tar
+          util-linux
 
       - uses: actions/checkout@v4
         with:
