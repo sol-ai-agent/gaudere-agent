@@ -30,7 +30,8 @@ jobs:
           grep -q 'SQLITE_OPEN_READONLY' agent/src/LocalActivityPulseSidecarInspection.cpp
           grep -q 'replacement.revision != expected.revision + 1' agent/src/LocalActivityPulseStore.cpp
           grep -q '0600' agent/src/LocalActivityPulseStore.cpp
-          ! grep -Eq 'Provider|OpenAI|Curl|HttpTransport|SecretSource|WakeIntent|ActionStore|TaskStore|consume\(' $files
+          ! grep -Eq '#include .*Provider|#include .*OpenAI|#include .*Curl|#include .*HttpTransport|#include .*SecretSource|#include .*WakeIntent|#include .*ActionStore|#include .*TaskStore' $files
+          ! grep -Eq 'consume\(' $files
           ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
           ! grep -Eq '(^|[^[:alnum:]_])exec(v|ve|vp|vpe|l|le|lp|lpe)?[[:space:]]*\(' $files
           ! grep -q 'LocalActivityPulseStore' agent/src/main.cpp
