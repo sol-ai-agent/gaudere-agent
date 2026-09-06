@@ -107,6 +107,7 @@ void execute_sql(const std::string& path, const std::string& sql)
 
 void remove_sqlite_files(const std::string& path)
 {
+    unlink((path + "-journal").c_str());
     unlink((path + "-shm").c_str());
     unlink((path + "-wal").c_str());
     unlink(path.c_str());
@@ -237,23 +238,25 @@ int main()
     }
 
     const auto database_before = file_snapshot(path);
+    const auto journal_before = file_snapshot(path + "-journal");
     const auto wal_before = file_snapshot(path + "-wal");
-    const bool shm_before = file_snapshot(path + "-shm").exists;
+    const auto shm_before = file_snapshot(path + "-shm");
+    expect(!journal_before.exists && !wal_before.exists && !shm_before.exists,
+           "settled sidecar has no lingering SQLite auxiliary journal state");
+
     const auto inspected = inspect_local_activity_pulse_sidecar(path);
     const auto database_after = file_snapshot(path);
+    const auto journal_after = file_snapshot(path + "-journal");
     const auto wal_after = file_snapshot(path + "-wal");
-    const bool shm_after = file_snapshot(path + "-shm").exists;
+    const auto shm_after = file_snapshot(path + "-shm");
     expect(inspected.eligible && inspected.cursor
                && inspected.cursor->generation == 1
                && inspected.cursor->state == LocalActivityPulseState::settled,
            "strict read-only inspector returns the one canonical durable cursor");
     expect(same_snapshot(database_before, database_after),
            "read-only inspection does not modify the main SQLite database");
-    expect(same_snapshot(wal_before, wal_after),
-           "read-only inspection neither creates nor modifies WAL state");
-    if (shm_before != shm_after) {
-        std::cout << "SQLite read-only inspection changed only ephemeral -shm presence\n";
-    }
+    expect(!journal_after.exists && !wal_after.exists && !shm_after.exists,
+           "read-only inspection creates no journal, WAL or SHM files");
 
     const auto ambiguous_path = temporary_path();
     {
