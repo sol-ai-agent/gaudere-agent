@@ -1,6 +1,6 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1 gaudere-current-cognition-prepare gaudere-current-cognition gaudere-autonomous-cognition-pulse gaudere-continuity-delta-checkpoint
+bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1 gaudere-current-cognition-prepare gaudere-current-cognition gaudere-autonomous-cognition-pulse gaudere-continuity-delta-checkpoint gaudere-local-activity-seed gaudere-local-activity-status
 
 gaudere_agent_SOURCES = \
 	main.cpp \
@@ -21,6 +21,9 @@ gaudere_agent_SOURCES = \
 	BoundedReflection.hpp \
 	CanonicalCognitionDecision.cpp \
 	CanonicalCognitionDecision.hpp \
+	ContinuityDeltaCheckpoint.hpp \
+	ContinuityDeltaCheckpointInspection.cpp \
+	ContinuityDeltaCheckpointInspection.hpp \
 	CurlHttpTransport.cpp \
 	CurlHttpTransport.hpp \
 	CurrentCognitionCycle.cpp \
@@ -40,6 +43,21 @@ gaudere_agent_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalActivityPulse.cpp \
+	LocalActivityPulse.hpp \
+	LocalActivityPulseSchedulerBridge.cpp \
+	LocalActivityPulseSchedulerBridge.hpp \
+	LocalActivityPulseService.cpp \
+	LocalActivityPulseService.hpp \
+	LocalActivityPulseSidecarInspection.cpp \
+	LocalActivityPulseStatus.cpp \
+	LocalActivityPulseStatus.hpp \
+	LocalActivityPulseStore.cpp \
+	LocalActivityPulseStore.hpp \
+	LocalContinuityObservation.cpp \
+	LocalContinuityObservation.hpp \
+	LocalContinuityObservationHandler.cpp \
+	LocalContinuityObservationHandler.hpp \
 	LocalEchoHandler.cpp \
 	LocalEchoHandler.hpp \
 	LocalWaitHandler.cpp \
@@ -263,3 +281,42 @@ gaudere_continuity_delta_checkpoint_SOURCES = \
 	TaskExecutor.hpp \
 	WakeSourceDecision.hpp
 gaudere_continuity_delta_checkpoint_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+gaudere_local_activity_seed_SOURCES = \
+	local_activity_seed_main.cpp \
+	CanonicalCognitionDecision.cpp \
+	CanonicalCognitionDecision.hpp \
+	ContinuityDeltaCheckpoint.hpp \
+	ContinuityDeltaCheckpointInspection.cpp \
+	ContinuityDeltaCheckpointInspection.hpp \
+	LocalActivityPulse.cpp \
+	LocalActivityPulse.hpp \
+	LocalActivityPulseStore.cpp \
+	LocalActivityPulseStore.hpp \
+	LocalContinuityObservation.cpp \
+	LocalContinuityObservation.hpp \
+	LocalContinuityObservationHandler.cpp \
+	LocalContinuityObservationHandler.hpp \
+	OpenAIBudget.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp
+gaudere_local_activity_seed_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+
+gaudere_local_activity_status_SOURCES = \
+	local_activity_status_main.cpp \
+	LocalActivityPulseSchedulerBridge.cpp \
+	LocalActivityPulseSchedulerBridge.hpp \
+	LocalActivityPulseSidecarInspection.cpp \
+	LocalActivityPulseStatus.cpp \
+	LocalActivityPulseStatus.hpp \
+	LocalActivityPulseStore.cpp \
+	LocalActivityPulseStore.hpp \
+	LocalContinuityObservation.cpp \
+	LocalContinuityObservation.hpp \
+	Sha256.cpp \
+	Sha256.hpp
+gaudere_local_activity_status_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3

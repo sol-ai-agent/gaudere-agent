@@ -9,6 +9,9 @@
 #include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
 #include "LiveControlProcessor.hpp"
+#include "LocalActivityPulse.hpp"
+#include "LocalActivityPulseService.hpp"
+#include "LocalActivityPulseStore.hpp"
 #include "LocalEchoHandler.hpp"
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
@@ -65,6 +68,7 @@ struct Options {
     std::string secret_directory = "/run/secrets";
     std::string control_socket;
     std::string autonomous_pulse_sidecar;
+    std::string local_activity_sidecar;
 };
 
 void usage(const char* program)
@@ -78,6 +82,7 @@ void usage(const char* program)
         << "[--wake-intents] "
         << "[--autonomous-pulse-sidecar PATH] "
         << "[--autonomous-pulse-provider] "
+        << "[--local-activity-sidecar PATH] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -119,6 +124,8 @@ Options parse_options(const int argc, char* argv[])
             options.autonomous_pulse_sidecar = argv[++index];
         } else if (argument == "--autonomous-pulse-provider") {
             options.autonomous_pulse_provider = true;
+        } else if (argument == "--local-activity-sidecar" && index + 1 < argc) {
+            options.local_activity_sidecar = argv[++index];
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -159,6 +166,10 @@ Options parse_options(const int argc, char* argv[])
     if (!options.autonomous_pulse_sidecar.empty() && modes != 0) {
         throw std::invalid_argument(
             "--autonomous-pulse-sidecar is only valid in service mode");
+    }
+    if (!options.local_activity_sidecar.empty() && modes != 0) {
+        throw std::invalid_argument(
+            "--local-activity-sidecar is only valid in service mode");
     }
     if (options.autonomous_pulse_provider && modes != 0) {
         throw std::invalid_argument(
@@ -262,6 +273,48 @@ void require_distinct_regular_pulse_sidecar(const Options& options)
     if (!inspection.eligible || !inspection.cursor) {
         throw std::invalid_argument(
             "autonomous pulse sidecar is not eligible: " + inspection.detail);
+    }
+}
+
+void require_distinct_regular_local_activity_sidecar(const Options& options)
+{
+    if (options.local_activity_sidecar.empty()) return;
+
+    const auto state_status = std::filesystem::symlink_status(options.state_path);
+    const auto sidecar_status =
+        std::filesystem::symlink_status(options.local_activity_sidecar);
+    if (!std::filesystem::is_regular_file(state_status)) {
+        throw std::invalid_argument(
+            "local activity requires state database to be a regular non-symlink file");
+    }
+    if (!std::filesystem::is_regular_file(sidecar_status)) {
+        throw std::invalid_argument(
+            "local activity sidecar must already exist as a regular non-symlink file");
+    }
+
+    const auto state = std::filesystem::weakly_canonical(options.state_path);
+    const auto sidecar = std::filesystem::weakly_canonical(options.local_activity_sidecar);
+    if (state == sidecar) {
+        throw std::invalid_argument(
+            "local activity sidecar resolves to the state database");
+    }
+    std::error_code equivalent_error;
+    if (std::filesystem::equivalent(options.state_path,
+                                    options.local_activity_sidecar,
+                                    equivalent_error)) {
+        throw std::invalid_argument(
+            "local activity sidecar aliases the state database");
+    }
+    if (equivalent_error) {
+        throw std::runtime_error(
+            "could not compare local activity sidecar identity");
+    }
+
+    const auto inspection = gaudere_agent::inspect_local_activity_pulse_sidecar(
+        options.local_activity_sidecar);
+    if (!inspection.eligible || !inspection.cursor) {
+        throw std::invalid_argument(
+            "local activity sidecar is not eligible: " + inspection.detail);
     }
 }
 
@@ -377,6 +430,7 @@ int main(int argc, char* argv[])
         const auto options = parse_options(argc, argv);
         std::cout << std::unitbuf;
         require_distinct_regular_pulse_sidecar(options);
+        require_distinct_regular_local_activity_sidecar(options);
 
         sigset_t signals{};
         if (!options.openai_once) {
@@ -454,6 +508,13 @@ int main(int argc, char* argv[])
         std::unique_ptr<gaudere_agent::AutonomousCognitionProviderService>
             pulse_provider_service;
         bool pulse_monitoring = false;
+        std::unique_ptr<gaudere_agent::LocalActivityPulseStore>
+            local_activity_store;
+        std::unique_ptr<gaudere_agent::LocalActivityPulse>
+            local_activity_pulse;
+        std::unique_ptr<gaudere_agent::LocalActivityPulseService>
+            local_activity_service;
+        bool local_activity_monitoring = false;
 
         if (!task_dispatcher.register_handler("local.echo", echo_handler)
             || !task_dispatcher.register_handler("local.wait", wait_handler)) {
@@ -461,7 +522,8 @@ int main(int argc, char* argv[])
         }
 
         if (options.openai_enabled || !options.control_socket.empty()
-            || !options.autonomous_pulse_sidecar.empty()) {
+            || !options.autonomous_pulse_sidecar.empty()
+            || !options.local_activity_sidecar.empty()) {
             provider_budget_store =
                 std::make_unique<gaudere::persistence::sqlite::BudgetStore>(
                     options.state_path);
@@ -530,10 +592,6 @@ int main(int argc, char* argv[])
             pulse = std::make_unique<gaudere_agent::AutonomousCognitionPulse>(
                 *pulse_store, task_store, *provider_budget_store, *pulse_wakes,
                 work_runtime, now, true);
-            // The provider gate is provider-free until execution: it only validates
-            // durable lineage, Action evidence, freshness and budget eligibility.
-            // Construct it even while provider authority is OFF so stale prepared
-            // cognition can be retired without granting network/secret authority.
             pulse_provider_gate =
                 std::make_unique<gaudere_agent::AutonomousCognitionProviderGate>(
                     options.state_path, task_store, *provider_budget_store,
@@ -571,6 +629,41 @@ int main(int argc, char* argv[])
                     << options.autonomous_pulse_sidecar
                     << " provider_execution=false automatic_seed=false\n";
             }
+        }
+
+        if (!options.local_activity_sidecar.empty()) {
+            if (!provider_budget_store) {
+                throw std::runtime_error(
+                    "local activity provider budget reader is unavailable");
+            }
+            gaudere::scheduling::wake::WakeIntentStore* local_wakes =
+                wake_intent_store.get();
+            if (!local_wakes) {
+                if (!pulse_wake_store) {
+                    pulse_wake_store =
+                        std::make_unique<gaudere::persistence::sqlite::WakeIntentStore>(
+                            options.state_path);
+                }
+                local_wakes = pulse_wake_store.get();
+            }
+            local_activity_store =
+                std::make_unique<gaudere_agent::LocalActivityPulseStore>(
+                    options.local_activity_sidecar);
+            if (!local_activity_store->find(gaudere_agent::local_activity_pulse_scope)) {
+                throw std::runtime_error(
+                    "local activity sidecar lost its seeded cursor after inspection");
+            }
+            local_activity_pulse =
+                std::make_unique<gaudere_agent::LocalActivityPulse>(
+                    *local_activity_store, task_store, action_store,
+                    *provider_budget_store, *local_wakes, work_runtime, now, true);
+            local_activity_service =
+                std::make_unique<gaudere_agent::LocalActivityPulseService>(
+                    *local_activity_pulse, *local_activity_store, work_scheduler);
+            std::cout
+                << "gaudere-agent: local continuity activity enabled sidecar="
+                << options.local_activity_sidecar
+                << " provider_execution=false automatic_seed=false max_generations=3\n";
         }
 
         action_runtime.recover();
@@ -617,8 +710,37 @@ int main(int argc, char* argv[])
             return step.plan.healthy;
         };
 
+        const auto step_local_activity = [&]() {
+            if (!local_activity_service) return true;
+            const auto step = local_activity_service->step();
+            local_activity_monitoring = step.healthy && step.monitoring;
+            if (step.observation.task) {
+                std::cout << "gaudere-agent: local continuity activity task="
+                          << step.observation.task->id
+                          << " provider_execution=false\n";
+            }
+            if (!step.detail.empty()) {
+                std::cout << "gaudere-agent: local continuity activity: "
+                          << step.detail << '\n';
+            }
+            if (!step.healthy) {
+                std::cerr
+                    << "gaudere-agent: local continuity activity monitoring disabled\n";
+            }
+            if (step.healthy && !step.monitoring
+                && step.observation.result
+                    == gaudere_agent::LocalActivityPulseResult::quiescent) {
+                std::cout
+                    << "gaudere-agent: local continuity activity quiescent after generation 3\n";
+            }
+            return step.healthy;
+        };
+
         if (pulse_service && !step_autonomous_pulse()) {
             throw std::runtime_error("autonomous pulse startup failed");
+        }
+        if (local_activity_service && !step_local_activity()) {
+            throw std::runtime_error("local continuity activity startup failed");
         }
 
         if (options.echo) {
@@ -725,6 +847,9 @@ int main(int argc, char* argv[])
 
                 if (pulse_service && pulse_monitoring) {
                     static_cast<void>(step_autonomous_pulse());
+                }
+                if (local_activity_service && local_activity_monitoring) {
+                    static_cast<void>(step_local_activity());
                 }
             }
 

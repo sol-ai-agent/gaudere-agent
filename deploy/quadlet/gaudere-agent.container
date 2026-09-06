@@ -8,7 +8,7 @@ DefaultDependencies=false
 [Container]
 Image=localhost/gaudere-agent:dev
 ContainerName=gaudere-agent
-Exec=--state /var/lib/gaudere/state.db --control-socket /tmp/gaudere-control.sock
+Exec=--state /var/lib/gaudere/state.db --control-socket /tmp/gaudere-control.sock --local-activity-sidecar /var/lib/gaudere/local-activity-pulse.db
 
 Network=none
 UserNS=keep-id
