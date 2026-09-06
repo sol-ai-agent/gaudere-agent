@@ -436,7 +436,7 @@ LocalActivityPulseStore::LocalActivityPulseStore(const std::string& path)
     }
 
     try {
-        execute(database_, "PRAGMA journal_mode=WAL;");
+        execute(database_, "PRAGMA journal_mode=DELETE;");
         execute(database_, "PRAGMA synchronous=FULL;");
         execute(database_, "PRAGMA busy_timeout=5000;");
         execute(database_, "BEGIN IMMEDIATE;");
