@@ -1,0 +1,112 @@
+name: Local activity pulse read-only status proof
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-local-activity-status:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin and build Gaudere
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          test "${#gaudere_ref}" -eq 40
+          test -z "$(printf '%s' "$gaudere_ref" | tr -d '0-9a-f')"
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove status source is read-only and authority-free
+        run: |
+          set -eu
+          files='agent/src/LocalActivityPulseStatus.cpp agent/src/LocalActivityPulseStatus.hpp agent/src/local_activity_status_main.cpp'
+          grep -q 'SQLITE_OPEN_READONLY' agent/src/LocalActivityPulseStatus.cpp
+          grep -q 'immutable=1' agent/src/LocalActivityPulseStatus.cpp
+          grep -q 'PRAGMA query_only=ON' agent/src/LocalActivityPulseStatus.cpp
+          ! grep -Eq 'SQLITE_OPEN_(READWRITE|CREATE)' $files
+          ! grep -Eq 'INSERT[[:space:]]|UPDATE[[:space:]]|DELETE[[:space:]]|CREATE[[:space:]]+TABLE|ALTER[[:space:]]+TABLE|PRAGMA[[:space:]]+journal_mode' $files
+          ! grep -Eq 'Provider|OpenAIActivation|Curl|HttpTransport|SecretSource|TaskStore|ActionStore|WakeIntentStore|budget::Store' $files
+          ! grep -Eq 'std::thread|pthread|jthread|async[[:space:]]*\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])exec(v|ve|vp|vpe|l|le|lp|lpe)?[[:space:]]*\(' $files
+          ! grep -q 'LocalActivityPulseStatus' agent/src/main.cpp
+          ! grep -R -q 'gaudere-local-activity-status' agent/deploy/quadlet
+
+      - name: Compile read-only status proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          common="-std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Iagent/src"
+          c++ $common $(pkg-config --cflags gaudere) \
+            agent/tests/local_activity_pulse_status_test.cpp \
+            agent/src/LocalActivityPulseStatus.cpp \
+            agent/src/LocalActivityPulseSchedulerBridge.cpp \
+            agent/src/LocalActivityPulseStore.cpp \
+            agent/src/LocalActivityPulseSidecarInspection.cpp \
+            agent/src/LocalContinuityObservation.cpp \
+            agent/src/Sha256.cpp \
+            $(pkg-config --libs gaudere) -lsqlite3 \
+            -o /tmp/local-activity-pulse-status-test
+          c++ $common $(pkg-config --cflags gaudere) \
+            agent/src/local_activity_status_main.cpp \
+            agent/src/LocalActivityPulseStatus.cpp \
+            agent/src/LocalActivityPulseSchedulerBridge.cpp \
+            agent/src/LocalActivityPulseStore.cpp \
+            agent/src/LocalActivityPulseSidecarInspection.cpp \
+            agent/src/LocalContinuityObservation.cpp \
+            agent/src/Sha256.cpp \
+            $(pkg-config --libs gaudere) -lsqlite3 \
+            -o /tmp/gaudere-local-activity-status
+
+      - name: Run read-only status proof
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/local-activity-pulse-status-test
+          tmp=$(mktemp -d)
+          /tmp/gaudere-local-activity-status \
+            --state "$tmp/state.db" \
+            --sidecar "$tmp/local-activity.db" \
+            --enabled > "$tmp/status.json"
+          grep -q '"cursor_state":"unseeded"' "$tmp/status.json"
+          grep -q '"seeded":false' "$tmp/status.json"
+          test ! -e "$tmp/state.db"
+          test ! -e "$tmp/local-activity.db"
