@@ -97,7 +97,7 @@ bool active_generation_shape(const LocalActivityPulseCursor& cursor,
 {
     return cursor.generation >= 1 && cursor.generation <= 3
         && cursor.captured_at_ms
-        && *cursor.captured_at_ms >= 0
+        && *cursor.captured_at_ms >= cursor.due_at_ms
         && cursor.task_id.size() <= max_id_bytes
         && prefixed_sha256(cursor.task_id, observation_prefix)
         && predecessor_shape(cursor)
@@ -282,7 +282,7 @@ bool valid_local_activity_pulse_cursor(
         || !lowercase_sha256(cursor.anchor_checkpoint_result_sha256)
         || cursor.anchor_at_ms < 0
         || cursor.due_at_ms < cursor.anchor_at_ms
-        || (cursor.captured_at_ms && *cursor.captured_at_ms < cursor.anchor_at_ms)
+        || (cursor.captured_at_ms && *cursor.captured_at_ms < cursor.due_at_ms)
         || cursor.task_id.size() > max_id_bytes
         || (!cursor.task_id.empty() && !safe_text(cursor.task_id))
         || !optional_safe_id(cursor.predecessor_observation_task_id)
@@ -414,7 +414,7 @@ LocalActivityPulseStore::LocalActivityPulseStore(const std::string& path)
                 " anchor_checkpoint_result_sha256 TEXT NOT NULL,"
                 " anchor_at_ms INTEGER NOT NULL CHECK(anchor_at_ms >= 0),"
                 " due_at_ms INTEGER NOT NULL CHECK(due_at_ms >= anchor_at_ms),"
-                " captured_at_ms INTEGER CHECK(captured_at_ms IS NULL OR captured_at_ms >= anchor_at_ms),"
+                " captured_at_ms INTEGER CHECK(captured_at_ms IS NULL OR captured_at_ms >= due_at_ms),"
                 " task_id TEXT NOT NULL,"
                 " result_sha256 TEXT,"
                 " predecessor_observation_task_id TEXT,"
