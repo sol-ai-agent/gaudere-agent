@@ -127,6 +127,26 @@ bool same_cursor(const LocalActivityPulseCursor& left,
         && left.blocked_reason == right.blocked_reason;
 }
 
+bool same_opportunity(const LocalActivityPulseCursor& left,
+                      const LocalActivityPulseCursor& right) noexcept
+{
+    return left.generation == right.generation
+        && left.due_at_ms == right.due_at_ms
+        && left.captured_at_ms == right.captured_at_ms
+        && left.task_id == right.task_id
+        && left.predecessor_observation_task_id
+            == right.predecessor_observation_task_id
+        && left.predecessor_observation_result_sha256
+            == right.predecessor_observation_result_sha256;
+}
+
+bool same_blocked_payload(const LocalActivityPulseCursor& left,
+                          const LocalActivityPulseCursor& right) noexcept
+{
+    return same_opportunity(left, right)
+        && left.result_sha256 == right.result_sha256;
+}
+
 void bind_text(sqlite3* database, sqlite3_stmt* statement,
                const int index, const std::string& value)
 {
@@ -352,23 +372,50 @@ bool valid_local_activity_pulse_transition(
 
     switch (expected.state) {
     case LocalActivityPulseState::idle:
+        if (replacement.due_at_ms != expected.due_at_ms) return false;
         return (replacement.state == LocalActivityPulseState::preparing
                 && replacement.generation == 1)
             || (replacement.state == LocalActivityPulseState::blocked
                 && replacement.generation == 0);
+
     case LocalActivityPulseState::preparing:
-        return replacement.generation == expected.generation
-            && (replacement.state == LocalActivityPulseState::settled
-                || replacement.state == LocalActivityPulseState::quiescent
-                || replacement.state == LocalActivityPulseState::blocked);
+        if (replacement.generation != expected.generation
+            || !same_opportunity(expected, replacement)) {
+            return false;
+        }
+        if (replacement.state == LocalActivityPulseState::settled
+            || replacement.state == LocalActivityPulseState::quiescent) {
+            return replacement.result_sha256.has_value();
+        }
+        return replacement.state == LocalActivityPulseState::blocked
+            && replacement.result_sha256 == expected.result_sha256;
+
     case LocalActivityPulseState::settled:
-        return (replacement.state == LocalActivityPulseState::preparing
-                && replacement.generation == expected.generation + 1)
-            || (replacement.state == LocalActivityPulseState::blocked
-                && replacement.generation == expected.generation);
+        if (replacement.state == LocalActivityPulseState::blocked) {
+            return replacement.generation == expected.generation
+                && same_blocked_payload(expected, replacement);
+        }
+        if (replacement.state != LocalActivityPulseState::preparing
+            || replacement.generation != expected.generation + 1
+            || !expected.captured_at_ms || !expected.result_sha256
+            || *expected.captured_at_ms
+                > std::numeric_limits<std::int64_t>::max()
+                    - local_activity_pulse_cadence_ms) {
+            return false;
+        }
+        return replacement.due_at_ms
+                == *expected.captured_at_ms + local_activity_pulse_cadence_ms
+            && replacement.predecessor_observation_task_id
+                == std::optional<std::string>{expected.task_id}
+            && replacement.predecessor_observation_result_sha256
+                == expected.result_sha256
+            && !replacement.result_sha256;
+
     case LocalActivityPulseState::blocked:
         return replacement.state == LocalActivityPulseState::blocked
-            && replacement.generation == expected.generation;
+            && replacement.generation == expected.generation
+            && same_blocked_payload(expected, replacement);
+
     case LocalActivityPulseState::quiescent:
         return false;
     }
