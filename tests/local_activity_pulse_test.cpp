@@ -35,6 +35,7 @@ using TaskStatus = gaudere::work::TaskStatus;
 using Action = gaudere::scheduling::wake::Action;
 using ActionStatus = gaudere::scheduling::wake::ActionStatus;
 using EffectResult = gaudere::scheduling::wake::EffectResult;
+using PulseResult = LocalActivityPulseResult;
 
 int failures = 0;
 
@@ -65,12 +66,6 @@ std::string empty_wake_canonical()
 {
     return Json{{"scope", "cognition.reflect.wake.v0"},
                 {"cardinality", "empty"}}.dump();
-}
-
-std::int64_t milliseconds(const gaudere::work::TimePoint value)
-{
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        value.time_since_epoch()).count();
 }
 
 gaudere::work::TimePoint time_point(const std::int64_t value)
@@ -314,7 +309,7 @@ struct Fixture {
         actions.save(action);
     }
 
-    [[nodiscard]] std::uint64_t provider_total() const
+    [[nodiscard]] std::uint64_t provider_total()
     {
         return budgets.snapshot(
             std::string{openai_budget_scope()},
@@ -332,21 +327,6 @@ struct Fixture {
     Task anchor;
     Task successor;
 };
-
-LocalActivityPulseObservation observe_with_fresh_runtime(
-    Fixture& fixture,
-    LocalActivityPulseStore& store,
-    const bool enabled = true,
-    LocalActivityPulse::PhaseHook hook = {})
-{
-    gaudere::work::Runtime runtime(
-        fixture.tasks, [&fixture] { return fixture.now; });
-    runtime.recover();
-    LocalActivityPulse pulse(
-        store, fixture.tasks, fixture.actions, fixture.budgets, fixture.wakes,
-        runtime, [&fixture] { return fixture.now; }, enabled, std::move(hook));
-    return pulse.observe();
-}
 
 void disabled_and_unseeded_are_inert()
 {
