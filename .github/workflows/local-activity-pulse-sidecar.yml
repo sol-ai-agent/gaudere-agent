@@ -30,6 +30,9 @@ jobs:
           grep -q 'SQLITE_OPEN_READONLY' agent/src/LocalActivityPulseSidecarInspection.cpp
           grep -q 'replacement.revision != expected.revision + 1' agent/src/LocalActivityPulseStore.cpp
           grep -q '0600' agent/src/LocalActivityPulseStore.cpp
+          grep -q 'PRAGMA journal_mode=DELETE' agent/src/LocalActivityPulseStore.cpp
+          ! grep -q 'PRAGMA journal_mode=WAL' agent/src/LocalActivityPulseStore.cpp
+          grep -q 'read-only inspection creates no journal, WAL or SHM files' agent/tests/local_activity_pulse_store_test.cpp
           ! grep -Eq '#include .*Provider|#include .*OpenAI|#include .*Curl|#include .*HttpTransport|#include .*SecretSource|#include .*WakeIntent|#include .*ActionStore|#include .*TaskStore' $files
           ! grep -Eq 'consume\(' $files
           ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
