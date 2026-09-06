@@ -61,13 +61,17 @@ jobs:
           make --jobs=2 check
           make install
 
-      - name: Prove local observation slice has no external-effect authority
+      - name: Prove local observation slice has bounded evidence and no external-effect authority
         run: |
           set -eu
           files='agent/src/LocalContinuityObservation.cpp agent/src/LocalContinuityObservation.hpp agent/src/LocalContinuityObservationHandler.cpp agent/src/LocalContinuityObservationHandler.hpp'
           grep -q 'gaudere.continuity.local-observation.v1' agent/src/LocalContinuityObservation.hpp
+          grep -q 'anchor_checkpoint_result_sha256' agent/src/LocalContinuityObservation.hpp
+          grep -q 'predecessor_provider_action_id' agent/src/LocalContinuityObservation.hpp
+          grep -q 'historical_wake_sha256' agent/src/LocalContinuityObservation.hpp
           grep -q 'generation > max_generation' agent/src/LocalContinuityObservation.cpp
           grep -q 'context.task.input' agent/src/LocalContinuityObservationHandler.cpp
+          ! grep -Eq 'actions_total|actions_confirmed|wake_total|wake_fired|checkpoint_count|latest_checkpoint_task_id' agent/src/LocalContinuityObservation.cpp agent/src/LocalContinuityObservation.hpp
           ! grep -Eq 'Provider|OpenAI|Curl|HttpTransport|SecretSource|WakeIntentStore|ActionStore|consume\(' $files
           ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
           ! grep -Eq '(^|[^[:alnum:]_])exec(v|ve|vp|vpe|l|le|lp|lpe)?[[:space:]]*\(' $files

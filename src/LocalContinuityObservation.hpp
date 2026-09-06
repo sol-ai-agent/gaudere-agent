@@ -28,15 +28,21 @@ struct LocalContinuityObservationFacts {
     std::int64_t captured_at_ms = 0;
     std::optional<std::string> predecessor_observation_task_id;
     std::optional<std::string> predecessor_observation_result_sha256;
+
+    // Immutable seed anchor. The result hash is included in opportunity identity so
+    // a Task cannot be silently rebound to different checkpoint bytes.
     std::string anchor_checkpoint_task_id;
+    std::string anchor_checkpoint_result_sha256;
+
+    // Bounded durable evidence only. These values are obtainable through existing
+    // exact IDs/scopes; no global Task/Action/Wake enumeration is required.
+    std::string provider_scope;
     std::uint64_t provider_total = 0;
     std::uint64_t provider_limit = 0;
-    std::uint64_t actions_total = 0;
-    std::uint64_t actions_confirmed = 0;
-    std::uint64_t wake_total = 0;
-    std::uint64_t wake_fired = 0;
-    std::uint64_t checkpoint_count = 0;
-    std::string latest_checkpoint_task_id;
+    std::string predecessor_provider_action_id;
+    std::string audited_provider_action_id;
+    std::string historical_wake_scope;
+    std::string historical_wake_sha256;
 };
 
 struct LocalContinuityObservationInspection {
