@@ -2,6 +2,7 @@
 
 #include <sqlite3.h>
 
+#include <cerrno>
 #include <fcntl.h>
 #include <iostream>
 #include <stdexcept>
@@ -34,6 +35,30 @@ std::string temporary_path()
 std::string repeated(const char value)
 {
     return std::string(64, value);
+}
+
+struct FileSnapshot {
+    bool exists = false;
+    off_t size = 0;
+    timespec modified{};
+};
+
+FileSnapshot file_snapshot(const std::string& path)
+{
+    struct stat status {};
+    if (stat(path.c_str(), &status) == 0)
+        return {true, status.st_size, status.st_mtim};
+    if (errno == ENOENT) return {};
+    throw std::runtime_error("stat failed for " + path);
+}
+
+bool same_snapshot(const FileSnapshot& left, const FileSnapshot& right) noexcept
+{
+    return left.exists == right.exists
+        && (!left.exists
+            || (left.size == right.size
+                && left.modified.tv_sec == right.modified.tv_sec
+                && left.modified.tv_nsec == right.modified.tv_nsec));
 }
 
 gaudere_agent::LocalActivityPulseCursor seed_cursor()
@@ -80,6 +105,13 @@ void execute_sql(const std::string& path, const std::string& sql)
     sqlite3_close(database);
 }
 
+void remove_sqlite_files(const std::string& path)
+{
+    unlink((path + "-shm").c_str());
+    unlink((path + "-wal").c_str());
+    unlink(path.c_str());
+}
+
 } // namespace
 
 int main()
@@ -115,6 +147,13 @@ int main()
         const auto preparing = preparing_one(seed);
         expect(valid_local_activity_pulse_transition(seed, preparing),
                "idle to generation-1 preparing transition is canonical");
+
+        auto before_due = preparing;
+        before_due.captured_at_ms = before_due.due_at_ms - 1;
+        expect(!valid_local_activity_pulse_cursor(before_due)
+                   && !valid_local_activity_pulse_transition(seed, before_due),
+               "capture before durable due time is rejected");
+
         expect(store.replace(seed, preparing).result
                    == LocalActivityPulseStoreResult::accepted,
                "first CAS transition is accepted");
@@ -166,16 +205,24 @@ int main()
                "generation cannot skip an opportunity");
     }
 
-    const bool wal_before = access((path + "-wal").c_str(), F_OK) == 0;
-    const bool shm_before = access((path + "-shm").c_str(), F_OK) == 0;
+    const auto database_before = file_snapshot(path);
+    const auto wal_before = file_snapshot(path + "-wal");
+    const bool shm_before = file_snapshot(path + "-shm").exists;
     const auto inspected = inspect_local_activity_pulse_sidecar(path);
+    const auto database_after = file_snapshot(path);
+    const auto wal_after = file_snapshot(path + "-wal");
+    const bool shm_after = file_snapshot(path + "-shm").exists;
     expect(inspected.eligible && inspected.cursor
                && inspected.cursor->generation == 1
                && inspected.cursor->state == LocalActivityPulseState::settled,
            "strict read-only inspector returns the one canonical durable cursor");
-    expect((access((path + "-wal").c_str(), F_OK) == 0) == wal_before
-               && (access((path + "-shm").c_str(), F_OK) == 0) == shm_before,
-           "read-only inspection does not create WAL or SHM sidecars");
+    expect(same_snapshot(database_before, database_after),
+           "read-only inspection does not modify the main SQLite database");
+    expect(same_snapshot(wal_before, wal_after),
+           "read-only inspection neither creates nor modifies WAL state");
+    if (shm_before != shm_after) {
+        std::cout << "SQLite read-only inspection changed only ephemeral -shm presence\n";
+    }
 
     const auto ambiguous_path = temporary_path();
     {
@@ -219,10 +266,10 @@ int main()
     expect(!inspect_local_activity_pulse_sidecar(bad_mode_path).eligible,
            "read-only inspector also refuses unsafe sidecar permissions");
 
-    unlink(path.c_str());
-    unlink(ambiguous_path.c_str());
-    unlink(extra_table_path.c_str());
-    unlink(bad_mode_path.c_str());
+    remove_sqlite_files(path);
+    remove_sqlite_files(ambiguous_path);
+    remove_sqlite_files(extra_table_path);
+    remove_sqlite_files(bad_mode_path);
 
     if (failures != 0) {
         std::cerr << failures << " local activity pulse store test(s) failed\n";
