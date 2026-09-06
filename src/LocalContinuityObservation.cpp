@@ -20,6 +20,10 @@ using TaskStatus = gaudere::work::TaskStatus;
 constexpr std::size_t max_observation_bytes = 32 * 1024;
 constexpr std::uint32_t max_generation = 3;
 constexpr const char* checkpoint_prefix = "continuity.delta-checkpoint.v1:";
+constexpr const char* provider_scope = "provider.call:openai.responses";
+constexpr const char* provider_action_prefix =
+    "provider.call:openai.responses:cognition.current.v0:";
+constexpr const char* historical_wake_scope = "cognition.reflect.wake.v0";
 
 bool lowercase_sha256(const std::string& value) noexcept
 {
@@ -78,6 +82,13 @@ bool signed_nonnegative_field(const Json& value, const char* name, std::int64_t&
     return out >= 0;
 }
 
+bool string_field(const Json& value, const char* name, std::string& out)
+{
+    if (!value.contains(name) || !value.at(name).is_string()) return false;
+    out = value.at(name).get<std::string>();
+    return true;
+}
+
 bool nullable_string_field(const Json& value,
                            const char* name,
                            std::optional<std::string>& out)
@@ -101,25 +112,25 @@ Json nullable_string_json(const std::optional<std::string>& value)
 Json payload_json(const LocalContinuityObservationFacts& facts)
 {
     return Json{
-        {"actions_confirmed", facts.actions_confirmed},
-        {"actions_total", facts.actions_total},
+        {"audited_provider_action_id", facts.audited_provider_action_id},
+        {"anchor_checkpoint_result_sha256", facts.anchor_checkpoint_result_sha256},
         {"anchor_checkpoint_task_id", facts.anchor_checkpoint_task_id},
         {"captured_at_ms", facts.captured_at_ms},
-        {"checkpoint_count", facts.checkpoint_count},
         {"due_at_ms", facts.due_at_ms},
         {"generation", facts.generation},
+        {"historical_wake_scope", facts.historical_wake_scope},
+        {"historical_wake_sha256", facts.historical_wake_sha256},
         {"lateness_ms", facts.captured_at_ms - facts.due_at_ms},
-        {"latest_checkpoint_task_id", facts.latest_checkpoint_task_id},
         {"predecessor_observation_result_sha256",
          nullable_string_json(facts.predecessor_observation_result_sha256)},
         {"predecessor_observation_task_id",
          nullable_string_json(facts.predecessor_observation_task_id)},
+        {"predecessor_provider_action_id", facts.predecessor_provider_action_id},
         {"provider_limit", facts.provider_limit},
+        {"provider_scope", facts.provider_scope},
         {"provider_total", facts.provider_total},
         {"schema", local_continuity_observation_schema},
-        {"scope", local_continuity_observation_scope},
-        {"wake_fired", facts.wake_fired},
-        {"wake_total", facts.wake_total}
+        {"scope", local_continuity_observation_scope}
     };
 }
 
@@ -134,25 +145,28 @@ bool validate_facts(const LocalContinuityObservationFacts& facts,
         detail = "capture time precedes durable due time";
         return false;
     }
-    if (!prefixed_sha256(facts.anchor_checkpoint_task_id, checkpoint_prefix)) {
-        detail = "anchor checkpoint identity is not canonical";
+    if (!prefixed_sha256(facts.anchor_checkpoint_task_id, checkpoint_prefix)
+        || !lowercase_sha256(facts.anchor_checkpoint_result_sha256)) {
+        detail = "anchor checkpoint evidence is not canonical";
         return false;
     }
-    if (facts.checkpoint_count != 1
-        || facts.latest_checkpoint_task_id != facts.anchor_checkpoint_task_id) {
-        detail = "checkpoint continuity is not exactly the anchored checkpoint";
+    if (facts.provider_scope != provider_scope
+        || facts.provider_limit == 0
+        || facts.provider_total > facts.provider_limit) {
+        detail = "provider budget evidence is not canonical";
         return false;
     }
-    if (facts.provider_limit == 0 || facts.provider_total > facts.provider_limit) {
-        detail = "provider budget snapshot is invalid";
+    if (!prefixed_sha256(facts.predecessor_provider_action_id,
+                         provider_action_prefix)
+        || !prefixed_sha256(facts.audited_provider_action_id,
+                            provider_action_prefix)
+        || facts.predecessor_provider_action_id == facts.audited_provider_action_id) {
+        detail = "provider Action evidence is not two distinct canonical identities";
         return false;
     }
-    if (facts.actions_confirmed > facts.actions_total) {
-        detail = "confirmed Action count exceeds total";
-        return false;
-    }
-    if (facts.wake_fired > facts.wake_total) {
-        detail = "fired WakeIntent count exceeds total";
+    if (facts.historical_wake_scope != historical_wake_scope
+        || !lowercase_sha256(facts.historical_wake_sha256)) {
+        detail = "historical WakeIntent evidence is not canonical";
         return false;
     }
 
@@ -185,7 +199,7 @@ std::string local_continuity_observation_opportunity_identity(
         throw std::invalid_argument(detail);
 
     std::string identity;
-    identity.reserve(512);
+    identity.reserve(640);
     identity += "schema=";
     identity += local_continuity_observation_identity_schema;
     identity += "\nscope=";
@@ -193,6 +207,8 @@ std::string local_continuity_observation_opportunity_identity(
     identity += "\ngeneration=" + std::to_string(facts.generation);
     identity += "\ndue_at_ms=" + std::to_string(facts.due_at_ms);
     identity += "\nanchor_checkpoint_task_id=" + facts.anchor_checkpoint_task_id;
+    identity += "\nanchor_checkpoint_result_sha256="
+        + facts.anchor_checkpoint_result_sha256;
     identity += "\npredecessor_observation_task_id=";
     if (facts.predecessor_observation_task_id)
         identity += *facts.predecessor_observation_task_id;
@@ -252,29 +268,30 @@ LocalContinuityObservationInspection inspect_local_continuity_observation_payloa
             || !signed_nonnegative_field(parsed, "due_at_ms", facts.due_at_ms)
             || !signed_nonnegative_field(parsed, "captured_at_ms", facts.captured_at_ms)
             || !unsigned_field(parsed, "lateness_ms", lateness)
-            || !parsed.contains("anchor_checkpoint_task_id")
-            || !parsed.at("anchor_checkpoint_task_id").is_string()
+            || !string_field(parsed, "anchor_checkpoint_task_id",
+                             facts.anchor_checkpoint_task_id)
+            || !string_field(parsed, "anchor_checkpoint_result_sha256",
+                             facts.anchor_checkpoint_result_sha256)
             || !nullable_string_field(parsed, "predecessor_observation_task_id",
                                       facts.predecessor_observation_task_id)
-            || !nullable_string_field(parsed, "predecessor_observation_result_sha256",
+            || !nullable_string_field(parsed,
+                                      "predecessor_observation_result_sha256",
                                       facts.predecessor_observation_result_sha256)
+            || !string_field(parsed, "provider_scope", facts.provider_scope)
             || !unsigned_field(parsed, "provider_total", facts.provider_total)
             || !unsigned_field(parsed, "provider_limit", facts.provider_limit)
-            || !unsigned_field(parsed, "actions_total", facts.actions_total)
-            || !unsigned_field(parsed, "actions_confirmed", facts.actions_confirmed)
-            || !unsigned_field(parsed, "wake_total", facts.wake_total)
-            || !unsigned_field(parsed, "wake_fired", facts.wake_fired)
-            || !unsigned_field(parsed, "checkpoint_count", facts.checkpoint_count)
-            || !parsed.contains("latest_checkpoint_task_id")
-            || !parsed.at("latest_checkpoint_task_id").is_string()) {
+            || !string_field(parsed, "predecessor_provider_action_id",
+                             facts.predecessor_provider_action_id)
+            || !string_field(parsed, "audited_provider_action_id",
+                             facts.audited_provider_action_id)
+            || !string_field(parsed, "historical_wake_scope",
+                             facts.historical_wake_scope)
+            || !string_field(parsed, "historical_wake_sha256",
+                             facts.historical_wake_sha256)) {
             inspection.detail = "payload field types are invalid";
             return inspection;
         }
         facts.generation = static_cast<std::uint32_t>(generation);
-        facts.anchor_checkpoint_task_id =
-            parsed.at("anchor_checkpoint_task_id").get<std::string>();
-        facts.latest_checkpoint_task_id =
-            parsed.at("latest_checkpoint_task_id").get<std::string>();
 
         if (facts.captured_at_ms < facts.due_at_ms
             || lateness != static_cast<std::uint64_t>(facts.captured_at_ms - facts.due_at_ms)) {

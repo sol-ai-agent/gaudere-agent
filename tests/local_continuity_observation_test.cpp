@@ -19,6 +19,16 @@ void expect(const bool condition, const std::string& message)
     }
 }
 
+std::string repeated(const char value)
+{
+    return std::string(64, value);
+}
+
+std::string provider_action(const char value)
+{
+    return "provider.call:openai.responses:cognition.current.v0:" + repeated(value);
+}
+
 gaudere_agent::LocalContinuityObservationFacts generation_one()
 {
     gaudere_agent::LocalContinuityObservationFacts facts;
@@ -26,16 +36,15 @@ gaudere_agent::LocalContinuityObservationFacts generation_one()
     facts.due_at_ms = 1'000;
     facts.captured_at_ms = 1'250;
     facts.anchor_checkpoint_task_id =
-        "continuity.delta-checkpoint.v1:"
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        "continuity.delta-checkpoint.v1:" + repeated('a');
+    facts.anchor_checkpoint_result_sha256 = repeated('b');
+    facts.provider_scope = "provider.call:openai.responses";
     facts.provider_total = 10;
     facts.provider_limit = 12;
-    facts.actions_total = 10;
-    facts.actions_confirmed = 10;
-    facts.wake_total = 1;
-    facts.wake_fired = 1;
-    facts.checkpoint_count = 1;
-    facts.latest_checkpoint_task_id = facts.anchor_checkpoint_task_id;
+    facts.predecessor_provider_action_id = provider_action('c');
+    facts.audited_provider_action_id = provider_action('d');
+    facts.historical_wake_scope = "cognition.reflect.wake.v0";
+    facts.historical_wake_sha256 = repeated('e');
     return facts;
 }
 
@@ -51,9 +60,11 @@ int main()
     expect(inspection.eligible, "canonical generation-1 Task is accepted");
     expect(inspection.facts.generation == 1
                && inspection.facts.provider_total == 10
-               && inspection.facts.actions_confirmed == 10
-               && inspection.facts.wake_fired == 1,
-           "canonical durable facts survive inspection");
+               && inspection.facts.provider_scope == "provider.call:openai.responses"
+               && inspection.facts.predecessor_provider_action_id
+                    == provider_action('c')
+               && inspection.facts.historical_wake_sha256 == repeated('e'),
+           "bounded exact durable evidence survives inspection");
     expect(task.kind == local_continuity_observation_task_kind
                && task.input_content_type == local_continuity_observation_content_type,
            "Task kind and content type are exact");
@@ -61,19 +72,26 @@ int main()
     auto later_capture = facts;
     later_capture.captured_at_ms += 60'000;
     later_capture.provider_total = 11;
-    later_capture.actions_total = 11;
+    later_capture.audited_provider_action_id = provider_action('f');
+    later_capture.historical_wake_sha256 = repeated('1');
     const auto same_opportunity = make_local_continuity_observation_task(later_capture);
     expect(same_opportunity.id == task.id
                && same_opportunity.idempotency_key == task.idempotency_key,
-           "capture time and observed facts do not change opportunity identity");
+           "capture time and observed bounded evidence do not change opportunity identity");
     expect(same_opportunity.input != task.input,
-           "changed observed facts remain visible as a semantic conflict");
+           "changed observed evidence remains visible as a semantic conflict");
 
     auto changed_due = facts;
     changed_due.due_at_ms += 1;
     const auto different_opportunity = make_local_continuity_observation_task(changed_due);
     expect(different_opportunity.id != task.id,
            "durable due time participates in opportunity identity");
+
+    auto changed_anchor_hash = facts;
+    changed_anchor_hash.anchor_checkpoint_result_sha256 = repeated('2');
+    const auto different_anchor = make_local_continuity_observation_task(changed_anchor_hash);
+    expect(different_anchor.id != task.id,
+           "checkpoint result hash participates in opportunity identity");
 
     auto tampered = task;
     tampered.input += " ";
@@ -96,12 +114,44 @@ int main()
     expect(invalid_anchor_rejected,
            "non-canonical checkpoint anchor is rejected before Task creation");
 
+    bool invalid_provider_scope_rejected = false;
+    try {
+        auto bad = facts;
+        bad.provider_scope = "provider.call:anything";
+        (void)make_local_continuity_observation_task(bad);
+    } catch (const std::invalid_argument&) {
+        invalid_provider_scope_rejected = true;
+    }
+    expect(invalid_provider_scope_rejected,
+           "provider evidence is pinned to the bounded OpenAI budget scope");
+
+    bool duplicate_action_rejected = false;
+    try {
+        auto bad = facts;
+        bad.audited_provider_action_id = bad.predecessor_provider_action_id;
+        (void)make_local_continuity_observation_task(bad);
+    } catch (const std::invalid_argument&) {
+        duplicate_action_rejected = true;
+    }
+    expect(duplicate_action_rejected,
+           "observation requires two distinct canonical provider Action identities");
+
+    bool invalid_wake_scope_rejected = false;
+    try {
+        auto bad = facts;
+        bad.historical_wake_scope = "other.wake.scope";
+        (void)make_local_continuity_observation_task(bad);
+    } catch (const std::invalid_argument&) {
+        invalid_wake_scope_rejected = true;
+    }
+    expect(invalid_wake_scope_rejected,
+           "historical wake evidence is pinned to the one bounded scope");
+
     bool generation_one_predecessor_rejected = false;
     try {
         auto bad = facts;
         bad.predecessor_observation_task_id = task.id;
-        bad.predecessor_observation_result_sha256 =
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        bad.predecessor_observation_result_sha256 = repeated('3');
         (void)make_local_continuity_observation_task(bad);
     } catch (const std::invalid_argument&) {
         generation_one_predecessor_rejected = true;
@@ -114,8 +164,7 @@ int main()
     generation_two.due_at_ms = 100'000;
     generation_two.captured_at_ms = 100'100;
     generation_two.predecessor_observation_task_id = task.id;
-    generation_two.predecessor_observation_result_sha256 =
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    generation_two.predecessor_observation_result_sha256 = repeated('4');
     const auto second_task = make_local_continuity_observation_task(generation_two);
     expect(inspect_local_continuity_observation_task(second_task).eligible,
            "later generation requires and accepts exact predecessor evidence");
