@@ -1,0 +1,94 @@
+name: Local continuity observation provider-free proof
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-local-observation:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere dependency
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          case "$gaudere_ref" in
+            *[!0-9a-f]*|'') exit 1 ;;
+          esac
+          test "${#gaudere_ref}" -eq 40
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+
+      - name: Build and install Gaudere
+        run: |
+          set -eu
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove local observation slice has no external-effect authority
+        run: |
+          set -eu
+          files='agent/src/LocalContinuityObservation.cpp agent/src/LocalContinuityObservation.hpp agent/src/LocalContinuityObservationHandler.cpp agent/src/LocalContinuityObservationHandler.hpp'
+          grep -q 'gaudere.continuity.local-observation.v1' agent/src/LocalContinuityObservation.hpp
+          grep -q 'generation > max_generation' agent/src/LocalContinuityObservation.cpp
+          grep -q 'context.task.input' agent/src/LocalContinuityObservationHandler.cpp
+          ! grep -Eq 'Provider|OpenAI|Curl|HttpTransport|SecretSource|WakeIntentStore|ActionStore|consume\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])exec(v|ve|vp|vpe|l|le|lp|lpe)?[[:space:]]*\(' $files
+          ! grep -q 'LocalContinuityObservation' agent/src/main.cpp
+          ! grep -R -q 'continuity.local-observation' agent/deploy/quadlet
+
+      - name: Compile local continuity observation proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere) \
+            agent/tests/local_continuity_observation_test.cpp \
+            agent/src/LocalContinuityObservation.cpp \
+            agent/src/LocalContinuityObservationHandler.cpp \
+            agent/src/Sha256.cpp \
+            $(pkg-config --libs gaudere) \
+            -o /tmp/local-continuity-observation-test
+
+      - name: Run provider-free local observation proof
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/local-continuity-observation-test
