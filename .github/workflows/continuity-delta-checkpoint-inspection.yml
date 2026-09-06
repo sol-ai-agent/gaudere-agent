@@ -1,0 +1,64 @@
+name: Continuity delta checkpoint read-only inspection
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-checkpoint-inspection:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y gcc-c++ git json-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere headers
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+
+      - name: Prove inspector is strict, read-only and unwired
+        run: |
+          set -eu
+          files='agent/src/ContinuityDeltaCheckpointInspection.cpp agent/src/ContinuityDeltaCheckpointInspection.hpp'
+          grep -q 'inspect_succeeded_continuity_delta_checkpoint' agent/src/ContinuityDeltaCheckpointInspection.hpp
+          grep -q 'historical_wake_sha256' agent/src/ContinuityDeltaCheckpointInspection.hpp
+          grep -q 'inspect_canonical_cognition_decision' agent/src/ContinuityDeltaCheckpointInspection.cpp
+          grep -q 'snapshot_prefix = "continuity.resume-context-snapshot.v1:"' agent/src/ContinuityDeltaCheckpointInspection.cpp
+          grep -q 'action_key == expected' agent/src/ContinuityDeltaCheckpointInspection.cpp
+          ! grep -Eq 'TaskStore|ActionStore|WakeIntentStore|budget::Store|Provider|OpenAI|Curl|HttpTransport|SecretSource|consume\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
+          ! grep -q 'ContinuityDeltaCheckpointInspection' agent/src/main.cpp
+          ! grep -R -q 'ContinuityDeltaCheckpointInspection' agent/deploy/quadlet
+
+      - name: Compile read-only checkpoint inspector
+        run: |
+          set -eu
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src -Igaudere/include \
+            agent/tests/continuity_delta_checkpoint_inspection_test.cpp \
+            agent/src/ContinuityDeltaCheckpointInspection.cpp \
+            agent/src/CanonicalCognitionDecision.cpp \
+            agent/src/Sha256.cpp \
+            -o /tmp/continuity-delta-checkpoint-inspection-test
+
+      - name: Run read-only checkpoint inspector proof
+        run: /tmp/continuity-delta-checkpoint-inspection-test
