@@ -174,6 +174,14 @@ int main()
         settled.result_sha256 = repeated('f');
         expect(valid_local_activity_pulse_transition(preparing, settled),
                "preparing to settled transition is canonical");
+
+        auto rewritten_settlement = settled;
+        rewritten_settlement.due_at_ms += 1;
+        expect(valid_local_activity_pulse_cursor(rewritten_settlement)
+                   && !valid_local_activity_pulse_transition(
+                       preparing, rewritten_settlement),
+               "settlement cannot rewrite admitted opportunity timing");
+
         expect(store.replace(preparing, settled).result
                    == LocalActivityPulseStoreResult::accepted,
                "settlement CAS is accepted");
@@ -182,7 +190,8 @@ int main()
         preparing_two.revision = 3;
         preparing_two.generation = 2;
         preparing_two.state = LocalActivityPulseState::preparing;
-        preparing_two.due_at_ms = *settled.captured_at_ms + 86'400'000;
+        preparing_two.due_at_ms =
+            *settled.captured_at_ms + local_activity_pulse_cadence_ms;
         preparing_two.captured_at_ms = preparing_two.due_at_ms + 10;
         preparing_two.predecessor_observation_task_id = settled.task_id;
         preparing_two.predecessor_observation_result_sha256 =
@@ -191,7 +200,19 @@ int main()
             "continuity.local-observation.v1:" + repeated('1');
         preparing_two.result_sha256.reset();
         expect(valid_local_activity_pulse_transition(settled, preparing_two),
-               "settled generation advances by exactly one to preparing");
+               "settled generation advances by exactly one at captured+24h");
+
+        auto wrong_next_due = preparing_two;
+        wrong_next_due.due_at_ms += 1;
+        expect(valid_local_activity_pulse_cursor(wrong_next_due)
+                   && !valid_local_activity_pulse_transition(settled, wrong_next_due),
+               "next generation due time cannot drift from captured+24h");
+
+        auto wrong_predecessor = preparing_two;
+        wrong_predecessor.predecessor_observation_result_sha256 = repeated('2');
+        expect(valid_local_activity_pulse_cursor(wrong_predecessor)
+                   && !valid_local_activity_pulse_transition(settled, wrong_predecessor),
+               "next generation must chain the exact previous result hash");
 
         auto illegal_anchor = preparing_two;
         illegal_anchor.anchor_checkpoint_task_id =
@@ -203,6 +224,16 @@ int main()
         generation_jump.generation = 3;
         expect(!valid_local_activity_pulse_transition(settled, generation_jump),
                "generation cannot skip an opportunity");
+
+        auto blocked_rewrite = settled;
+        blocked_rewrite.revision = 3;
+        blocked_rewrite.state = LocalActivityPulseState::blocked;
+        blocked_rewrite.blocked_reason = "synthetic conflict";
+        blocked_rewrite.task_id =
+            "continuity.local-observation.v1:" + repeated('3');
+        expect(valid_local_activity_pulse_cursor(blocked_rewrite)
+                   && !valid_local_activity_pulse_transition(settled, blocked_rewrite),
+               "blocked state cannot rewrite settled semantic evidence");
     }
 
     const auto database_before = file_snapshot(path);
