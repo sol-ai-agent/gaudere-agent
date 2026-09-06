@@ -1,0 +1,105 @@
+name: Local activity pulse provider-free state machine
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-local-activity-pulse:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin Gaudere dependency
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          test "${#gaudere_ref}" -eq 40
+          test -z "$(printf '%s' "$gaudere_ref" | tr -d '0-9a-f')"
+          git -C gaudere checkout --detach "$gaudere_ref"
+          test "$(git -C gaudere rev-parse HEAD)" = "$gaudere_ref"
+
+      - name: Build and install Gaudere
+        run: |
+          set -eu
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove local pulse authority is provider-free and inert
+        run: |
+          set -eu
+          files='agent/src/LocalActivityPulse.cpp agent/src/LocalActivityPulse.hpp'
+          grep -q 'bool enabled = false' agent/src/LocalActivityPulse.hpp
+          grep -q 'after_preparing' agent/src/LocalActivityPulse.cpp
+          grep -q 'after_submit' agent/src/LocalActivityPulse.cpp
+          grep -q 'after_execute' agent/src/LocalActivityPulse.cpp
+          grep -q 'after_settlement' agent/src/LocalActivityPulse.cpp
+          grep -q 'local_continuity_observation_task_id' agent/src/LocalActivityPulse.cpp
+          grep -q 'budget_store.snapshot' agent/src/LocalActivityPulse.cpp
+          ! grep -Eq 'ProviderTaskHandler|OpenAIActivation|CurlHttpTransport|HttpTransport|FileSecretSource|SecretSource|CurrentCognitionCycle|AutonomousCognitionPulse|ResumeContextSnapshotRecorder' $files
+          ! grep -Eq 'consume[[:space:]]*\(' $files
+          ! grep -Eq 'wake_store_?\.(accept|reconcile|revoke)[[:space:]]*\(' $files
+          ! grep -Eq 'action_store_?\.save[[:space:]]*\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])exec(v|ve|vp|vpe|l|le|lp|lpe)?[[:space:]]*\(' $files
+          ! grep -q 'LocalActivityPulse' agent/src/main.cpp
+          ! grep -R -q 'LocalActivityPulse' agent/deploy/quadlet
+
+      - name: Compile local activity pulse proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src $(pkg-config --cflags gaudere gaudere-persistence-sqlite) \
+            agent/tests/local_activity_pulse_test.cpp \
+            agent/src/LocalActivityPulse.cpp \
+            agent/src/LocalActivityPulseStore.cpp \
+            agent/src/LocalActivityPulseSidecarInspection.cpp \
+            agent/src/LocalContinuityObservation.cpp \
+            agent/src/LocalContinuityObservationHandler.cpp \
+            agent/src/ContinuityDeltaCheckpointInspection.cpp \
+            agent/src/CanonicalCognitionDecision.cpp \
+            agent/src/TaskExecutor.cpp \
+            agent/src/Sha256.cpp \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
+            -o /tmp/local-activity-pulse-test
+
+      - name: Run provider-free crash and boundedness proof
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/local-activity-pulse-test

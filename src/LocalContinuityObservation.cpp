@@ -109,6 +109,58 @@ Json nullable_string_json(const std::optional<std::string>& value)
     return value ? Json(*value) : Json(nullptr);
 }
 
+LocalContinuityObservationOpportunity opportunity_from_facts(
+    const LocalContinuityObservationFacts& facts) noexcept
+{
+    LocalContinuityObservationOpportunity opportunity;
+    opportunity.generation = facts.generation;
+    opportunity.due_at_ms = facts.due_at_ms;
+    opportunity.predecessor_observation_task_id =
+        facts.predecessor_observation_task_id;
+    opportunity.predecessor_observation_result_sha256 =
+        facts.predecessor_observation_result_sha256;
+    opportunity.anchor_checkpoint_task_id = facts.anchor_checkpoint_task_id;
+    opportunity.anchor_checkpoint_result_sha256 =
+        facts.anchor_checkpoint_result_sha256;
+    return opportunity;
+}
+
+bool validate_opportunity(const LocalContinuityObservationOpportunity& opportunity,
+                          std::string& detail) noexcept
+{
+    if (opportunity.generation == 0 || opportunity.generation > max_generation) {
+        detail = "generation is outside bounded range 1..3";
+        return false;
+    }
+    if (opportunity.due_at_ms < 0) {
+        detail = "due time precedes Unix epoch";
+        return false;
+    }
+    if (!prefixed_sha256(opportunity.anchor_checkpoint_task_id, checkpoint_prefix)
+        || !lowercase_sha256(opportunity.anchor_checkpoint_result_sha256)) {
+        detail = "anchor checkpoint evidence is not canonical";
+        return false;
+    }
+    if (opportunity.generation == 1) {
+        if (opportunity.predecessor_observation_task_id
+            || opportunity.predecessor_observation_result_sha256) {
+            detail = "generation 1 must not claim a predecessor observation";
+            return false;
+        }
+    } else {
+        if (!opportunity.predecessor_observation_task_id
+            || !opportunity.predecessor_observation_result_sha256
+            || !prefixed_sha256(*opportunity.predecessor_observation_task_id,
+                                local_continuity_observation_task_prefix)
+            || !lowercase_sha256(
+                *opportunity.predecessor_observation_result_sha256)) {
+            detail = "later generation predecessor evidence is not canonical";
+            return false;
+        }
+    }
+    return true;
+}
+
 Json payload_json(const LocalContinuityObservationFacts& facts)
 {
     return Json{
@@ -137,17 +189,10 @@ Json payload_json(const LocalContinuityObservationFacts& facts)
 bool validate_facts(const LocalContinuityObservationFacts& facts,
                     std::string& detail) noexcept
 {
-    if (facts.generation == 0 || facts.generation > max_generation) {
-        detail = "generation is outside bounded range 1..3";
+    if (!validate_opportunity(opportunity_from_facts(facts), detail))
         return false;
-    }
-    if (facts.due_at_ms < 0 || facts.captured_at_ms < facts.due_at_ms) {
+    if (facts.captured_at_ms < facts.due_at_ms) {
         detail = "capture time precedes durable due time";
-        return false;
-    }
-    if (!prefixed_sha256(facts.anchor_checkpoint_task_id, checkpoint_prefix)
-        || !lowercase_sha256(facts.anchor_checkpoint_result_sha256)) {
-        detail = "anchor checkpoint evidence is not canonical";
         return false;
     }
     if (facts.provider_scope != provider_scope
@@ -169,33 +214,22 @@ bool validate_facts(const LocalContinuityObservationFacts& facts,
         detail = "historical WakeIntent evidence is not canonical";
         return false;
     }
-
-    if (facts.generation == 1) {
-        if (facts.predecessor_observation_task_id
-            || facts.predecessor_observation_result_sha256) {
-            detail = "generation 1 must not claim a predecessor observation";
-            return false;
-        }
-    } else {
-        if (!facts.predecessor_observation_task_id
-            || !facts.predecessor_observation_result_sha256
-            || !prefixed_sha256(*facts.predecessor_observation_task_id,
-                                local_continuity_observation_task_prefix)
-            || !lowercase_sha256(*facts.predecessor_observation_result_sha256)) {
-            detail = "later generation predecessor evidence is not canonical";
-            return false;
-        }
-    }
     return true;
 }
 
 } // namespace
 
+LocalContinuityObservationOpportunity local_continuity_observation_opportunity(
+    const LocalContinuityObservationFacts& facts) noexcept
+{
+    return opportunity_from_facts(facts);
+}
+
 std::string local_continuity_observation_opportunity_identity(
-    const LocalContinuityObservationFacts& facts)
+    const LocalContinuityObservationOpportunity& opportunity)
 {
     std::string detail;
-    if (!validate_facts(facts, detail))
+    if (!validate_opportunity(opportunity, detail))
         throw std::invalid_argument(detail);
 
     std::string identity;
@@ -204,25 +238,47 @@ std::string local_continuity_observation_opportunity_identity(
     identity += local_continuity_observation_identity_schema;
     identity += "\nscope=";
     identity += local_continuity_observation_scope;
-    identity += "\ngeneration=" + std::to_string(facts.generation);
-    identity += "\ndue_at_ms=" + std::to_string(facts.due_at_ms);
-    identity += "\nanchor_checkpoint_task_id=" + facts.anchor_checkpoint_task_id;
+    identity += "\ngeneration=" + std::to_string(opportunity.generation);
+    identity += "\ndue_at_ms=" + std::to_string(opportunity.due_at_ms);
+    identity += "\nanchor_checkpoint_task_id="
+        + opportunity.anchor_checkpoint_task_id;
     identity += "\nanchor_checkpoint_result_sha256="
-        + facts.anchor_checkpoint_result_sha256;
+        + opportunity.anchor_checkpoint_result_sha256;
     identity += "\npredecessor_observation_task_id=";
-    if (facts.predecessor_observation_task_id)
-        identity += *facts.predecessor_observation_task_id;
+    if (opportunity.predecessor_observation_task_id)
+        identity += *opportunity.predecessor_observation_task_id;
     identity += "\npredecessor_observation_result_sha256=";
-    if (facts.predecessor_observation_result_sha256)
-        identity += *facts.predecessor_observation_result_sha256;
+    if (opportunity.predecessor_observation_result_sha256)
+        identity += *opportunity.predecessor_observation_result_sha256;
     identity += '\n';
     return identity;
+}
+
+std::string local_continuity_observation_opportunity_identity(
+    const LocalContinuityObservationFacts& facts)
+{
+    std::string detail;
+    if (!validate_facts(facts, detail))
+        throw std::invalid_argument(detail);
+    return local_continuity_observation_opportunity_identity(
+        opportunity_from_facts(facts));
+}
+
+std::string local_continuity_observation_task_id(
+    const LocalContinuityObservationOpportunity& opportunity)
+{
+    return std::string{local_continuity_observation_task_prefix}
+        + sha256_hex(local_continuity_observation_opportunity_identity(opportunity));
 }
 
 gaudere::work::Task make_local_continuity_observation_task(
     const LocalContinuityObservationFacts& facts)
 {
-    const auto identity = local_continuity_observation_opportunity_identity(facts);
+    std::string detail;
+    if (!validate_facts(facts, detail))
+        throw std::invalid_argument(detail);
+    const auto opportunity = opportunity_from_facts(facts);
+    const auto identity = local_continuity_observation_opportunity_identity(opportunity);
     const auto identity_sha = sha256_hex(identity);
     const auto payload = payload_json(facts).dump();
     if (payload.size() > max_observation_bytes)
