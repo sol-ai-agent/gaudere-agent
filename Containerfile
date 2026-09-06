@@ -69,13 +69,17 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-current-cognition /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-autonomous-cognition-pulse /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-continuity-delta-checkpoint /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-local-activity-seed /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-local-activity-status /opt/runtime/bin/ \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1-prepare \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1 \
     && test -x /opt/runtime/bin/gaudere-current-cognition-prepare \
     && test -x /opt/runtime/bin/gaudere-current-cognition \
     && test -x /opt/runtime/bin/gaudere-autonomous-cognition-pulse \
-    && test -x /opt/runtime/bin/gaudere-continuity-delta-checkpoint
+    && test -x /opt/runtime/bin/gaudere-continuity-delta-checkpoint \
+    && test -x /opt/runtime/bin/gaudere-local-activity-seed \
+    && test -x /opt/runtime/bin/gaudere-local-activity-status
 
 FROM registry.fedoraproject.org/fedora:44
 
@@ -100,6 +104,8 @@ RUN test -x /usr/local/bin/gaudere-resume-after-wake \
     && test -x /usr/local/bin/gaudere-current-cognition \
     && test -x /usr/local/bin/gaudere-autonomous-cognition-pulse \
     && test -x /usr/local/bin/gaudere-continuity-delta-checkpoint \
+    && test -x /usr/local/bin/gaudere-local-activity-seed \
+    && test -x /usr/local/bin/gaudere-local-activity-status \
     && echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
     && ldconfig
 
