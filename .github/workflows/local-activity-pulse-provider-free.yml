@@ -84,7 +84,7 @@ jobs:
           set -eu
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
           c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
-            -Iagent/src $(pkg-config --cflags gaudere) \
+            -Iagent/src $(pkg-config --cflags gaudere gaudere-persistence-sqlite) \
             agent/tests/local_activity_pulse_test.cpp \
             agent/src/LocalActivityPulse.cpp \
             agent/src/LocalActivityPulseStore.cpp \
@@ -95,7 +95,7 @@ jobs:
             agent/src/CanonicalCognitionDecision.cpp \
             agent/src/TaskExecutor.cpp \
             agent/src/Sha256.cpp \
-            $(pkg-config --libs gaudere) -lsqlite3 \
+            $(pkg-config --libs gaudere-persistence-sqlite gaudere) -lsqlite3 \
             -o /tmp/local-activity-pulse-test
 
       - name: Run provider-free crash and boundedness proof
