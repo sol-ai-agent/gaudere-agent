@@ -12,6 +12,7 @@ namespace gaudere_agent {
 inline constexpr const char* local_activity_pulse_scope =
     "continuity.local-observation-pulse.v1";
 inline constexpr int local_activity_pulse_sidecar_schema = 1;
+inline constexpr std::int64_t local_activity_pulse_cadence_ms = 86'400'000;
 
 enum class LocalActivityPulseState {
     idle = 0,
