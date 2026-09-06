@@ -22,6 +22,16 @@ inline constexpr const char* local_continuity_observation_task_prefix =
 inline constexpr const char* local_continuity_observation_identity_schema =
     "gaudere.continuity.local-observation.identity.v1";
 
+/** Immutable fields that identify one admitted observation opportunity. */
+struct LocalContinuityObservationOpportunity {
+    std::uint32_t generation = 0;
+    std::int64_t due_at_ms = 0;
+    std::optional<std::string> predecessor_observation_task_id;
+    std::optional<std::string> predecessor_observation_result_sha256;
+    std::string anchor_checkpoint_task_id;
+    std::string anchor_checkpoint_result_sha256;
+};
+
 struct LocalContinuityObservationFacts {
     std::uint32_t generation = 0;
     std::int64_t due_at_ms = 0;
@@ -52,8 +62,21 @@ struct LocalContinuityObservationInspection {
     std::string canonical_payload;
 };
 
+[[nodiscard]] LocalContinuityObservationOpportunity
+local_continuity_observation_opportunity(
+    const LocalContinuityObservationFacts& facts) noexcept;
+
+/** Canonical identity bytes for one opportunity, independent of captured facts. */
+[[nodiscard]] std::string local_continuity_observation_opportunity_identity(
+    const LocalContinuityObservationOpportunity& opportunity);
+
+/** Compatibility overload for a fully captured observation. */
 [[nodiscard]] std::string local_continuity_observation_opportunity_identity(
     const LocalContinuityObservationFacts& facts);
+
+/** Deterministic Task ID that may be reserved before evidence capture. */
+[[nodiscard]] std::string local_continuity_observation_task_id(
+    const LocalContinuityObservationOpportunity& opportunity);
 
 [[nodiscard]] gaudere::work::Task make_local_continuity_observation_task(
     const LocalContinuityObservationFacts& facts);
