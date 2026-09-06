@@ -60,7 +60,11 @@ bool unsigned_field(const Json& value, const char* name, std::uint64_t& out)
 {
     if (!value.contains(name)) return false;
     const auto& field = value.at(name);
-    if (!(field.is_number_unsigned() || field.is_number_integer())) return false;
+    if (field.is_number_unsigned()) {
+        out = field.get<std::uint64_t>();
+        return true;
+    }
+    if (!field.is_number_integer()) return false;
     const auto signed_value = field.get<std::int64_t>();
     if (signed_value < 0) return false;
     out = static_cast<std::uint64_t>(signed_value);
@@ -89,6 +93,11 @@ bool nullable_string_field(const Json& value,
     return true;
 }
 
+Json nullable_string_json(const std::optional<std::string>& value)
+{
+    return value ? Json(*value) : Json(nullptr);
+}
+
 Json payload_json(const LocalContinuityObservationFacts& facts)
 {
     return Json{
@@ -102,11 +111,9 @@ Json payload_json(const LocalContinuityObservationFacts& facts)
         {"lateness_ms", facts.captured_at_ms - facts.due_at_ms},
         {"latest_checkpoint_task_id", facts.latest_checkpoint_task_id},
         {"predecessor_observation_result_sha256",
-         facts.predecessor_observation_result_sha256
-             ? Json{*facts.predecessor_observation_result_sha256} : Json{nullptr}},
+         nullable_string_json(facts.predecessor_observation_result_sha256)},
         {"predecessor_observation_task_id",
-         facts.predecessor_observation_task_id
-             ? Json{*facts.predecessor_observation_task_id} : Json{nullptr}},
+         nullable_string_json(facts.predecessor_observation_task_id)},
         {"provider_limit", facts.provider_limit},
         {"provider_total", facts.provider_total},
         {"schema", local_continuity_observation_schema},
