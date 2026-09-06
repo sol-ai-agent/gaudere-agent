@@ -21,7 +21,6 @@ gaudere_agent_SOURCES = \
 	BoundedReflection.hpp \
 	CanonicalCognitionDecision.cpp \
 	CanonicalCognitionDecision.hpp \
-	ContinuityDeltaCheckpoint.cpp \
 	ContinuityDeltaCheckpoint.hpp \
 	ContinuityDeltaCheckpointInspection.cpp \
 	ContinuityDeltaCheckpointInspection.hpp \
@@ -287,7 +286,6 @@ gaudere_local_activity_seed_SOURCES = \
 	local_activity_seed_main.cpp \
 	CanonicalCognitionDecision.cpp \
 	CanonicalCognitionDecision.hpp \
-	ContinuityDeltaCheckpoint.cpp \
 	ContinuityDeltaCheckpoint.hpp \
 	ContinuityDeltaCheckpointInspection.cpp \
 	ContinuityDeltaCheckpointInspection.hpp \
