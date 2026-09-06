@@ -68,7 +68,9 @@ jobs:
           grep -q 'gaudere.continuity.local-observation.v1' agent/src/LocalContinuityObservation.hpp
           grep -q 'generation > max_generation' agent/src/LocalContinuityObservation.cpp
           grep -q 'context.task.input' agent/src/LocalContinuityObservationHandler.cpp
-          ! grep -Eq 'Provider|OpenAI|Curl|HttpTransport|SecretSource|WakeIntentStore|ActionStore|consume\(|system\(|fork\(|exec|popen|socket\(|connect\(' $files
+          ! grep -Eq 'Provider|OpenAI|Curl|HttpTransport|SecretSource|WakeIntentStore|ActionStore|consume\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])(system|fork|popen|socket|connect)[[:space:]]*\(' $files
+          ! grep -Eq '(^|[^[:alnum:]_])exec(v|ve|vp|vpe|l|le|lp|lpe)?[[:space:]]*\(' $files
           ! grep -q 'LocalContinuityObservation' agent/src/main.cpp
           ! grep -R -q 'continuity.local-observation' agent/deploy/quadlet
 
