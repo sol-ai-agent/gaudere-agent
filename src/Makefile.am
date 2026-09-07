@@ -24,4 +24,5 @@ gaudere_goose_tools_mcp_SOURCES = \
 	Sha256.cpp \
 	Sha256.hpp
 
-gaudere_goose_tools_mcp_LDADD = $(JSON_LIBS) -lsqlite3 -pthread
+gaudere_goose_tools_mcp_LDADD = $(JSON_LIBS) -lsqlite3
+gaudere_goose_tools_mcp_LDFLAGS = -pthread
