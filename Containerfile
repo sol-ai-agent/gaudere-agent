@@ -71,6 +71,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-continuity-delta-checkpoint /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-activity-seed /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-activity-status /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-goose-tools-mcp /opt/runtime/bin/ \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1-prepare \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1 \
@@ -79,23 +80,46 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && test -x /opt/runtime/bin/gaudere-autonomous-cognition-pulse \
     && test -x /opt/runtime/bin/gaudere-continuity-delta-checkpoint \
     && test -x /opt/runtime/bin/gaudere-local-activity-seed \
-    && test -x /opt/runtime/bin/gaudere-local-activity-status
+    && test -x /opt/runtime/bin/gaudere-local-activity-status \
+    && test -x /opt/runtime/bin/gaudere-goose-tools-mcp
+
+# Goose is pinned independently of the Gaudere source tree. Keep the download
+# and archive verification in a disposable stage so the final runtime image does
+# not need curl/tar merely to carry the local reasoning engine.
+FROM registry.fedoraproject.org/fedora:44 AS goose-cli
+ARG GOOSE_VERSION=1.49.0
+ARG GOOSE_ARCHIVE_SHA256=38d5035e4a786f6b62abe0cd0f2bef7e6ac8041e3e006e2000561dd8df6aead3
+RUN dnf install -y curl findutils gzip tar coreutils \
+    && dnf clean all \
+    && curl --fail --location --retry 3 \
+       --output /tmp/goose.tar.gz \
+       "https://github.com/aaif-goose/goose/releases/download/v${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.gz" \
+    && printf '%s  %s\n' "${GOOSE_ARCHIVE_SHA256}" /tmp/goose.tar.gz | sha256sum -c - \
+    && mkdir -p /tmp/goose-unpack /opt/goose \
+    && tar -xzf /tmp/goose.tar.gz -C /tmp/goose-unpack \
+    && test "$(find /tmp/goose-unpack -type f -name goose -perm /111 | wc -l)" -eq 1 \
+    && GOOSE_BIN="$(find /tmp/goose-unpack -type f -name goose -perm /111 -print -quit)" \
+    && install -m 0755 "${GOOSE_BIN}" /opt/goose/goose \
+    && /opt/goose/goose --version
 
 FROM registry.fedoraproject.org/fedora:44
 
 ARG GAUDERE_AGENT_REF
 ARG GAUDERE_REF
+ARG GOOSE_VERSION=1.49.0
 
 LABEL org.opencontainers.image.source="https://github.com/sol-ai-agent/gaudere-agent" \
       org.opencontainers.image.revision="${GAUDERE_AGENT_REF}" \
       io.gaudere.agent.revision="${GAUDERE_AGENT_REF}" \
-      io.gaudere.core.revision="${GAUDERE_REF}"
+      io.gaudere.core.revision="${GAUDERE_REF}" \
+      io.gaudere.goose.version="${GOOSE_VERSION}"
 
 RUN dnf install -y libcurl libstdc++ sqlite-libs \
     && dnf clean all \
     && useradd --uid 1000 --create-home --shell /sbin/nologin gaudere
 
 COPY --from=builder /opt/runtime/ /usr/local/
+COPY --from=goose-cli /opt/goose/goose /usr/local/bin/goose
 
 RUN test -x /usr/local/bin/gaudere-resume-after-wake \
     && test -x /usr/local/bin/gaudere-resume-after-wake-v1-prepare \
@@ -106,6 +130,9 @@ RUN test -x /usr/local/bin/gaudere-resume-after-wake \
     && test -x /usr/local/bin/gaudere-continuity-delta-checkpoint \
     && test -x /usr/local/bin/gaudere-local-activity-seed \
     && test -x /usr/local/bin/gaudere-local-activity-status \
+    && test -x /usr/local/bin/gaudere-goose-tools-mcp \
+    && test -x /usr/local/bin/goose \
+    && /usr/local/bin/goose --version \
     && echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
     && ldconfig
 

@@ -13,6 +13,9 @@
 #include "LocalActivityPulseService.hpp"
 #include "LocalActivityPulseStore.hpp"
 #include "LocalEchoHandler.hpp"
+#include "LocalGooseCognitionHandler.hpp"
+#include "LocalGooseCognitionService.hpp"
+#include "LocalGooseRunner.hpp"
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
 #include "OpenAIOneShot.hpp"
@@ -34,6 +37,7 @@
 #include <gaudere/work/Runtime.hpp>
 
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -69,6 +73,9 @@ struct Options {
     std::string control_socket;
     std::string autonomous_pulse_sidecar;
     std::string local_activity_sidecar;
+    std::string local_goose_model;
+    std::string local_goose_model_sha256;
+    std::string local_goose_governance;
 };
 
 void usage(const char* program)
@@ -83,7 +90,26 @@ void usage(const char* program)
         << "[--autonomous-pulse-sidecar PATH] "
         << "[--autonomous-pulse-provider] "
         << "[--local-activity-sidecar PATH] "
+        << "[--local-goose-model PATH --local-goose-model-sha256 SHA256 "
+        << "--local-goose-governance PATH] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
+}
+
+bool canonical_sha256(const std::string& value)
+{
+    if (value.size() != 64) return false;
+    for (const unsigned char c : value) {
+        if (!std::isxdigit(c)) return false;
+        if (c >= 'A' && c <= 'F') return false;
+    }
+    return true;
+}
+
+bool local_goose_requested(const Options& options)
+{
+    return !options.local_goose_model.empty()
+        || !options.local_goose_model_sha256.empty()
+        || !options.local_goose_governance.empty();
 }
 
 Options parse_options(const int argc, char* argv[])
@@ -126,6 +152,12 @@ Options parse_options(const int argc, char* argv[])
             options.autonomous_pulse_provider = true;
         } else if (argument == "--local-activity-sidecar" && index + 1 < argc) {
             options.local_activity_sidecar = argv[++index];
+        } else if (argument == "--local-goose-model" && index + 1 < argc) {
+            options.local_goose_model = argv[++index];
+        } else if (argument == "--local-goose-model-sha256" && index + 1 < argc) {
+            options.local_goose_model_sha256 = argv[++index];
+        } else if (argument == "--local-goose-governance" && index + 1 < argc) {
+            options.local_goose_governance = argv[++index];
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -171,6 +203,10 @@ Options parse_options(const int argc, char* argv[])
         throw std::invalid_argument(
             "--local-activity-sidecar is only valid in service mode");
     }
+    if (local_goose_requested(options) && modes != 0) {
+        throw std::invalid_argument(
+            "local Goose cognition is only valid in service mode");
+    }
     if (options.autonomous_pulse_provider && modes != 0) {
         throw std::invalid_argument(
             "--autonomous-pulse-provider is only valid in service mode");
@@ -195,6 +231,32 @@ Options parse_options(const int argc, char* argv[])
         && !gaudere_agent::parse_local_wait_duration(options.text)) {
         throw std::invalid_argument(
             "--enqueue-wait MS must be an integer from 1 to 5000");
+    }
+
+    if (local_goose_requested(options)) {
+        if (options.local_goose_model.empty()
+            || options.local_goose_model_sha256.empty()
+            || options.local_goose_governance.empty()) {
+            throw std::invalid_argument(
+                "local Goose requires model path, model SHA256, and governance path together");
+        }
+        if (options.local_activity_sidecar.empty()) {
+            throw std::invalid_argument(
+                "local Goose requires --local-activity-sidecar PATH");
+        }
+        if (options.control_socket.empty()) {
+            throw std::invalid_argument(
+                "local Goose typed tools require --control-socket PATH");
+        }
+        if (options.local_goose_model.front() != '/'
+            || options.local_goose_governance.front() != '/') {
+            throw std::invalid_argument(
+                "local Goose model/governance paths must be absolute");
+        }
+        if (!canonical_sha256(options.local_goose_model_sha256)) {
+            throw std::invalid_argument(
+                "local Goose model SHA256 must be 64 lowercase hexadecimal characters");
+        }
     }
 
     if (!options.openai_enabled
@@ -318,6 +380,28 @@ void require_distinct_regular_local_activity_sidecar(const Options& options)
     }
 }
 
+void require_distinct_local_goose_governance(const Options& options)
+{
+    if (!local_goose_requested(options)) return;
+    const auto governance = std::filesystem::weakly_canonical(
+        options.local_goose_governance);
+    const auto state = std::filesystem::weakly_canonical(options.state_path);
+    const auto activity = std::filesystem::weakly_canonical(
+        options.local_activity_sidecar);
+    if (governance == state || governance == activity) {
+        throw std::invalid_argument(
+            "local Goose governance sidecar must be distinct from state/pulse databases");
+    }
+    if (!options.autonomous_pulse_sidecar.empty()) {
+        const auto autonomous = std::filesystem::weakly_canonical(
+            options.autonomous_pulse_sidecar);
+        if (governance == autonomous) {
+            throw std::invalid_argument(
+                "local Goose governance sidecar must be distinct from autonomous pulse database");
+        }
+    }
+}
+
 sigset_t block_control_signals()
 {
     sigset_t signals;
@@ -431,6 +515,7 @@ int main(int argc, char* argv[])
         std::cout << std::unitbuf;
         require_distinct_regular_pulse_sidecar(options);
         require_distinct_regular_local_activity_sidecar(options);
+        require_distinct_local_goose_governance(options);
 
         sigset_t signals{};
         if (!options.openai_once) {
@@ -794,6 +879,88 @@ int main(int argc, char* argv[])
                           << options.control_socket << '\n';
             }
 
+            std::atomic_bool local_goose_stop_requested{false};
+            std::unique_ptr<gaudere_agent::PosixLocalGooseRunner>
+                local_goose_runner;
+            std::unique_ptr<gaudere_agent::LocalGooseCognitionHandler>
+                local_goose_handler;
+            std::unique_ptr<gaudere_agent::LocalGooseCognitionService>
+                local_goose_service;
+            bool local_goose_monitoring = false;
+
+            const auto pump_local_goose_tools = [&]() {
+                if (local_goose_stop_requested.load()) {
+                    throw std::runtime_error("shutdown requested during local Goose cognition");
+                }
+                if (!control_processor || !control_mailbox) return;
+                const auto control = control_processor->process(*control_mailbox);
+                if (control.work_may_be_pending) {
+                    work_controller.notify_work();
+                }
+                if (control.wake_deadline_may_have_changed) {
+                    work_controller.refresh_deadlines();
+                }
+            };
+
+            if (local_goose_requested(options)) {
+                if (!local_activity_store) {
+                    throw std::runtime_error(
+                        "local Goose requires initialized local activity store");
+                }
+                local_goose_runner =
+                    std::make_unique<gaudere_agent::PosixLocalGooseRunner>(
+                        pump_local_goose_tools);
+                local_goose_handler =
+                    std::make_unique<gaudere_agent::LocalGooseCognitionHandler>(
+                        *local_goose_runner,
+                        options.local_goose_model,
+                        options.local_goose_model_sha256,
+                        true,
+                        options.control_socket,
+                        options.local_goose_governance);
+                local_goose_service =
+                    std::make_unique<gaudere_agent::LocalGooseCognitionService>(
+                        [&local_activity_store]() {
+                            if (!local_activity_store) {
+                                return std::optional<gaudere_agent::LocalActivityPulseCursor>{};
+                            }
+                            return local_activity_store->find(
+                                gaudere_agent::local_activity_pulse_scope);
+                        },
+                        task_store,
+                        work_runtime,
+                        *local_goose_handler,
+                        options.local_goose_model_sha256);
+                std::cout
+                    << "gaudere-agent: local Goose cognition enabled model="
+                    << options.local_goose_model
+                    << " governance=" << options.local_goose_governance
+                    << " typed_tools=true provider=local\n";
+            }
+
+            const auto step_local_goose = [&]() {
+                if (!local_goose_service) return true;
+                const auto step = local_goose_service->step();
+                local_goose_monitoring = step.healthy && step.monitoring;
+                if (step.task) {
+                    std::cout << "gaudere-agent: local Goose task="
+                              << step.task->id << '\n';
+                }
+                if (step.decision) {
+                    std::cout << "gaudere-agent: local Goose decision="
+                              << step.decision->decision << '\n';
+                }
+                if (!step.detail.empty()) {
+                    std::cout << "gaudere-agent: local Goose: "
+                              << step.detail << '\n';
+                }
+                if (!step.healthy) {
+                    std::cerr
+                        << "gaudere-agent: local Goose monitoring disabled\n";
+                }
+                return step.healthy;
+            };
+
             std::cout << "gaudere-agent: running\n";
 
             int received = 0;
@@ -810,8 +977,26 @@ int main(int argc, char* argv[])
                     } else if (!internal_wake.load()) {
                         received = signal;
                     }
+                    local_goose_stop_requested.store(true);
                     work_controller.stop();
                 });
+            }
+
+            if (local_goose_service && !step_local_goose()) {
+                local_goose_stop_requested.store(true);
+                if (control_server) {
+                    control_server->stop();
+                    control_server->join();
+                }
+                work_controller.stop();
+                if (signal_waiter.joinable()) {
+                    internal_wake.store(true);
+                    if (pthread_kill(signal_waiter.native_handle(), SIGUSR1) != 0) {
+                        signal_wait_failed.store(true);
+                    }
+                    signal_waiter.join();
+                }
+                throw std::runtime_error("local Goose startup failed");
             }
 
             bool work_conflict = false;
@@ -835,6 +1020,7 @@ int main(int argc, char* argv[])
                 }
                 if (result == gaudere_agent::WorkCycleResult::state_conflict) {
                     work_conflict = true;
+                    local_goose_stop_requested.store(true);
                     work_controller.stop();
                     if (signal_waiter.joinable()) {
                         internal_wake.store(true);
@@ -851,8 +1037,12 @@ int main(int argc, char* argv[])
                 if (local_activity_service && local_activity_monitoring) {
                     static_cast<void>(step_local_activity());
                 }
+                if (local_goose_service && local_goose_monitoring) {
+                    static_cast<void>(step_local_goose());
+                }
             }
 
+            local_goose_stop_requested.store(true);
             if (control_server) {
                 control_server->stop();
                 control_server->join();

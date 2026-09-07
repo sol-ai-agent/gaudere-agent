@@ -97,6 +97,17 @@ gaudere_agent_SOURCES = \
 	TaskReport.hpp \
 	WorkController.cpp \
 	WorkController.hpp
+
+gaudere_agent_SOURCES += \
+	LocalGooseCognition.cpp \
+	LocalGooseCognition.hpp \
+	LocalGooseCognitionHandler.cpp \
+	LocalGooseCognitionHandler.hpp \
+	LocalGooseCognitionService.cpp \
+	LocalGooseCognitionService.hpp \
+	LocalGooseRunner.cpp \
+	LocalGooseRunner.hpp
+
 gaudere_agent_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(CURL_LIBS) -lsqlite3
 
 gaudere_control_SOURCES = \
@@ -320,3 +331,19 @@ gaudere_local_activity_status_SOURCES = \
 	Sha256.cpp \
 	Sha256.hpp
 gaudere_local_activity_status_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+
+bin_PROGRAMS += gaudere-goose-tools-mcp
+
+gaudere_goose_tools_mcp_SOURCES = \
+	goose_tools_mcp_main.cpp \
+	GooseGovernanceStore.cpp \
+	GooseGovernanceStore.hpp \
+	GooseToolsMcp.cpp \
+	GooseToolsMcp.hpp \
+	LiveControl.cpp \
+	LiveControl.hpp \
+	Sha256.cpp \
+	Sha256.hpp
+
+gaudere_goose_tools_mcp_LDADD = $(JSON_LIBS) -lsqlite3
+gaudere_goose_tools_mcp_LDFLAGS = -pthread
