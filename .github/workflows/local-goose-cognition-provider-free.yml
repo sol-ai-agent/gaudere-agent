@@ -22,6 +22,7 @@ jobs:
           gcc-c++
           git
           json-devel
+          libcurl-devel
           libtool
           make
           pkgconf-pkg-config
@@ -62,6 +63,7 @@ jobs:
           grep -q '"--no-session"' agent/src/LocalGooseRunner.cpp
           grep -q '"--with-extension"' agent/src/LocalGooseRunner.cpp
           grep -q '/usr/local/bin/gaudere-goose-tools-mcp' agent/src/LocalGooseRunner.cpp
+          grep -q 'GOOSE_PATH_ROOT=' agent/src/LocalGooseRunner.cpp
           grep -q 'posix_spawn' agent/src/LocalGooseRunner.cpp
           grep -q 'local_risk_promotion_allowed.*, false' agent/src/GooseToolsMcp.cpp
           grep -q 'arbitrary_shell_allowed.*, false' agent/src/GooseToolsMcp.cpp
@@ -125,9 +127,29 @@ jobs:
             | /tmp/gaudere-goose-tools-mcp --socket /tmp/nonexistent-gaudere-control.sock --governance /tmp/gaudere-goose-mcp-ci.db \
             | grep -q 'gaudere_propose_risk_rule_change'
 
-      - name: Prove production remains opt-in
+      - name: Build complete agent with Autotools
         run: |
           set -eu
-          ! grep -q 'LocalGoose' agent/src/main.cpp
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build-full
+          cd build-full
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2
+          test -x src/gaudere-agent
+          test -x src/gaudere-goose-tools-mcp
+
+      - name: Prove pinned Goose runtime and opt-in service gate
+        run: |
+          set -eu
+          grep -q 'GOOSE_VERSION=1.49.0' agent/Containerfile
+          grep -q '38d5035e4a786f6b62abe0cd0f2bef7e6ac8041e3e006e2000561dd8df6aead3' agent/Containerfile
+          grep -q 'goose-x86_64-unknown-linux-gnu.tar.gz' agent/Containerfile
+          grep -q 'gaudere-goose-tools-mcp' agent/Containerfile
+          grep -q 'local_goose_requested' agent/src/main.cpp
+          grep -q 'local Goose requires --local-activity-sidecar PATH' agent/src/main.cpp
+          grep -q 'local Goose typed tools require --control-socket PATH' agent/src/main.cpp
           ! grep -q 'local-goose' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose' agent/deploy/quadlet/gaudere-agent-openai.container.in
