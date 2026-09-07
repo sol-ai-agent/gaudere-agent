@@ -1,0 +1,94 @@
+name: Local Goose cognition provider-free gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-local-goose-cognition:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Pin and build Gaudere
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove local Goose boundary source
+        run: |
+          set -eu
+          files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
+          grep -q 'GOOSE_MODE=chat' agent/src/LocalGooseRunner.cpp
+          grep -q '"--provider", "local"' agent/src/LocalGooseRunner.cpp
+          grep -q '"--no-profile"' agent/src/LocalGooseRunner.cpp
+          grep -q '"--no-session"' agent/src/LocalGooseRunner.cpp
+          grep -q 'posix_spawn' agent/src/LocalGooseRunner.cpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' $files
+          ! grep -Eq '/bin/(sh|bash)|--with-extension|developer|shell' agent/src/LocalGooseRunner.cpp
+          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource|WakeIntentStore|ActionStore' $files
+          ! grep -q 'cognition.current.v0:345f9ec66c316b1513f0d914a2f4ffff3183b4519ca2b7e2a7077e89df6377f3' $files
+
+      - name: Compile provider-free local Goose tests
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          common="-std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Iagent/src"
+          c++ $common $(pkg-config --cflags gaudere) \
+            agent/tests/local_goose_cognition_test.cpp \
+            agent/src/LocalGooseCognition.cpp \
+            agent/src/LocalGooseCognitionHandler.cpp \
+            agent/src/LocalGooseRunner.cpp \
+            agent/src/LocalContinuityObservation.cpp \
+            agent/src/Sha256.cpp \
+            $(pkg-config --libs gaudere) -pthread \
+            -o /tmp/local-goose-cognition-test
+
+      - name: Run provider-free local Goose tests
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          /tmp/local-goose-cognition-test
+
+      - name: Prove production remains opt-in
+        run: |
+          set -eu
+          ! grep -q 'LocalGoose' agent/src/main.cpp
+          ! grep -q 'local-goose' agent/deploy/quadlet/gaudere-agent.container
+          ! grep -q 'local-goose' agent/deploy/quadlet/gaudere-agent-openai.container.in
