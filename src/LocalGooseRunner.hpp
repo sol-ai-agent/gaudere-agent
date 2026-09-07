@@ -15,6 +15,13 @@ struct LocalGooseRunRequest {
     std::string prompt;
     std::chrono::milliseconds timeout{std::chrono::minutes{10}};
     std::size_t max_output_bytes = 16 * 1024;
+
+    // When enabled, Goose receives only Gaudere's fixed typed MCP extension.
+    // The extension itself obtains its runtime authority from Gaudere's durable
+    // operational policy and current risk envelope.
+    bool tools_enabled = false;
+    std::string control_socket;
+    std::string governance_path;
 };
 
 struct LocalGooseRunResult {
