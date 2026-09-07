@@ -111,6 +111,11 @@ GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request
     return invocation;
 }
 
+PosixLocalGooseRunner::PosixLocalGooseRunner(CooperativePump cooperative_pump)
+    : cooperative_pump_(std::move(cooperative_pump))
+{
+}
+
 LocalGooseRunResult PosixLocalGooseRunner::run(const LocalGooseRunRequest& request)
 {
     LocalGooseRunResult result;
@@ -177,6 +182,23 @@ LocalGooseRunResult PosixLocalGooseRunner::run(const LocalGooseRunRequest& reque
                 ::close(output_pipe[0]);
                 result.detail = "cannot read Goose output";
                 return result;
+            }
+
+            if (cooperative_pump_) {
+                try {
+                    cooperative_pump_();
+                } catch (const std::exception& error) {
+                    kill_and_reap(pid);
+                    ::close(output_pipe[0]);
+                    result.detail = std::string("Gaudere typed-tool pump failed: ")
+                        + error.what();
+                    return result;
+                } catch (...) {
+                    kill_and_reap(pid);
+                    ::close(output_pipe[0]);
+                    result.detail = "Gaudere typed-tool pump failed";
+                    return result;
+                }
             }
 
             if (!child_done) {
