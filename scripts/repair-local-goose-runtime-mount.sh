@@ -9,6 +9,11 @@ goose_root=${GAUDERE_GOOSE_ROOT:-$HOME/.local/share/gaudere/goose}
 container_root=/var/lib/gaudere/goose
 host_model_cache=$goose_root/cache/huggingface
 container_model_cache=$container_root/cache/huggingface
+# Bootstrap execution envelope for the pinned 4.6 GiB GGUF. Fedora production
+# proved that the pre-Goose 256 MiB cgroup budget OOM-kills Goose while mapping
+# the model. Keep a finite bound with headroom for llama.cpp/KV/runtime state.
+goose_memory=12G
+goose_memory_swap=14G
 
 fail()
 {
@@ -53,14 +58,16 @@ cleanup()
 trap cleanup EXIT
 trap 'cleanup; exit 1' HUP INT TERM
 
-python3 - "$target_quadlet" "$rendered_quadlet" "$goose_root" "$container_root" "$host_model_cache" "$container_model_cache" <<'PY'
+python3 - "$target_quadlet" "$rendered_quadlet" "$goose_root" "$container_root" "$host_model_cache" "$container_model_cache" "$goose_memory" "$goose_memory_swap" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
-host_root, container_root, host_cache, container_cache = sys.argv[3:]
+host_root, container_root, host_cache, container_cache, target_memory, target_swap = sys.argv[3:]
 lines = source.read_text(encoding='utf-8').splitlines()
+original = list(lines)
 
 images = [line for line in lines if line.startswith('Image=')]
 execs = [line for line in lines if line.startswith('Exec=')]
@@ -90,34 +97,69 @@ for line in lines:
         if line not in (old_root, new_root, cache_ro):
             raise SystemExit(f'unexpected mount overlaps Goose runtime/model tree: {line}')
 
-if lines[root_indexes[0]] == new_root and cache_ro in lines:
-    destination.write_text(source.read_text(encoding='utf-8'), encoding='utf-8')
-    print('mount_layout=already-correct')
-    raise SystemExit(0)
-if cache_ro in lines:
-    raise SystemExit('read-only model-cache mount exists while Goose root is not writable')
+if lines[root_indexes[0]] == old_root:
+    if cache_ro in lines:
+        raise SystemExit('read-only model-cache mount exists while Goose root is not writable')
+    lines[root_indexes[0]] = new_root
+    lines.insert(root_indexes[0] + 1, cache_ro)
+elif cache_ro not in lines:
+    lines.insert(root_indexes[0] + 1, cache_ro)
 
-lines[root_indexes[0]] = new_root
-lines.insert(root_indexes[0] + 1, cache_ro)
+size_re = re.compile(r'^(\d+)([KMGT])$', re.IGNORECASE)
+
+def size_bytes(value: str) -> int:
+    match = size_re.fullmatch(value.strip())
+    if not match:
+        raise SystemExit(f'unsupported finite Quadlet memory size: {value}')
+    number = int(match.group(1))
+    scale = {'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}[match.group(2).upper()]
+    return number * scale
+
+memory_indexes = [i for i, line in enumerate(lines) if line.startswith('Memory=')]
+swap_indexes = [i for i, line in enumerate(lines) if line.startswith('MemorySwap=')]
+if len(memory_indexes) != 1 or len(swap_indexes) != 1:
+    raise SystemExit('target Quadlet must contain exactly one Memory= and one MemorySwap= line')
+
+memory_index = memory_indexes[0]
+swap_index = swap_indexes[0]
+current_memory = lines[memory_index].split('=', 1)[1]
+current_swap = lines[swap_index].split('=', 1)[1]
+if size_bytes(current_memory) < size_bytes(target_memory):
+    lines[memory_index] = f'Memory={target_memory}'
+if size_bytes(current_swap) < size_bytes(target_swap):
+    lines[swap_index] = f'MemorySwap={target_swap}'
+# Podman requires memory-swap >= memory. Prove that after normalization.
+final_memory = lines[memory_index].split('=', 1)[1]
+final_swap = lines[swap_index].split('=', 1)[1]
+if size_bytes(final_swap) < size_bytes(final_memory):
+    raise SystemExit('final MemorySwap must be greater than or equal to Memory')
+
 rendered = '\n'.join(lines) + '\n'
 
-# Mechanically prove that only the Goose root mode changed and one nested
-# read-only model-cache mount was inserted.
-def normalize(values, repaired):
+# Mechanically prove that only the Goose root mount layout and finite resource
+# budget may change. Everything else, especially provider/network authority,
+# must remain byte-for-byte equivalent after normalization.
+def normalize(values):
     out = []
     for line in values:
         if line in (old_root, new_root):
             out.append('Volume=<goose-root-layout>')
-        elif repaired and line == cache_ro:
+        elif line == cache_ro:
             continue
+        elif line.startswith('Memory='):
+            out.append('Memory=<goose-bootstrap-budget>')
+        elif line.startswith('MemorySwap='):
+            out.append('MemorySwap=<goose-bootstrap-budget>')
         else:
             out.append(line)
     return out
-if normalize(source.read_text(encoding='utf-8').splitlines(), False) != normalize(rendered.splitlines(), True):
-    raise SystemExit('runtime/model mount repair attempted an unauthorized Quadlet mutation')
+if normalize(original) != normalize(rendered.splitlines()):
+    raise SystemExit('runtime/model/resource repair attempted an unauthorized Quadlet mutation')
 
 destination.write_text(rendered, encoding='utf-8')
-print('mount_layout=repaired')
+print('layout_and_budget=repaired' if original != lines else 'layout_and_budget=already-correct')
+print(f'memory={final_memory}')
+print(f'memory_swap={final_swap}')
 PY
 
 require_service_stopped
@@ -132,6 +174,8 @@ cleanup
 trap - EXIT HUP INT TERM
 printf 'gaudere local-goose runtime mount repair: runtime_mount=writable\n'
 printf 'gaudere local-goose runtime mount repair: model_cache_mount=read-only\n'
+printf 'gaudere local-goose runtime mount repair: memory_floor=%s\n' "$goose_memory"
+printf 'gaudere local-goose runtime mount repair: memory_swap_floor=%s\n' "$goose_memory_swap"
 printf 'gaudere local-goose runtime mount repair: provider_authority=OFF\n'
 printf 'gaudere local-goose runtime mount repair: network=none\n'
 printf 'gaudere local-goose runtime mount repair: service remains stopped\n'
