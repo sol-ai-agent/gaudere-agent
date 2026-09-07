@@ -30,6 +30,16 @@ std::string governed_prompt(const LocalGooseCognitionInspection& cognition,
     return prompt;
 }
 
+std::string normalize_model_selector(std::string value)
+{
+    // The current service CLI already treats --local-goose-model as an absolute
+    // selector. Preserve that gate while adapting Goose 1.49, whose local provider
+    // expects the registered model id rather than a GGUF path. A single leading
+    // slash is therefore only a service-level sentinel and is never passed to Goose.
+    if (!value.empty() && value.front() == '/') value.erase(0, 1);
+    return value;
+}
+
 } // namespace
 
 LocalGooseCognitionHandler::LocalGooseCognitionHandler(
@@ -40,7 +50,7 @@ LocalGooseCognitionHandler::LocalGooseCognitionHandler(
     std::string control_socket,
     std::string governance_path,
     std::string goose_path_root)
-    : runner_(runner), model_id_(std::move(model_id)),
+    : runner_(runner), model_id_(normalize_model_selector(std::move(model_id))),
       model_sha256_(std::move(model_sha256)), tools_enabled_(tools_enabled),
       control_socket_(std::move(control_socket)),
       governance_path_(std::move(governance_path)),
