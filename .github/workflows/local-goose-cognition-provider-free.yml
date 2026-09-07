@@ -54,7 +54,7 @@ jobs:
       - name: Prove local Goose boundary source
         run: |
           set -eu
-          files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
+          files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
           grep -q 'GOOSE_MODE=chat' agent/src/LocalGooseRunner.cpp
           grep -q '"--provider", "local"' agent/src/LocalGooseRunner.cpp
           grep -q '"--no-profile"' agent/src/LocalGooseRunner.cpp
@@ -74,9 +74,11 @@ jobs:
             agent/tests/local_goose_cognition_test.cpp \
             agent/src/LocalGooseCognition.cpp \
             agent/src/LocalGooseCognitionHandler.cpp \
+            agent/src/LocalGooseCognitionService.cpp \
             agent/src/LocalGooseRunner.cpp \
             agent/src/LocalContinuityObservation.cpp \
             agent/src/Sha256.cpp \
+            agent/src/TaskExecutor.cpp \
             $(pkg-config --libs gaudere) -pthread \
             -o /tmp/local-goose-cognition-test
 
