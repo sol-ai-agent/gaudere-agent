@@ -7,6 +7,7 @@
 
 #include <cctype>
 #include <limits>
+#include <set>
 #include <stdexcept>
 
 namespace gaudere_agent {
@@ -122,8 +123,9 @@ LocalGooseCognitionInspection inspect_local_goose_cognition_task(
         for (const auto& item : parsed.items()) keys.insert(item.key());
         if (!parsed.is_object() || keys != expected
             || parsed.value("schema", "") != local_goose_cognition_schema
-            || !parsed.at("source_observation_payload").is_object()) {
-            out.detail = "local Goose cognition JSON schema differs";
+            || !parsed.at("source_observation_payload").is_object()
+            || parsed.dump() != task.input) {
+            out.detail = "local Goose cognition JSON schema/canonical bytes differ";
             return out;
         }
         out.source_observation_task_id = parsed.at("source_observation_task_id").get<std::string>();
