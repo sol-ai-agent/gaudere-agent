@@ -54,16 +54,21 @@ jobs:
       - name: Prove local Goose boundary source
         run: |
           set -eu
-          files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
-          grep -q 'GOOSE_MODE=chat' agent/src/LocalGooseRunner.cpp
+          cognition_files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
+          tool_files='agent/src/GooseGovernanceStore.cpp agent/src/GooseGovernanceStore.hpp agent/src/GooseToolsMcp.cpp agent/src/GooseToolsMcp.hpp agent/src/goose_tools_mcp_main.cpp'
+          grep -q 'request.tools_enabled ? "auto" : "chat"' agent/src/LocalGooseRunner.cpp
           grep -q '"--provider", "local"' agent/src/LocalGooseRunner.cpp
           grep -q '"--no-profile"' agent/src/LocalGooseRunner.cpp
           grep -q '"--no-session"' agent/src/LocalGooseRunner.cpp
+          grep -q '"--with-extension"' agent/src/LocalGooseRunner.cpp
+          grep -q '/usr/local/bin/gaudere-goose-tools-mcp' agent/src/LocalGooseRunner.cpp
           grep -q 'posix_spawn' agent/src/LocalGooseRunner.cpp
-          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' $files
-          ! grep -Eq '/bin/(sh|bash)|--with-extension|developer|shell' agent/src/LocalGooseRunner.cpp
-          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource|WakeIntentStore|ActionStore' $files
-          ! grep -q 'cognition.current.v0:345f9ec66c316b1513f0d914a2f4ffff3183b4519ca2b7e2a7077e89df6377f3' $files
+          grep -q 'local_risk_promotion_allowed.*, false' agent/src/GooseToolsMcp.cpp
+          grep -q 'arbitrary_shell_allowed.*, false' agent/src/GooseToolsMcp.cpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' $cognition_files $tool_files
+          ! grep -Eq '/bin/(sh|bash)|developer' agent/src/LocalGooseRunner.cpp $tool_files
+          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' $tool_files
+          ! grep -q 'cognition.current.v0:345f9ec66c316b1513f0d914a2f4ffff3183b4519ca2b7e2a7077e89df6377f3' $cognition_files $tool_files
 
       - name: Compile provider-free local Goose tests
         run: |
@@ -82,11 +87,43 @@ jobs:
             $(pkg-config --libs gaudere) -pthread \
             -o /tmp/local-goose-cognition-test
 
+          c++ $common \
+            agent/tests/local_goose_tools_invocation_test.cpp \
+            agent/src/LocalGooseRunner.cpp \
+            -pthread \
+            -o /tmp/local-goose-tools-invocation-test
+
+          c++ $common \
+            agent/tests/goose_tools_mcp_test.cpp \
+            agent/src/GooseGovernanceStore.cpp \
+            agent/src/GooseToolsMcp.cpp \
+            agent/src/LiveControl.cpp \
+            agent/src/Sha256.cpp \
+            -lsqlite3 -pthread \
+            -o /tmp/goose-tools-mcp-test
+
+          c++ $common \
+            agent/src/goose_tools_mcp_main.cpp \
+            agent/src/GooseGovernanceStore.cpp \
+            agent/src/GooseToolsMcp.cpp \
+            agent/src/LiveControl.cpp \
+            agent/src/Sha256.cpp \
+            -lsqlite3 -pthread \
+            -o /tmp/gaudere-goose-tools-mcp
+
       - name: Run provider-free local Goose tests
         run: |
           set -eu
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           /tmp/local-goose-cognition-test
+          /tmp/local-goose-tools-invocation-test
+          /tmp/goose-tools-mcp-test
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | /tmp/gaudere-goose-tools-mcp --socket /tmp/nonexistent-gaudere-control.sock --governance /tmp/gaudere-goose-mcp-ci.db \
+            | grep -q 'gaudere_propose_risk_rule_change'
 
       - name: Prove production remains opt-in
         run: |
