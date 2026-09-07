@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -46,11 +47,24 @@ public:
         const LocalGooseRunRequest& request) = 0;
 };
 
-/** Fixed, no-shell Goose invocation. The production container remains Network=none. */
+/**
+ * Fixed, no-shell Goose invocation. The production container remains Network=none.
+ *
+ * An optional cooperative pump lets the sole Gaudere runtime thread service typed
+ * MCP requests while the child Goose process is alive. The pump is never executed
+ * by the child and does not grant Goose any authority by itself.
+ */
 class PosixLocalGooseRunner final : public LocalGooseRunner {
 public:
+    using CooperativePump = std::function<void()>;
+
+    explicit PosixLocalGooseRunner(CooperativePump cooperative_pump = {});
+
     [[nodiscard]] LocalGooseRunResult run(
         const LocalGooseRunRequest& request) override;
+
+private:
+    CooperativePump cooperative_pump_;
 };
 
 } // namespace gaudere_agent
