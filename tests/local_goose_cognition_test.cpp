@@ -1,16 +1,21 @@
 #include "LocalGooseCognition.hpp"
 #include "LocalGooseCognitionHandler.hpp"
+#include "LocalGooseCognitionService.hpp"
 #include "LocalGooseRunner.hpp"
 #include "LocalContinuityObservation.hpp"
 #include "Sha256.hpp"
 
+#include <gaudere/work/Runtime.hpp>
 #include <gaudere/work/Task.hpp>
+#include <gaudere/work/TaskStore.hpp>
 
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,17 +25,25 @@ using namespace gaudere_agent;
 using Task = gaudere::work::Task;
 using TaskResult = gaudere::work::TaskResult;
 using TaskStatus = gaudere::work::TaskStatus;
+using TimePoint = gaudere::work::TimePoint;
 
 std::string hex(char c) { return std::string(64, c); }
 
-Task source_observation()
+Task source_observation(const std::uint32_t generation = 1,
+                        const std::optional<Task>& predecessor = std::nullopt)
 {
     LocalContinuityObservationFacts facts;
-    facts.generation = 1;
-    facts.due_at_ms = 1000;
-    facts.captured_at_ms = 1001;
+    facts.generation = generation;
+    facts.due_at_ms = 1000 * static_cast<std::int64_t>(generation);
+    facts.captured_at_ms = facts.due_at_ms + 1;
     facts.anchor_checkpoint_task_id = "continuity.delta-checkpoint.v1:" + hex('a');
     facts.anchor_checkpoint_result_sha256 = hex('a');
+    if (generation > 1) {
+        assert(predecessor && predecessor->result);
+        facts.predecessor_observation_task_id = predecessor->id;
+        facts.predecessor_observation_result_sha256 =
+            sha256_hex(predecessor->result->output);
+    }
     facts.provider_scope = "provider.call:openai.responses";
     facts.provider_total = 10;
     facts.provider_limit = 12;
@@ -60,6 +73,63 @@ public:
         seen = request;
         return answer;
     }
+};
+
+class MemoryTaskStore final : public gaudere::work::TaskStore {
+public:
+    std::optional<Task> find(const std::string& id) const override
+    {
+        const auto it = tasks.find(id);
+        return it == tasks.end() ? std::nullopt : std::optional<Task>{it->second};
+    }
+
+    std::optional<Task> find_by_idempotency_key(
+        const std::string& key) const override
+    {
+        for (const auto& [id, task] : tasks) {
+            static_cast<void>(id);
+            if (task.idempotency_key == key) return task;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<Task> find_pending_for(
+        const std::vector<std::string>& accepted_kinds) const override
+    {
+        for (const auto& [id, task] : tasks) {
+            static_cast<void>(id);
+            if (task.status != TaskStatus::pending) continue;
+            if (std::find(accepted_kinds.begin(), accepted_kinds.end(), task.kind)
+                != accepted_kinds.end())
+                return task;
+        }
+        return std::nullopt;
+    }
+
+    std::vector<Task> leased_with_expired_lease(TimePoint) const override
+    {
+        return {};
+    }
+
+    std::optional<TimePoint> next_lease_expiry() const override
+    {
+        return std::nullopt;
+    }
+
+    bool has_active() const override
+    {
+        for (const auto& [id, task] : tasks) {
+            static_cast<void>(id);
+            if (task.status == TaskStatus::running
+                || task.status == TaskStatus::cancel_requested)
+                return true;
+        }
+        return false;
+    }
+
+    void save(const Task& task) override { tasks[task.id] = task; }
+
+    std::map<std::string, Task> tasks;
 };
 
 std::string decision(const std::string& kind, const std::string& openai)
@@ -161,6 +231,79 @@ int main()
     assert(!contains(invocation.argv, "/bin/bash"));
     assert(!contains(invocation.argv, "--with-extension"));
     std::remove(model_path.c_str());
+
+    // Service proof: a settled pulse observation creates/executes one cognition,
+    // and replay/restart observes the same durable decision without a second call.
+    MemoryTaskStore store;
+    store.save(source);
+    const auto now = [] {
+        return TimePoint{std::chrono::milliseconds{10'000}};
+    };
+    gaudere::work::Runtime runtime(store, now);
+    runtime.recover();
+    assert(runtime.state() == gaudere::work::RuntimeState::running);
+
+    LocalActivityPulseCursor cursor;
+    cursor.generation = 1;
+    cursor.state = LocalActivityPulseState::settled;
+    cursor.task_id = source.id;
+    cursor.result_sha256 = sha256_hex(source.result->output);
+
+    FakeRunner service_runner;
+    service_runner.answer = {
+        LocalGooseRunOutcome::succeeded, decision("idle", ""), {}};
+    LocalGooseCognitionHandler service_handler(
+        service_runner, "/models/gaudere.gguf", model_sha);
+    LocalGooseCognitionService service(
+        [&cursor] { return std::optional<LocalActivityPulseCursor>{cursor}; },
+        store, runtime, service_handler, model_sha);
+
+    const auto first = service.step();
+    assert(first.healthy);
+    assert(first.result == LocalGooseCognitionServiceResult::succeeded);
+    assert(first.task && first.task->status == TaskStatus::succeeded);
+    assert(first.decision && first.decision->decision == "idle");
+    assert(service_runner.calls == 1);
+
+    const auto replay = service.step();
+    assert(replay.healthy);
+    assert(replay.result == LocalGooseCognitionServiceResult::succeeded);
+    assert(replay.task && first.task && replay.task->id == first.task->id);
+    assert(service_runner.calls == 1);
+
+    // A later observation may independently decide that OpenAI is useful. The
+    // service persists only that decision; it has no provider/action dependency.
+    const auto source2 = source_observation(2, source);
+    store.save(source2);
+    cursor.generation = 2;
+    cursor.task_id = source2.id;
+    cursor.result_sha256 = sha256_hex(source2.result->output);
+    service_runner.answer = {LocalGooseRunOutcome::succeeded,
+        decision("request_openai", "Consider the consequential choice"), {}};
+    const auto second = service.step();
+    assert(second.healthy);
+    assert(second.result == LocalGooseCognitionServiceResult::succeeded);
+    assert(second.decision && second.decision->decision == "request_openai");
+    assert(second.decision->openai_request
+           && *second.decision->openai_request
+               == "Consider the consequential choice");
+    assert(service_runner.calls == 2);
+
+    // A local inference failure becomes a terminal task but does not make the
+    // independent pulse/cognition monitor unhealthy for later generations.
+    const auto source3 = source_observation(3, source2);
+    store.save(source3);
+    cursor.generation = 3;
+    cursor.state = LocalActivityPulseState::quiescent;
+    cursor.task_id = source3.id;
+    cursor.result_sha256 = sha256_hex(source3.result->output);
+    service_runner.answer = {
+        LocalGooseRunOutcome::timed_out, {}, "bounded timeout"};
+    const auto failed = service.step();
+    assert(failed.healthy);
+    assert(!failed.monitoring);
+    assert(failed.result == LocalGooseCognitionServiceResult::failed);
+    assert(failed.task && failed.task->status == TaskStatus::failed);
 
     std::cout << "local Goose cognition provider-free tests passed\n";
     return 0;
