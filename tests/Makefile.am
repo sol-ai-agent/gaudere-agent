@@ -92,6 +92,8 @@ explicit_wake_integration_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalEchoHandler.cpp \
+	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \
 	../src/OpenAITask.hpp \
 	../src/TaskDispatcher.cpp \
@@ -130,8 +132,12 @@ live_control_processor_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalEchoHandler.cpp \
+	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \
 	../src/OpenAITask.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
 live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
@@ -280,6 +286,8 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalEchoHandler.cpp \
+	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \
 	../src/OpenAITask.hpp \
 	../src/TaskDispatcher.cpp \
@@ -305,8 +313,12 @@ wake_status_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalEchoHandler.cpp \
+	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \
 	../src/OpenAITask.hpp \
+	../src/TaskExecutor.cpp \
+	../src/TaskExecutor.hpp \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
 wake_status_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
