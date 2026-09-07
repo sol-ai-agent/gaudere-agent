@@ -1,8 +1,10 @@
 #include "LiveControlProcessor.hpp"
 
 #include "BoundedReflection.hpp"
+#include "LocalEchoHandler.hpp"
 #include "OpenAIBudget.hpp"
 #include "OpenAITask.hpp"
+#include "TaskExecutor.hpp"
 #include "TaskReport.hpp"
 
 #include <algorithm>
@@ -14,6 +16,8 @@
 
 namespace gaudere_agent {
 namespace {
+
+constexpr const char* goose_sync_echo_prefix = "goose-local-echo:";
 
 gaudere::work::Task make_live_echo_task(const LiveControlCommand& command)
 {
@@ -28,6 +32,26 @@ gaudere::work::Task make_live_echo_task(const LiveControlCommand& command)
     task.limits.max_runtime = std::chrono::seconds{1};
     task.limits.max_attempts = 1;
     return task;
+}
+
+bool goose_synchronous_echo(const LiveControlCommand& command) noexcept
+{
+    return command.operation == LiveControlOperation::submit_echo
+        && command.id.rfind(goose_sync_echo_prefix, 0) == 0;
+}
+
+bool same_local_echo_definition(const gaudere::work::Task& stored,
+                                const gaudere::work::Task& expected) noexcept
+{
+    return stored.id == expected.id
+        && stored.idempotency_key == expected.idempotency_key
+        && stored.kind == expected.kind
+        && stored.input_content_type == expected.input_content_type
+        && stored.input == expected.input
+        && stored.limits.max_input_bytes == expected.limits.max_input_bytes
+        && stored.limits.max_output_bytes == expected.limits.max_output_bytes
+        && stored.limits.max_runtime == expected.limits.max_runtime
+        && stored.limits.max_attempts == expected.limits.max_attempts;
 }
 
 std::string task_report(const gaudere::work::Task& task)
@@ -193,14 +217,16 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
                 pending->command(), work_may_be_pending,
                 wake_deadline_may_have_changed));
         } catch (const std::exception& error) {
-            work_may_be_pending = task_submission_may_have_committed;
+            work_may_be_pending = task_submission_may_have_committed
+                && !goose_synchronous_echo(pending->command());
             wake_deadline_may_have_changed =
                 wake_transition_may_have_committed;
             pending->complete(LiveControlReply{
                 false, 1, std::string("gaudere-agent: live control command failed: ")
                               + error.what() + "\n"});
         } catch (...) {
-            work_may_be_pending = task_submission_may_have_committed;
+            work_may_be_pending = task_submission_may_have_committed
+                && !goose_synchronous_echo(pending->command());
             wake_deadline_may_have_changed =
                 wake_transition_may_have_committed;
             pending->complete(LiveControlReply{
@@ -355,9 +381,40 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
             false, 4, "gaudere-agent: " + description + " submission rejected\n"};
     }
 
-    const auto stored = store_.find(id);
+    auto stored = store_.find(id);
     if (!stored) {
         throw std::runtime_error(description + " task is missing after submission");
+    }
+
+    if (goose_synchronous_echo(command)) {
+        if (!same_local_echo_definition(*stored, task)) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: reserved Goose local echo id conflicts with an existing Task\n"};
+        }
+        if (!gaudere::work::is_terminal(stored->status)) {
+            LocalEchoHandler echo_handler;
+            TaskExecutor executor(runtime_, store_);
+            const auto executed = executor.execute(
+                id, "local-goose-tool", echo_handler);
+            if (executed != ExecuteResult::completed) {
+                stored = store_.find(id);
+                return LiveControlReply{
+                    false, 4,
+                    std::string("gaudere-agent: reserved Goose local echo could not execute synchronously\n")
+                        + (stored ? task_report(*stored) : std::string{})};
+            }
+            stored = store_.find(id);
+            if (!stored) {
+                throw std::runtime_error(
+                    "synchronous Goose local echo disappeared after execution");
+            }
+        }
+        if (stored->status != gaudere::work::TaskStatus::succeeded) {
+            return LiveControlReply{false, 4, task_report(*stored)};
+        }
+        work_may_be_pending = false;
+        return LiveControlReply{true, 0, task_report(*stored)};
     }
 
     if (!gaudere::work::is_terminal(stored->status)) {
