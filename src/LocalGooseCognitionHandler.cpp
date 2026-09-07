@@ -34,16 +34,21 @@ std::string governed_prompt(const LocalGooseCognitionInspection& cognition,
 
 LocalGooseCognitionHandler::LocalGooseCognitionHandler(
     LocalGooseRunner& runner,
-    std::string model_path,
+    std::string model_id,
     std::string model_sha256,
     const bool tools_enabled,
     std::string control_socket,
-    std::string governance_path)
-    : runner_(runner), model_path_(std::move(model_path)),
+    std::string governance_path,
+    std::string goose_path_root)
+    : runner_(runner), model_id_(std::move(model_id)),
       model_sha256_(std::move(model_sha256)), tools_enabled_(tools_enabled),
       control_socket_(std::move(control_socket)),
-      governance_path_(std::move(governance_path))
+      governance_path_(std::move(governance_path)),
+      goose_path_root_(std::move(goose_path_root))
 {
+    if (model_id_.empty() || goose_path_root_.empty()) {
+        throw std::invalid_argument("local Goose model id/path root must not be empty");
+    }
     if (tools_enabled_ && (control_socket_.empty() || governance_path_.empty())) {
         throw std::invalid_argument(
             "typed local Goose tools require control socket and governance sidecar paths");
@@ -67,7 +72,8 @@ HandlerResult LocalGooseCognitionHandler::execute(const TaskContext& context)
     }
 
     LocalGooseRunRequest request;
-    request.model_path = model_path_;
+    request.model_id = model_id_;
+    request.goose_path_root = goose_path_root_;
     request.prompt = governed_prompt(cognition, tools_enabled_);
     request.timeout = context.task.limits.max_runtime;
     request.max_output_bytes = static_cast<std::size_t>(
