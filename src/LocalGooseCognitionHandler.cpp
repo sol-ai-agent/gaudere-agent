@@ -6,6 +6,31 @@
 #include <utility>
 
 namespace gaudere_agent {
+namespace {
+
+std::string governed_prompt(const LocalGooseCognitionInspection& cognition,
+                            const bool tools_enabled)
+{
+    auto prompt = local_goose_prompt(cognition);
+    if (!tools_enabled) return prompt;
+
+    const std::string legacy =
+        "In this local gate you have no tools, network, secrets, shell, or external-action authority. ";
+    const std::string governed =
+        "In this local gate you have no arbitrary shell, direct network, direct secret access, or host authority. "
+        "You may use only the typed Gaudere tools currently exposed by your own durable operational policy. "
+        "You may change that operational tool policy within the current risk envelope. "
+        "You may propose changes to the risk envelope, but local Goose cognition cannot approve or promote them; "
+        "a separate OpenAI-validated Gaudere governance path is required for any such promotion. ";
+    const auto position = prompt.find(legacy);
+    if (position == std::string::npos) {
+        throw std::logic_error("local Goose base prompt boundary sentence changed unexpectedly");
+    }
+    prompt.replace(position, legacy.size(), governed);
+    return prompt;
+}
+
+} // namespace
 
 LocalGooseCognitionHandler::LocalGooseCognitionHandler(
     LocalGooseRunner& runner,
@@ -43,7 +68,7 @@ HandlerResult LocalGooseCognitionHandler::execute(const TaskContext& context)
 
     LocalGooseRunRequest request;
     request.model_path = model_path_;
-    request.prompt = local_goose_prompt(cognition);
+    request.prompt = governed_prompt(cognition, tools_enabled_);
     request.timeout = context.task.limits.max_runtime;
     request.max_output_bytes = static_cast<std::size_t>(
         context.task.limits.max_output_bytes);
