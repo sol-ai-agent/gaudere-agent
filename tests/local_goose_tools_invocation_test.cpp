@@ -2,8 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstdio>
-#include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -19,15 +18,13 @@ bool contains(const std::vector<std::string>& values, const std::string& value)
 
 int main()
 {
-    const std::string model_path = "/tmp/gaudere-local-goose-tools-test.gguf";
-    {
-        std::ofstream model(model_path, std::ios::binary | std::ios::trunc);
-        model << "GGUF-test-placeholder";
-        assert(model.good());
-    }
+    const std::string goose_root = "/tmp/gaudere-local-goose-tools-root";
+    std::filesystem::remove_all(goose_root);
+    std::filesystem::create_directories(goose_root);
 
     gaudere_agent::LocalGooseRunRequest request;
-    request.model_path = model_path;
+    request.model_id = "unsloth/gemma-4-E4B-it-GGUF:Q4_K_M";
+    request.goose_path_root = goose_root;
     request.prompt = "Use Gaudere's own typed tools when useful.";
     request.tools_enabled = true;
     request.control_socket = "/tmp/gaudere-control.sock";
@@ -38,6 +35,8 @@ int main()
     assert(contains(invocation.argv, "--with-extension"));
     assert(contains(invocation.environment, "GOOSE_MODE=auto"));
     assert(contains(invocation.environment, "GOOSE_MAX_TURNS=32"));
+    assert(contains(invocation.environment, "GOOSE_MODEL=unsloth/gemma-4-E4B-it-GGUF:Q4_K_M"));
+    assert(contains(invocation.environment, "GOOSE_PATH_ROOT=" + goose_root));
     assert(!contains(invocation.environment, "GOOSE_MODE=chat"));
     assert(!contains(invocation.argv, "/bin/sh"));
     assert(!contains(invocation.argv, "/bin/bash"));
@@ -58,7 +57,7 @@ int main()
     }
     assert(rejected);
 
-    std::remove(model_path.c_str());
+    std::filesystem::remove_all(goose_root);
     std::cout << "local Goose typed-tool invocation tests passed\n";
     return 0;
 }
