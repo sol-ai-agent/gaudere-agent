@@ -97,16 +97,13 @@ for line in lines:
         if line not in (old_root, new_root, cache_ro):
             raise SystemExit(f'unexpected mount overlaps Goose runtime/model tree: {line}')
 
-changed = False
 if lines[root_indexes[0]] == old_root:
     if cache_ro in lines:
         raise SystemExit('read-only model-cache mount exists while Goose root is not writable')
     lines[root_indexes[0]] = new_root
     lines.insert(root_indexes[0] + 1, cache_ro)
-    changed = True
 elif cache_ro not in lines:
     lines.insert(root_indexes[0] + 1, cache_ro)
-    changed = True
 
 size_re = re.compile(r'^(\d+)([KMGT])$', re.IGNORECASE)
 
@@ -129,10 +126,8 @@ current_memory = lines[memory_index].split('=', 1)[1]
 current_swap = lines[swap_index].split('=', 1)[1]
 if size_bytes(current_memory) < size_bytes(target_memory):
     lines[memory_index] = f'Memory={target_memory}'
-    changed = True
 if size_bytes(current_swap) < size_bytes(target_swap):
     lines[swap_index] = f'MemorySwap={target_swap}'
-    changed = True
 # Podman requires memory-swap >= memory. Prove that after normalization.
 final_memory = lines[memory_index].split('=', 1)[1]
 final_swap = lines[swap_index].split('=', 1)[1]
@@ -144,12 +139,12 @@ rendered = '\n'.join(lines) + '\n'
 # Mechanically prove that only the Goose root mount layout and finite resource
 # budget may change. Everything else, especially provider/network authority,
 # must remain byte-for-byte equivalent after normalization.
-def normalize(values, repaired):
+def normalize(values):
     out = []
     for line in values:
         if line in (old_root, new_root):
             out.append('Volume=<goose-root-layout>')
-        elif repaired and line == cache_ro:
+        elif line == cache_ro:
             continue
         elif line.startswith('Memory='):
             out.append('Memory=<goose-bootstrap-budget>')
@@ -158,11 +153,11 @@ def normalize(values, repaired):
         else:
             out.append(line)
     return out
-if normalize(original, False) != normalize(rendered.splitlines(), True):
+if normalize(original) != normalize(rendered.splitlines()):
     raise SystemExit('runtime/model/resource repair attempted an unauthorized Quadlet mutation')
 
 destination.write_text(rendered, encoding='utf-8')
-print('mount_layout=repaired' if original != lines else 'mount_layout=already-correct')
+print('layout_and_budget=repaired' if original != lines else 'layout_and_budget=already-correct')
 print(f'memory={final_memory}')
 print(f'memory_swap={final_swap}')
 PY
@@ -179,8 +174,8 @@ cleanup
 trap - EXIT HUP INT TERM
 printf 'gaudere local-goose runtime mount repair: runtime_mount=writable\n'
 printf 'gaudere local-goose runtime mount repair: model_cache_mount=read-only\n'
-printf 'gaudere local-goose runtime mount repair: memory=%s\n' "$goose_memory"
-printf 'gaudere local-goose runtime mount repair: memory_swap=%s\n' "$goose_memory_swap"
+printf 'gaudere local-goose runtime mount repair: memory_floor=%s\n' "$goose_memory"
+printf 'gaudere local-goose runtime mount repair: memory_swap_floor=%s\n' "$goose_memory_swap"
 printf 'gaudere local-goose runtime mount repair: provider_authority=OFF\n'
 printf 'gaudere local-goose runtime mount repair: network=none\n'
 printf 'gaudere local-goose runtime mount repair: service remains stopped\n'
