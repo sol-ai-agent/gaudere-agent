@@ -6,9 +6,13 @@
 
 #include <gaudere/work/Task.hpp>
 
+#include <algorithm>
 #include <cassert>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -70,6 +74,11 @@ std::string decision(const std::string& kind, const std::string& openai)
         + "\",\"next_wake_after_ms\":86400000,\"openai_request\":null,\"reason\":\"My current state is coherent\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}";
 }
 
+bool contains(const std::vector<std::string>& values, const std::string& value)
+{
+    return std::find(values.begin(), values.end(), value) != values.end();
+}
+
 } // namespace
 
 int main()
@@ -86,6 +95,10 @@ int main()
     assert(inspection.source_observation_result_sha256
            == sha256_hex(source.result->output));
     assert(inspection.model_sha256 == model_sha);
+
+    auto noncanonical = a;
+    noncanonical.input += " ";
+    assert(!inspect_local_goose_cognition_task(noncanonical).eligible);
 
     const auto idle = inspect_local_goose_decision(decision("idle", ""));
     assert(idle.eligible);
@@ -126,10 +139,28 @@ int main()
     assert(malformed.outcome == HandlerOutcome::failed);
     assert(malformed.failure_code == "invalid_local_goose_decision");
 
-    // Invocation construction is tested separately from inference: no shell, no tools,
-    // fixed local provider, and chat mode are part of the executable contract.
-    // The model path check is intentionally exercised only in Fedora/image proof because
-    // CI does not download a GGUF model.
+    const std::string model_path = "/tmp/gaudere-local-goose-test.gguf";
+    {
+        std::ofstream model(model_path, std::ios::binary | std::ios::trunc);
+        model << "GGUF-test-placeholder";
+        assert(model.good());
+    }
+    LocalGooseRunRequest invocation_request;
+    invocation_request.model_path = model_path;
+    invocation_request.prompt = "canonical test prompt";
+    const auto invocation = make_goose_cli_invocation(invocation_request);
+    assert(invocation.binary == "/usr/local/bin/goose");
+    assert(invocation.argv == std::vector<std::string>({
+        "/usr/local/bin/goose", "run", "--no-profile", "--no-session",
+        "--provider", "local", "--model", model_path,
+        "--quiet", "--text", "canonical test prompt"}));
+    assert(contains(invocation.environment, "GOOSE_MODE=chat"));
+    assert(contains(invocation.environment, "GOOSE_PROVIDER=local"));
+    assert(contains(invocation.environment, "GOOSE_MODEL=" + model_path));
+    assert(!contains(invocation.argv, "/bin/sh"));
+    assert(!contains(invocation.argv, "/bin/bash"));
+    assert(!contains(invocation.argv, "--with-extension"));
+    std::remove(model_path.c_str());
 
     std::cout << "local Goose cognition provider-free tests passed\n";
     return 0;
