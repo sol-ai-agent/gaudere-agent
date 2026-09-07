@@ -22,7 +22,7 @@ jobs:
           test -x scripts/promote-local-goose-provider-off.sh
           test -x scripts/repair-local-goose-runtime-mount.sh
           test ! -x scripts/promote-local-goose-provider-off-base.sh
-      - name: Prove writable Goose runtime with read-only model cache
+      - name: Prove writable runtime, read-only model cache and bounded Goose memory
         run: |
           set -eu
           root=$(mktemp -d)
@@ -47,6 +47,8 @@ jobs:
           ReadOnly=true
           NoNewPrivileges=true
           DropCapability=all
+          Memory=256M
+          MemorySwap=512M
           Volume=/tmp/state:/var/lib/gaudere:Z
           Volume=$root/goose:/var/lib/gaudere/goose:ro,Z
           Exec=/usr/local/bin/gaudere-agent --state /var/lib/gaudere/state.db --control-socket /tmp/gaudere-control.sock --local-activity-sidecar /var/lib/gaudere/local-activity-pulse.db --local-goose-model /unsloth/gemma-4-E4B-it-GGUF:Q4_K_M --local-goose-model-sha256 $sha --local-goose-governance /var/lib/gaudere/goose-governance.db
@@ -58,8 +60,12 @@ jobs:
           quadlet="$root/config/containers/systemd/gaudere-agent.container"
           grep -Fx "Volume=$root/goose:/var/lib/gaudere/goose:rw,Z" "$quadlet"
           grep -Fx "Volume=$root/goose/cache/huggingface:/var/lib/gaudere/goose/cache/huggingface:ro" "$quadlet"
+          grep -Fx 'Memory=12G' "$quadlet"
+          grep -Fx 'MemorySwap=14G' "$quadlet"
           grep -Fx 'Network=none' "$quadlet"
           ! grep -q -- '--openai-model' "$quadlet"
+          ! grep -q -- '--autonomous-pulse-provider' "$quadlet"
+          ! grep -q -- '--wake-intents' "$quadlet"
           # Idempotence: a second repair changes nothing and still succeeds.
           before=$(sha256sum "$quadlet" | cut -d' ' -f1)
           XDG_CONFIG_HOME="$root/config" \
@@ -68,3 +74,37 @@ jobs:
           scripts/repair-local-goose-runtime-mount.sh
           after=$(sha256sum "$quadlet" | cut -d' ' -f1)
           test "$before" = "$after"
+      - name: Prove higher finite operator budget is preserved
+        run: |
+          set -eu
+          root=$(mktemp -d)
+          mkdir -p "$root/goose/cache/huggingface" "$root/config/containers/systemd"
+          cat > "$root/fake-systemctl" <<'SH'
+          #!/bin/sh
+          if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then exit 3; fi
+          if [ "$1" = "--user" ] && [ "$2" = "daemon-reload" ]; then exit 0; fi
+          exit 2
+          SH
+          chmod 700 "$root/fake-systemctl"
+          sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          cat > "$root/config/containers/systemd/gaudere-agent.container" <<EOF
+          [Container]
+          Image=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          Network=none
+          ReadOnly=true
+          NoNewPrivileges=true
+          DropCapability=all
+          Memory=16G
+          MemorySwap=18G
+          Volume=/tmp/state:/var/lib/gaudere:Z
+          Volume=$root/goose:/var/lib/gaudere/goose:rw,Z
+          Volume=$root/goose/cache/huggingface:/var/lib/gaudere/goose/cache/huggingface:ro
+          Exec=/usr/local/bin/gaudere-agent --state /var/lib/gaudere/state.db --control-socket /tmp/gaudere-control.sock --local-activity-sidecar /var/lib/gaudere/local-activity-pulse.db --local-goose-model /unsloth/gemma-4-E4B-it-GGUF:Q4_K_M --local-goose-model-sha256 $sha --local-goose-governance /var/lib/gaudere/goose-governance.db
+          EOF
+          XDG_CONFIG_HOME="$root/config" \
+          GAUDERE_GOOSE_ROOT="$root/goose" \
+          SYSTEMCTL="$root/fake-systemctl" \
+          scripts/repair-local-goose-runtime-mount.sh
+          quadlet="$root/config/containers/systemd/gaudere-agent.container"
+          grep -Fx 'Memory=16G' "$quadlet"
+          grep -Fx 'MemorySwap=18G' "$quadlet"
