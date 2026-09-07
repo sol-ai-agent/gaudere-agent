@@ -7,23 +7,23 @@ model_id=${GAUDERE_GOOSE_MODEL_ID:-unsloth/gemma-4-E4B-it-GGUF:Q4_K_M}
 goose_root=${GAUDERE_GOOSE_ROOT:-$HOME/.local/share/gaudere/goose}
 container_root=/var/lib/gaudere/goose
 
-command -v "$podman_command" >/dev/null 2>&1 || {
+if ! command -v "$podman_command" >/dev/null 2>&1; then
     echo "podman is required" >&2
-    return 1 2>/dev/null || false
-}
-command -v python3 >/dev/null 2>&1 || {
+    exit 1
+fi
+if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 is required" >&2
-    return 1 2>/dev/null || false
-}
+    exit 1
+fi
 
 case "$goose_root" in
     /*) ;;
-    *) echo "GAUDERE_GOOSE_ROOT must be absolute" >&2; return 1 2>/dev/null || false ;;
+    *) echo "GAUDERE_GOOSE_ROOT must be absolute" >&2; exit 1 ;;
 esac
 case "$model_id" in
     ''|*[!A-Za-z0-9._:/-]*)
         echo "GAUDERE_GOOSE_MODEL_ID contains unsupported characters" >&2
-        return 1 2>/dev/null || false
+        exit 1
         ;;
 esac
 
