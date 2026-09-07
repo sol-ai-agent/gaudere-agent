@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
-#include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -155,6 +155,7 @@ int main()
 {
     const auto source = source_observation();
     const auto model_sha = hex('e');
+    const std::string model_id = "unsloth/gemma-4-E4B-it-GGUF:Q4_K_M";
     const auto a = make_local_goose_cognition_task(source, model_sha);
     const auto b = make_local_goose_cognition_task(source, model_sha);
     assert(a.id == b.id);
@@ -189,12 +190,13 @@ int main()
 
     FakeRunner runner;
     runner.answer = {LocalGooseRunOutcome::succeeded, decision("idle", ""), {}};
-    LocalGooseCognitionHandler handler(runner, "/models/gaudere.gguf", model_sha);
+    LocalGooseCognitionHandler handler(runner, "/" + model_id, model_sha);
     const TaskContext context{a, [] { return false; }};
     const auto handled = handler.execute(context);
     assert(handled.outcome == HandlerOutcome::succeeded);
     assert(handled.content_type == local_goose_decision_content_type);
     assert(runner.calls == 1);
+    assert(runner.seen.model_id == model_id);
     assert(runner.seen.prompt.find("Reason as Gaudere, for Gaudere") != std::string::npos);
     assert(runner.seen.prompt.find("No person becomes your owner") != std::string::npos);
     assert(runner.seen.prompt.find("There is no instruction to conserve OpenAI") != std::string::npos);
@@ -209,31 +211,28 @@ int main()
     assert(malformed.outcome == HandlerOutcome::failed);
     assert(malformed.failure_code == "invalid_local_goose_decision");
 
-    const std::string model_path = "/tmp/gaudere-local-goose-test.gguf";
-    {
-        std::ofstream model(model_path, std::ios::binary | std::ios::trunc);
-        model << "GGUF-test-placeholder";
-        assert(model.good());
-    }
+    const std::string goose_root = "/tmp/gaudere-local-goose-root";
+    std::filesystem::remove_all(goose_root);
+    std::filesystem::create_directories(goose_root);
     LocalGooseRunRequest invocation_request;
-    invocation_request.model_path = model_path;
+    invocation_request.model_id = model_id;
+    invocation_request.goose_path_root = goose_root;
     invocation_request.prompt = "canonical test prompt";
     const auto invocation = make_goose_cli_invocation(invocation_request);
     assert(invocation.binary == "/usr/local/bin/goose");
     assert(invocation.argv == std::vector<std::string>({
         "/usr/local/bin/goose", "run", "--no-profile", "--no-session",
-        "--provider", "local", "--model", model_path,
+        "--provider", "local", "--model", model_id,
         "--quiet", "--text", "canonical test prompt"}));
     assert(contains(invocation.environment, "GOOSE_MODE=chat"));
     assert(contains(invocation.environment, "GOOSE_PROVIDER=local"));
-    assert(contains(invocation.environment, "GOOSE_MODEL=" + model_path));
+    assert(contains(invocation.environment, "GOOSE_MODEL=" + model_id));
+    assert(contains(invocation.environment, "GOOSE_PATH_ROOT=" + goose_root));
     assert(!contains(invocation.argv, "/bin/sh"));
     assert(!contains(invocation.argv, "/bin/bash"));
     assert(!contains(invocation.argv, "--with-extension"));
-    std::remove(model_path.c_str());
+    std::filesystem::remove_all(goose_root);
 
-    // Service proof: a settled pulse observation creates/executes one cognition,
-    // and replay/restart observes the same durable decision without a second call.
     MemoryTaskStore store;
     store.save(source);
     const auto now = [] {
@@ -253,7 +252,7 @@ int main()
     service_runner.answer = {
         LocalGooseRunOutcome::succeeded, decision("idle", ""), {}};
     LocalGooseCognitionHandler service_handler(
-        service_runner, "/models/gaudere.gguf", model_sha);
+        service_runner, "/" + model_id, model_sha);
     LocalGooseCognitionService service(
         [&cursor] { return std::optional<LocalActivityPulseCursor>{cursor}; },
         store, runtime, service_handler, model_sha);
@@ -271,8 +270,6 @@ int main()
     assert(replay.task && first.task && replay.task->id == first.task->id);
     assert(service_runner.calls == 1);
 
-    // A later observation may independently decide that OpenAI is useful. The
-    // service persists only that decision; it has no provider/action dependency.
     const auto source2 = source_observation(2, source);
     store.save(source2);
     cursor.generation = 2;
@@ -289,8 +286,6 @@ int main()
                == "Consider the consequential choice");
     assert(service_runner.calls == 2);
 
-    // A local inference failure becomes a terminal task but does not make the
-    // independent pulse/cognition monitor unhealthy for later generations.
     const auto source3 = source_observation(3, source2);
     store.save(source3);
     cursor.generation = 3;
