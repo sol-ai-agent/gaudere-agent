@@ -1,6 +1,8 @@
 #include "GooseToolsMcp.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -10,6 +12,9 @@ namespace gaudere_agent {
 namespace {
 
 using Json = nlohmann::json;
+
+constexpr const char* goose_sync_echo_prefix = "goose-local-echo:";
+constexpr std::size_t max_live_control_id_bytes = 128;
 
 const std::vector<std::string> governance_tools = {
     "gaudere_inspect_operational_policy",
@@ -88,11 +93,25 @@ std::vector<std::string> require_string_array(const Json& arguments,
 std::size_t require_size(const Json& arguments,
                          const char* name)
 {
-    if (!arguments.is_object() || !arguments.contains(name)
-        || !arguments.at(name).is_number_unsigned()) {
-        throw std::invalid_argument(std::string("missing unsigned integer argument: ") + name);
+    if (!arguments.is_object() || !arguments.contains(name)) {
+        throw std::invalid_argument(std::string("missing integer argument: ") + name);
     }
-    return arguments.at(name).get<std::size_t>();
+    const auto& value = arguments.at(name);
+    if (value.is_number_unsigned()) {
+        const auto number = value.get<std::uint64_t>();
+        if (number > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+            throw std::invalid_argument(std::string("integer argument is too large: ") + name);
+        }
+        return static_cast<std::size_t>(number);
+    }
+    if (value.is_number_integer()) {
+        const auto number = value.get<std::int64_t>();
+        if (number < 0) {
+            throw std::invalid_argument(std::string("integer argument must be non-negative: ") + name);
+        }
+        return static_cast<std::size_t>(number);
+    }
+    throw std::invalid_argument(std::string("missing integer argument: ") + name);
 }
 
 Json policy_json(const GooseOperationalPolicy& policy)
@@ -194,9 +213,11 @@ Json GooseToolsMcp::tools_list() const
     if (enabled_runtime_tool("gaudere_local_echo")) {
         tools.push_back(tool(
             "gaudere_local_echo",
-            "Submit one bounded local echo Task through Gaudere's durable typed Runtime. Useful as a provider-free action/proof primitive.",
+            "Execute one bounded local echo Task synchronously through Gaudere's durable typed Runtime. Useful as a provider-free action/proof primitive.",
             object_schema(
-                Json{{"id", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                Json{{"id", Json{{"type", "string"},
+                                  {"minLength", 1},
+                                  {"maxLength", max_live_control_id_bytes - std::char_traits<char>::length(goose_sync_echo_prefix)}}},
                      {"text", Json{{"type", "string"}, {"maxLength", 4096}}}},
                 {"id", "text"})));
     }
@@ -284,7 +305,10 @@ Json GooseToolsMcp::call_tool(const std::string& name,
         command.id = "current";
     } else if (name == "gaudere_local_echo") {
         command.operation = LiveControlOperation::submit_echo;
-        command.id = require_string(arguments, "id", 128);
+        const auto logical_id = require_string(
+            arguments, "id",
+            max_live_control_id_bytes - std::char_traits<char>::length(goose_sync_echo_prefix));
+        command.id = std::string(goose_sync_echo_prefix) + logical_id;
         command.text = require_string(arguments, "text", 4096, true);
     } else if (name == "gaudere_request_openai_risk_review") {
         const auto id = require_string(arguments, "proposal_id", 128);
