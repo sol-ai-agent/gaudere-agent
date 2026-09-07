@@ -14,6 +14,7 @@ namespace gaudere_agent {
 namespace {
 
 constexpr const char* goose_binary = "/usr/local/bin/goose";
+constexpr const char* goose_tools_binary = "/usr/local/bin/gaudere-goose-tools-mcp";
 
 bool regular_readable_model(const std::string& path) noexcept
 {
@@ -23,6 +24,19 @@ bool regular_readable_model(const std::string& path) noexcept
         && S_ISREG(metadata.st_mode)
         && !S_ISLNK(metadata.st_mode)
         && ::access(path.c_str(), R_OK) == 0;
+}
+
+bool safe_absolute_path(const std::string& path) noexcept
+{
+    if (path.empty() || path.front() != '/' || path.size() > 240) return false;
+    for (const unsigned char c : path) {
+        const bool ok = (c >= 'a' && c <= 'z')
+            || (c >= 'A' && c <= 'Z')
+            || (c >= '0' && c <= '9')
+            || c == '/' || c == '.' || c == '_' || c == ':' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
 }
 
 std::vector<char*> pointers(std::vector<std::string>& values)
@@ -53,6 +67,17 @@ GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request
     if (request.timeout.count() <= 0 || request.max_output_bytes == 0
         || request.max_output_bytes > 64 * 1024)
         throw std::invalid_argument("local Goose run bounds are invalid");
+    if (request.tools_enabled
+        && (!safe_absolute_path(request.control_socket)
+            || !safe_absolute_path(request.governance_path))) {
+        throw std::invalid_argument(
+            "typed Goose tools require safe absolute control/governance paths");
+    }
+    if (!request.tools_enabled
+        && (!request.control_socket.empty() || !request.governance_path.empty())) {
+        throw std::invalid_argument(
+            "Goose tool paths are invalid when typed tools are disabled");
+    }
 
     GooseCliInvocation invocation;
     invocation.binary = goose_binary;
@@ -62,14 +87,24 @@ GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request
         "--no-profile",
         "--no-session",
         "--provider", "local",
-        "--model", request.model_path,
+        "--model", request.model_path
+    };
+    if (request.tools_enabled) {
+        const std::string extension = std::string(goose_tools_binary)
+            + " --socket " + request.control_socket
+            + " --governance " + request.governance_path;
+        invocation.argv.push_back("--with-extension");
+        invocation.argv.push_back(extension);
+    }
+    invocation.argv.insert(invocation.argv.end(), {
         "--quiet",
         "--text", request.prompt
-    };
+    });
     invocation.environment = {
-        "GOOSE_MODE=chat",
+        std::string("GOOSE_MODE=") + (request.tools_enabled ? "auto" : "chat"),
         "GOOSE_PROVIDER=local",
         "GOOSE_MODEL=" + request.model_path,
+        "GOOSE_MAX_TURNS=32",
         "HOME=/tmp",
         "PATH=/usr/local/bin:/usr/bin"
     };
@@ -154,7 +189,6 @@ LocalGooseRunResult PosixLocalGooseRunner::run(const LocalGooseRunRequest& reque
                 }
             }
             if (child_done) {
-                // One final nonblocking drain occurs on the next iteration if data remains.
                 char probe;
                 const auto count = ::read(output_pipe[0], &probe, 1);
                 if (count > 0) {
