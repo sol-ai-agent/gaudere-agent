@@ -2,15 +2,31 @@
 
 #include "LocalGooseCognition.hpp"
 
+#include <stdexcept>
 #include <utility>
 
 namespace gaudere_agent {
 
 LocalGooseCognitionHandler::LocalGooseCognitionHandler(
-    LocalGooseRunner& runner, std::string model_path, std::string model_sha256)
+    LocalGooseRunner& runner,
+    std::string model_path,
+    std::string model_sha256,
+    const bool tools_enabled,
+    std::string control_socket,
+    std::string governance_path)
     : runner_(runner), model_path_(std::move(model_path)),
-      model_sha256_(std::move(model_sha256))
+      model_sha256_(std::move(model_sha256)), tools_enabled_(tools_enabled),
+      control_socket_(std::move(control_socket)),
+      governance_path_(std::move(governance_path))
 {
+    if (tools_enabled_ && (control_socket_.empty() || governance_path_.empty())) {
+        throw std::invalid_argument(
+            "typed local Goose tools require control socket and governance sidecar paths");
+    }
+    if (!tools_enabled_ && (!control_socket_.empty() || !governance_path_.empty())) {
+        throw std::invalid_argument(
+            "local Goose tool paths require typed tools to be enabled");
+    }
 }
 
 HandlerResult LocalGooseCognitionHandler::execute(const TaskContext& context)
@@ -31,6 +47,9 @@ HandlerResult LocalGooseCognitionHandler::execute(const TaskContext& context)
     request.timeout = context.task.limits.max_runtime;
     request.max_output_bytes = static_cast<std::size_t>(
         context.task.limits.max_output_bytes);
+    request.tools_enabled = tools_enabled_;
+    request.control_socket = control_socket_;
+    request.governance_path = governance_path_;
     const auto run = runner_.run(request);
     if (run.outcome != LocalGooseRunOutcome::succeeded) {
         const char* code = run.outcome == LocalGooseRunOutcome::timed_out
