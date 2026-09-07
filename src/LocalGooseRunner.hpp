@@ -12,7 +12,10 @@ namespace gaudere_agent {
 enum class LocalGooseRunOutcome { succeeded, failed, timed_out, output_too_large };
 
 struct LocalGooseRunRequest {
-    std::string model_path;
+    // Goose 1.49 local inference resolves a registered model id from its local
+    // registry. The registry/model files live under goose_path_root.
+    std::string model_id;
+    std::string goose_path_root = "/var/lib/gaudere/goose";
     std::string prompt;
     std::chrono::milliseconds timeout{std::chrono::minutes{10}};
     std::size_t max_output_bytes = 16 * 1024;
