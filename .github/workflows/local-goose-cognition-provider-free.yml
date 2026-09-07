@@ -151,5 +151,10 @@ jobs:
           grep -q 'local_goose_requested' agent/src/main.cpp
           grep -q 'local Goose requires --local-activity-sidecar PATH' agent/src/main.cpp
           grep -q 'local Goose typed tools require --control-socket PATH' agent/src/main.cpp
+          test -x agent/scripts/prepare-local-goose-model.sh
+          grep -q 'huggingface_home=$container_root/cache/huggingface' agent/scripts/prepare-local-goose-model.sh
+          grep -q -- '--env "HF_HOME=$huggingface_home"' agent/scripts/prepare-local-goose-model.sh
+          grep -q -- '--env "XDG_CACHE_HOME=$container_root/cache"' agent/scripts/prepare-local-goose-model.sh
+          grep -q 'Removed stale Goose registry entry' agent/scripts/prepare-local-goose-model.sh
           ! grep -q 'local-goose' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose' agent/deploy/quadlet/gaudere-agent-openai.container.in
