@@ -17,16 +17,6 @@ namespace {
 constexpr const char* goose_binary = "/usr/local/bin/goose";
 constexpr const char* goose_tools_binary = "/usr/local/bin/gaudere-goose-tools-mcp";
 
-bool regular_readable_model(const std::string& path) noexcept
-{
-    if (path.empty() || path.front() != '/') return false;
-    struct stat metadata {};
-    return ::lstat(path.c_str(), &metadata) == 0
-        && S_ISREG(metadata.st_mode)
-        && !S_ISLNK(metadata.st_mode)
-        && ::access(path.c_str(), R_OK) == 0;
-}
-
 bool safe_absolute_path(const std::string& path) noexcept
 {
     if (path.empty() || path.front() != '/' || path.size() > 240) return false;
@@ -38,6 +28,29 @@ bool safe_absolute_path(const std::string& path) noexcept
         if (!ok) return false;
     }
     return true;
+}
+
+bool safe_model_id(const std::string& value) noexcept
+{
+    if (value.empty() || value.size() > 240) return false;
+    for (const unsigned char c : value) {
+        const bool ok = (c >= 'a' && c <= 'z')
+            || (c >= 'A' && c <= 'Z')
+            || (c >= '0' && c <= '9')
+            || c == '/' || c == '.' || c == '_' || c == ':' || c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+bool readable_directory(const std::string& path) noexcept
+{
+    if (!safe_absolute_path(path)) return false;
+    struct stat metadata {};
+    return ::lstat(path.c_str(), &metadata) == 0
+        && S_ISDIR(metadata.st_mode)
+        && !S_ISLNK(metadata.st_mode)
+        && ::access(path.c_str(), R_OK | X_OK) == 0;
 }
 
 std::vector<char*> pointers(std::vector<std::string>& values)
@@ -61,8 +74,10 @@ void kill_and_reap(const pid_t pid) noexcept
 
 GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request)
 {
-    if (!regular_readable_model(request.model_path))
-        throw std::invalid_argument("local Goose model must be a readable regular absolute path");
+    if (!safe_model_id(request.model_id))
+        throw std::invalid_argument("local Goose model id is invalid");
+    if (!readable_directory(request.goose_path_root))
+        throw std::invalid_argument("local Goose path root must be a readable absolute directory");
     if (request.prompt.empty() || request.prompt.size() > 48 * 1024)
         throw std::invalid_argument("local Goose prompt is empty or oversized");
     if (request.timeout.count() <= 0 || request.max_output_bytes == 0
@@ -88,7 +103,7 @@ GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request
         "--no-profile",
         "--no-session",
         "--provider", "local",
-        "--model", request.model_path
+        "--model", request.model_id
     };
     if (request.tools_enabled) {
         const std::string extension = std::string(goose_tools_binary)
@@ -104,7 +119,8 @@ GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request
     invocation.environment = {
         std::string("GOOSE_MODE=") + (request.tools_enabled ? "auto" : "chat"),
         "GOOSE_PROVIDER=local",
-        "GOOSE_MODEL=" + request.model_path,
+        "GOOSE_MODEL=" + request.model_id,
+        "GOOSE_PATH_ROOT=" + request.goose_path_root,
         "GOOSE_MAX_TURNS=32",
         "HOME=/tmp",
         "PATH=/usr/local/bin:/usr/bin"
