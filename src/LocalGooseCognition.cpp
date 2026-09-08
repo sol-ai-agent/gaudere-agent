@@ -9,6 +9,7 @@
 #include <limits>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
 namespace gaudere_agent {
 namespace {
@@ -62,6 +63,25 @@ bool same_definition(const Task& a, const Task& b) noexcept
         && a.limits.max_output_bytes == b.limits.max_output_bytes
         && a.limits.max_runtime == b.limits.max_runtime
         && a.limits.max_attempts == b.limits.max_attempts;
+}
+
+bool parse_json_without_duplicate_keys(const std::string& raw,
+                                       Json& parsed)
+{
+    bool duplicate = false;
+    std::set<std::pair<int, std::string>> seen;
+    const Json::parser_callback_t callback =
+        [&duplicate, &seen](const int depth,
+                            const Json::parse_event_t event,
+                            Json& value) {
+            if (event == Json::parse_event_t::key) {
+                const auto key = value.get<std::string>();
+                if (!seen.emplace(depth, key).second) duplicate = true;
+            }
+            return true;
+        };
+    parsed = Json::parse(raw, callback);
+    return !duplicate;
 }
 
 } // namespace
@@ -184,7 +204,11 @@ LocalGooseDecisionInspection inspect_local_goose_decision(const std::string& raw
             out.detail = "local Goose decision is empty or oversized";
             return out;
         }
-        const auto parsed = Json::parse(raw);
+        Json parsed;
+        if (!parse_json_without_duplicate_keys(raw, parsed)) {
+            out.detail = "local Goose decision contains duplicate JSON keys";
+            return out;
+        }
         const std::set<std::string> expected{
             "assessment", "decision", "next_wake_after_ms",
             "openai_request", "reason", "schema"};
@@ -247,11 +271,9 @@ LocalGooseDecisionInspection inspect_local_goose_decision(const std::string& raw
             out.detail = "next wake delay has invalid type";
             return out;
         }
+        // The model is responsible for semantic JSON, not byte-level formatting.
+        // Gaudere owns canonical serialization for durable state.
         out.decision.canonical_json = parsed.dump();
-        if (out.decision.canonical_json != raw) {
-            out.detail = "local Goose decision JSON is not canonical";
-            return out;
-        }
         out.eligible = true;
         return out;
     } catch (const std::exception& e) {
@@ -277,7 +299,7 @@ std::string local_goose_prompt(const LocalGooseCognitionInspection& cognition)
         "In this local gate you have no tools, network, secrets, shell, or external-action authority. "
         "If stronger reasoning would genuinely help, you may freely choose request_openai; that choice is recorded "
         "but this gate will not execute OpenAI. There is no instruction to conserve OpenAI merely for conservation's sake. "
-        "Return exactly one canonical JSON object with these six keys and no markdown: "
+        "Return exactly one JSON object with these six keys and no markdown or duplicate keys; whitespace and indentation are allowed: "
         "assessment (string), decision (idle|continue_local|request_openai), "
         "next_wake_after_ms (nonnegative integer or null), openai_request (string only for request_openai, otherwise null), "
         "reason (string), schema (exactly gaudere.cognition.local-goose.decision.v1). "
