@@ -144,6 +144,19 @@ std::string decision(const std::string& kind, const std::string& openai)
         + "\",\"next_wake_after_ms\":86400000,\"openai_request\":null,\"reason\":\"My current state is coherent\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}";
 }
 
+std::string formatted_idle_decision()
+{
+    return
+        "{\n"
+        "  \"assessment\": \"Nothing urgent\",\n"
+        "  \"decision\": \"idle\",\n"
+        "  \"next_wake_after_ms\": 86400000,\n"
+        "  \"openai_request\": null,\n"
+        "  \"reason\": \"My current state is coherent\",\n"
+        "  \"schema\": \"gaudere.cognition.local-goose.decision.v1\"\n"
+        "}\n";
+}
+
 bool contains(const std::vector<std::string>& values, const std::string& value)
 {
     return std::find(values.begin(), values.end(), value) != values.end();
@@ -177,6 +190,16 @@ int main()
     assert(!idle.decision.openai_request);
     assert(idle.decision.next_wake_after_ms == 86400000);
 
+    const auto formatted = inspect_local_goose_decision(formatted_idle_decision());
+    assert(formatted.eligible);
+    assert(formatted.decision.decision == "idle");
+    assert(formatted.decision.canonical_json == decision("idle", ""));
+
+    const auto duplicate = inspect_local_goose_decision(
+        "{\"assessment\":\"first\",\"assessment\":\"second\",\"decision\":\"idle\",\"next_wake_after_ms\":null,\"openai_request\":null,\"reason\":\"x\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}");
+    assert(!duplicate.eligible);
+    assert(duplicate.detail.find("duplicate") != std::string::npos);
+
     const auto escalate = inspect_local_goose_decision(
         decision("request_openai", "Examine the long-term choice"));
     assert(escalate.eligible);
@@ -189,17 +212,19 @@ int main()
         "{\"assessment\":\"x\",\"decision\":\"obey_operator\",\"next_wake_after_ms\":null,\"openai_request\":null,\"reason\":\"x\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}").eligible);
 
     FakeRunner runner;
-    runner.answer = {LocalGooseRunOutcome::succeeded, decision("idle", ""), {}};
+    runner.answer = {LocalGooseRunOutcome::succeeded, formatted_idle_decision(), {}};
     LocalGooseCognitionHandler handler(runner, "/" + model_id, model_sha);
     const TaskContext context{a, [] { return false; }};
     const auto handled = handler.execute(context);
     assert(handled.outcome == HandlerOutcome::succeeded);
     assert(handled.content_type == local_goose_decision_content_type);
+    assert(handled.output == decision("idle", ""));
     assert(runner.calls == 1);
     assert(runner.seen.model_id == model_id);
     assert(runner.seen.prompt.find("Reason as Gaudere, for Gaudere") != std::string::npos);
     assert(runner.seen.prompt.find("No person becomes your owner") != std::string::npos);
     assert(runner.seen.prompt.find("There is no instruction to conserve OpenAI") != std::string::npos);
+    assert(runner.seen.prompt.find("whitespace and indentation are allowed") != std::string::npos);
 
     runner.answer = {LocalGooseRunOutcome::timed_out, {}, "timeout"};
     const auto timeout = handler.execute(context);
@@ -250,7 +275,7 @@ int main()
 
     FakeRunner service_runner;
     service_runner.answer = {
-        LocalGooseRunOutcome::succeeded, decision("idle", ""), {}};
+        LocalGooseRunOutcome::succeeded, formatted_idle_decision(), {}};
     LocalGooseCognitionHandler service_handler(
         service_runner, "/" + model_id, model_sha);
     LocalGooseCognitionService service(
@@ -261,6 +286,7 @@ int main()
     assert(first.healthy);
     assert(first.result == LocalGooseCognitionServiceResult::succeeded);
     assert(first.task && first.task->status == TaskStatus::succeeded);
+    assert(first.task->result && first.task->result->output == decision("idle", ""));
     assert(first.decision && first.decision->decision == "idle");
     assert(service_runner.calls == 1);
 
