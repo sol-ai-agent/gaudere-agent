@@ -7,6 +7,7 @@
 
 #include <cctype>
 #include <limits>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -63,6 +64,33 @@ bool same_definition(const Task& a, const Task& b) noexcept
         && a.limits.max_output_bytes == b.limits.max_output_bytes
         && a.limits.max_runtime == b.limits.max_runtime
         && a.limits.max_attempts == b.limits.max_attempts;
+}
+
+std::optional<std::string> decision_json_payload(const std::string& raw)
+{
+    constexpr const char* lf_prefix = "```json\n";
+    constexpr const char* lf_suffix = "\n```";
+    constexpr const char* crlf_prefix = "```json\r\n";
+    constexpr const char* crlf_suffix = "\r\n```";
+
+    const auto unwrap = [&raw](const std::string& prefix,
+                               const std::string& suffix)
+        -> std::optional<std::string> {
+        if (raw.size() <= prefix.size() + suffix.size()
+            || raw.compare(0, prefix.size(), prefix) != 0
+            || raw.compare(raw.size() - suffix.size(), suffix.size(), suffix) != 0) {
+            return std::nullopt;
+        }
+        return raw.substr(prefix.size(),
+                          raw.size() - prefix.size() - suffix.size());
+    };
+
+    if (raw.compare(0, 3, "```") == 0) {
+        if (auto payload = unwrap(lf_prefix, lf_suffix)) return payload;
+        if (auto payload = unwrap(crlf_prefix, crlf_suffix)) return payload;
+        return std::nullopt;
+    }
+    return raw;
 }
 
 bool parse_json_without_duplicate_keys(const std::string& raw,
@@ -204,8 +232,13 @@ LocalGooseDecisionInspection inspect_local_goose_decision(const std::string& raw
             out.detail = "local Goose decision is empty or oversized";
             return out;
         }
+        const auto payload = decision_json_payload(raw);
+        if (!payload) {
+            out.detail = "local Goose decision framing differs";
+            return out;
+        }
         Json parsed;
-        if (!parse_json_without_duplicate_keys(raw, parsed)) {
+        if (!parse_json_without_duplicate_keys(*payload, parsed)) {
             out.detail = "local Goose decision contains duplicate JSON keys";
             return out;
         }

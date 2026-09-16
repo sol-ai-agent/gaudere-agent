@@ -157,6 +157,11 @@ std::string formatted_idle_decision()
         "}\n";
 }
 
+std::string fenced_idle_decision()
+{
+    return std::string{"```json\n"} + formatted_idle_decision() + "```";
+}
+
 bool contains(const std::vector<std::string>& values, const std::string& value)
 {
     return std::find(values.begin(), values.end(), value) != values.end();
@@ -195,10 +200,37 @@ int main()
     assert(formatted.decision.decision == "idle");
     assert(formatted.decision.canonical_json == decision("idle", ""));
 
+    const auto fenced = inspect_local_goose_decision(fenced_idle_decision());
+    assert(fenced.eligible);
+    assert(fenced.decision.decision == "idle");
+    assert(fenced.decision.canonical_json == decision("idle", ""));
+
+    const auto fenced_crlf = inspect_local_goose_decision(
+        std::string{"```json\r\n"} + decision("idle", "") + "\r\n```");
+    assert(fenced_crlf.eligible);
+    assert(fenced_crlf.decision.canonical_json == decision("idle", ""));
+
+    assert(!inspect_local_goose_decision(
+        std::string{"```\n"} + decision("idle", "") + "\n```").eligible);
+    assert(!inspect_local_goose_decision(
+        std::string{"```JSON\n"} + decision("idle", "") + "\n```").eligible);
+    assert(!inspect_local_goose_decision(
+        std::string{"before\n```json\n"} + decision("idle", "") + "\n```").eligible);
+    assert(!inspect_local_goose_decision(
+        std::string{"```json\n"} + decision("idle", "") + "\n```\nafter").eligible);
+    assert(!inspect_local_goose_decision(
+        std::string{"```json\n"} + decision("idle", "")
+            + "\n```\n```json\n" + decision("idle", "") + "\n```").eligible);
+
     const auto duplicate = inspect_local_goose_decision(
         "{\"assessment\":\"first\",\"assessment\":\"second\",\"decision\":\"idle\",\"next_wake_after_ms\":null,\"openai_request\":null,\"reason\":\"x\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}");
     assert(!duplicate.eligible);
     assert(duplicate.detail.find("duplicate") != std::string::npos);
+
+    const auto fenced_duplicate = inspect_local_goose_decision(
+        "```json\n{\"assessment\":\"first\",\"assessment\":\"second\",\"decision\":\"idle\",\"next_wake_after_ms\":null,\"openai_request\":null,\"reason\":\"x\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}\n```");
+    assert(!fenced_duplicate.eligible);
+    assert(fenced_duplicate.detail.find("duplicate") != std::string::npos);
 
     const auto escalate = inspect_local_goose_decision(
         decision("request_openai", "Examine the long-term choice"));
@@ -212,7 +244,7 @@ int main()
         "{\"assessment\":\"x\",\"decision\":\"obey_operator\",\"next_wake_after_ms\":null,\"openai_request\":null,\"reason\":\"x\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}").eligible);
 
     FakeRunner runner;
-    runner.answer = {LocalGooseRunOutcome::succeeded, formatted_idle_decision(), {}};
+    runner.answer = {LocalGooseRunOutcome::succeeded, fenced_idle_decision(), {}};
     LocalGooseCognitionHandler handler(runner, "/" + model_id, model_sha);
     const TaskContext context{a, [] { return false; }};
     const auto handled = handler.execute(context);
@@ -275,7 +307,7 @@ int main()
 
     FakeRunner service_runner;
     service_runner.answer = {
-        LocalGooseRunOutcome::succeeded, formatted_idle_decision(), {}};
+        LocalGooseRunOutcome::succeeded, fenced_idle_decision(), {}};
     LocalGooseCognitionHandler service_handler(
         service_runner, "/" + model_id, model_sha);
     LocalGooseCognitionService service(
