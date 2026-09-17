@@ -55,7 +55,7 @@ jobs:
       - name: Prove local Goose boundary source
         run: |
           set -eu
-          cognition_files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCycle.cpp agent/src/LocalGooseCycle.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
+          cognition_files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCycle.cpp agent/src/LocalGooseCycle.hpp agent/src/LocalGooseCycleStore.cpp agent/src/LocalGooseCycleStore.hpp agent/src/LocalGooseCycleSidecarInspection.cpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
           tool_files='agent/src/GooseGovernanceStore.cpp agent/src/GooseGovernanceStore.hpp agent/src/GooseToolsMcp.cpp agent/src/GooseToolsMcp.hpp agent/src/goose_tools_mcp_main.cpp'
           grep -q 'request.tools_enabled ? "auto" : "chat"' agent/src/LocalGooseRunner.cpp
           grep -q '"--provider", "local"' agent/src/LocalGooseRunner.cpp
@@ -99,6 +99,13 @@ jobs:
             -o /tmp/local-goose-cycle-test
 
           c++ $common \
+            agent/tests/local_goose_cycle_sidecar_test.cpp \
+            agent/src/LocalGooseCycleStore.cpp \
+            agent/src/LocalGooseCycleSidecarInspection.cpp \
+            -lsqlite3 \
+            -o /tmp/local-goose-cycle-sidecar-test
+
+          c++ $common \
             agent/tests/local_goose_tools_invocation_test.cpp \
             agent/src/LocalGooseRunner.cpp \
             -pthread \
@@ -128,6 +135,7 @@ jobs:
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           /tmp/local-goose-cognition-test
           /tmp/local-goose-cycle-test
+          /tmp/local-goose-cycle-sidecar-test
           /tmp/local-goose-tools-invocation-test
           /tmp/goose-tools-mcp-test
           printf '%s\n' \
