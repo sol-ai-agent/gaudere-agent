@@ -33,6 +33,7 @@ int main()
     const auto invocation = gaudere_agent::make_goose_cli_invocation(request);
     assert(invocation.binary == "/usr/local/bin/goose");
     assert(contains(invocation.argv, "--with-extension"));
+    assert(contains(invocation.argv, "--quiet"));
     assert(contains(invocation.environment, "GOOSE_MODE=auto"));
     assert(contains(invocation.environment, "GOOSE_MAX_TURNS=32"));
     assert(contains(invocation.environment, "GOOSE_MODEL=unsloth/gemma-4-E4B-it-GGUF:Q4_K_M"));
@@ -47,6 +48,61 @@ int main()
     assert(extension + 1 != invocation.argv.end());
     assert(*(extension + 1)
            == "/usr/local/bin/gaudere-goose-tools-mcp --socket /tmp/gaudere-control.sock --governance /var/lib/gaudere/goose-governance.db");
+
+    const auto output_format = std::find(invocation.argv.begin(), invocation.argv.end(),
+                                         "--output-format");
+    assert(output_format != invocation.argv.end());
+    assert(output_format + 1 != invocation.argv.end());
+    assert(*(output_format + 1) == "json");
+
+    const std::string expected_decision =
+        R"({"assessment":"Policy inspected.","decision":"idle","next_wake_after_ms":null,"openai_request":null,"reason":"No action required.","schema":"gaudere.cognition.local-goose.decision.v1"})";
+    const std::string structured_output =
+        R"({
+  "messages": [
+    {
+      "role": "user",
+      "content": [{"type": "text", "text": "inspect policy"}]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {"type": "thinking", "thinking": "I will inspect it."},
+        {"type": "toolRequest", "toolCall": {"status": "success"}}
+      ]
+    },
+    {
+      "role": "user",
+      "content": [{"type": "toolResponse", "toolResult": {"status": "success"}}]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {"type": "thinking", "thinking": "Inspection complete."},
+        {"type": "text", "text": "{\"assessment\":\"Policy inspected.\",\"decision\":\"idle\",\"next_wake_after_ms\":null,\"openai_request\":null,\"reason\":\"No action required.\",\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}"}
+      ]
+    }
+  ],
+  "metadata": {"status": "completed"}
+})";
+
+    const auto inspected =
+        gaudere_agent::inspect_goose_structured_output(structured_output);
+    assert(inspected.eligible);
+    assert(inspected.response == expected_decision);
+    assert(inspected.detail.empty());
+
+    const auto decorated = gaudere_agent::inspect_goose_structured_output(
+        std::string{"\n  \xE2\x94\x80\xE2\x94\x80 tool trace\n"} + structured_output);
+    assert(!decorated.eligible);
+
+    const auto incomplete = gaudere_agent::inspect_goose_structured_output(
+        R"({"messages":[{"role":"assistant","content":[{"type":"text","text":"{}"}]}],"metadata":{"status":"running"}})");
+    assert(!incomplete.eligible);
+
+    const auto ambiguous = gaudere_agent::inspect_goose_structured_output(
+        R"({"messages":[{"role":"assistant","content":[{"type":"text","text":"one"},{"type":"text","text":"two"}]}],"metadata":{"status":"completed"}})");
+    assert(!ambiguous.eligible);
 
     request.control_socket = "/tmp/unsafe socket";
     bool rejected = false;
