@@ -55,7 +55,7 @@ jobs:
       - name: Prove local Goose boundary source
         run: |
           set -eu
-          cognition_files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
+          cognition_files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCycle.cpp agent/src/LocalGooseCycle.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
           tool_files='agent/src/GooseGovernanceStore.cpp agent/src/GooseGovernanceStore.hpp agent/src/GooseToolsMcp.cpp agent/src/GooseToolsMcp.hpp agent/src/goose_tools_mcp_main.cpp'
           grep -q 'request.tools_enabled ? "auto" : "chat"' agent/src/LocalGooseRunner.cpp
           grep -q '"--provider", "local"' agent/src/LocalGooseRunner.cpp
@@ -69,7 +69,7 @@ jobs:
           grep -q 'arbitrary_shell_allowed.*, false' agent/src/GooseToolsMcp.cpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' $cognition_files $tool_files
           ! grep -Eq '/bin/(sh|bash)|developer' agent/src/LocalGooseRunner.cpp $tool_files
-          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' $tool_files
+          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' $cognition_files $tool_files
           ! grep -q 'cognition.current.v0:345f9ec66c316b1513f0d914a2f4ffff3183b4519ca2b7e2a7077e89df6377f3' $cognition_files $tool_files
 
       - name: Compile provider-free local Goose tests
@@ -88,6 +88,15 @@ jobs:
             agent/src/TaskExecutor.cpp \
             $(pkg-config --libs gaudere) -pthread \
             -o /tmp/local-goose-cognition-test
+
+          c++ $common $(pkg-config --cflags gaudere) \
+            agent/tests/local_goose_cycle_test.cpp \
+            agent/src/LocalGooseCycle.cpp \
+            agent/src/LocalGooseCognition.cpp \
+            agent/src/LocalContinuityObservation.cpp \
+            agent/src/Sha256.cpp \
+            $(pkg-config --libs gaudere) \
+            -o /tmp/local-goose-cycle-test
 
           c++ $common \
             agent/tests/local_goose_tools_invocation_test.cpp \
@@ -118,6 +127,7 @@ jobs:
           set -eu
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           /tmp/local-goose-cognition-test
+          /tmp/local-goose-cycle-test
           /tmp/local-goose-tools-invocation-test
           /tmp/goose-tools-mcp-test
           printf '%s\n' \
