@@ -1,5 +1,7 @@
 #include "LocalGooseRunner.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <cerrno>
 #include <csignal>
 #include <fcntl.h>
@@ -14,8 +16,11 @@
 namespace gaudere_agent {
 namespace {
 
+using Json = nlohmann::json;
+
 constexpr const char* goose_binary = "/usr/local/bin/goose";
 constexpr const char* goose_tools_binary = "/usr/local/bin/gaudere-goose-tools-mcp";
+constexpr std::size_t max_goose_structured_output_bytes = 1024 * 1024;
 
 bool safe_absolute_path(const std::string& path) noexcept
 {
@@ -70,6 +75,20 @@ void kill_and_reap(const pid_t pid) noexcept
     while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
 }
 
+void trim_ascii_whitespace(std::string& value)
+{
+    while (!value.empty()
+           && (value.back() == '\n' || value.back() == '\r'
+               || value.back() == ' ' || value.back() == '\t'))
+        value.pop_back();
+    std::size_t first = 0;
+    while (first < value.size()
+           && (value[first] == '\n' || value[first] == '\r'
+               || value[first] == ' ' || value[first] == '\t'))
+        ++first;
+    value.erase(0, first);
+}
+
 } // namespace
 
 GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request)
@@ -114,6 +133,7 @@ GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request
     }
     invocation.argv.insert(invocation.argv.end(), {
         "--quiet",
+        "--output-format", "json",
         "--text", request.prompt
     });
     invocation.environment = {
@@ -126,6 +146,67 @@ GooseCliInvocation make_goose_cli_invocation(const LocalGooseRunRequest& request
         "PATH=/usr/local/bin:/usr/bin"
     };
     return invocation;
+}
+
+GooseStructuredOutputInspection inspect_goose_structured_output(
+    const std::string& raw) noexcept
+{
+    GooseStructuredOutputInspection out;
+    try {
+        if (raw.empty()) {
+            out.detail = "Goose structured output is empty";
+            return out;
+        }
+        const auto parsed = Json::parse(raw);
+        if (!parsed.is_object()
+            || !parsed.contains("messages") || !parsed.at("messages").is_array()
+            || !parsed.contains("metadata") || !parsed.at("metadata").is_object()
+            || parsed.at("metadata").value("status", "") != "completed") {
+            out.detail = "Goose structured output envelope differs";
+            return out;
+        }
+        const auto& messages = parsed.at("messages");
+        if (messages.empty()) {
+            out.detail = "Goose structured output has no messages";
+            return out;
+        }
+        const auto& final_message = messages.back();
+        if (!final_message.is_object()
+            || final_message.value("role", "") != "assistant"
+            || !final_message.contains("content")
+            || !final_message.at("content").is_array()) {
+            out.detail = "Goose structured output lacks final assistant content";
+            return out;
+        }
+
+        bool found_text = false;
+        for (const auto& item : final_message.at("content")) {
+            if (!item.is_object() || !item.contains("type")
+                || !item.at("type").is_string()) {
+                out.detail = "Goose final assistant content framing differs";
+                return out;
+            }
+            if (item.at("type").get<std::string>() != "text") continue;
+            if (found_text || !item.contains("text") || !item.at("text").is_string()) {
+                out.detail = "Goose final assistant text is ambiguous";
+                return out;
+            }
+            out.response = item.at("text").get<std::string>();
+            found_text = true;
+        }
+        if (!found_text) {
+            out.detail = "Goose final assistant text is missing";
+            return out;
+        }
+        out.eligible = true;
+        return out;
+    } catch (const std::exception& error) {
+        out.detail = std::string("invalid Goose structured output: ") + error.what();
+        return out;
+    } catch (...) {
+        out.detail = "invalid Goose structured output";
+        return out;
+    }
 }
 
 PosixLocalGooseRunner::PosixLocalGooseRunner(CooperativePump cooperative_pump)
@@ -183,11 +264,11 @@ LocalGooseRunResult PosixLocalGooseRunner::run(const LocalGooseRunRequest& reque
                 const auto count = ::read(output_pipe[0], buffer, sizeof(buffer));
                 if (count > 0) {
                     output.append(buffer, static_cast<std::size_t>(count));
-                    if (output.size() > request.max_output_bytes) {
+                    if (output.size() > max_goose_structured_output_bytes) {
                         kill_and_reap(pid);
                         ::close(output_pipe[0]);
                         result.outcome = LocalGooseRunOutcome::output_too_large;
-                        result.detail = "Goose output exceeds bound";
+                        result.detail = "Goose structured output exceeds bound";
                         return result;
                     }
                     continue;
@@ -232,10 +313,10 @@ LocalGooseRunResult PosixLocalGooseRunner::run(const LocalGooseRunRequest& reque
                 const auto count = ::read(output_pipe[0], &probe, 1);
                 if (count > 0) {
                     output.push_back(probe);
-                    if (output.size() > request.max_output_bytes) {
+                    if (output.size() > max_goose_structured_output_bytes) {
                         ::close(output_pipe[0]);
                         result.outcome = LocalGooseRunOutcome::output_too_large;
-                        result.detail = "Goose output exceeds bound";
+                        result.detail = "Goose structured output exceeds bound";
                         return result;
                     }
                     continue;
@@ -263,22 +344,27 @@ LocalGooseRunResult PosixLocalGooseRunner::run(const LocalGooseRunRequest& reque
             result.detail = "Goose local inference exited unsuccessfully";
             return result;
         }
-        while (!output.empty()
-               && (output.back() == '\n' || output.back() == '\r'
-                   || output.back() == ' ' || output.back() == '\t'))
-            output.pop_back();
-        std::size_t first = 0;
-        while (first < output.size()
-               && (output[first] == '\n' || output[first] == '\r'
-                   || output[first] == ' ' || output[first] == '\t'))
-            ++first;
-        output.erase(0, first);
-        if (output.empty()) {
-            result.detail = "Goose produced empty output";
+
+        const auto structured = inspect_goose_structured_output(output);
+        if (!structured.eligible) {
+            result.detail = structured.detail.empty()
+                ? "Goose structured output is invalid"
+                : structured.detail;
+            return result;
+        }
+        auto response = structured.response;
+        trim_ascii_whitespace(response);
+        if (response.empty()) {
+            result.detail = "Goose produced empty final response";
+            return result;
+        }
+        if (response.size() > request.max_output_bytes) {
+            result.outcome = LocalGooseRunOutcome::output_too_large;
+            result.detail = "Goose final response exceeds bound";
             return result;
         }
         result.outcome = LocalGooseRunOutcome::succeeded;
-        result.output = std::move(output);
+        result.output = std::move(response);
         return result;
     } catch (const std::exception& e) {
         result.detail = e.what();
