@@ -1,0 +1,115 @@
+name: Local Goose cycle runtime provider-free gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-local-goose-cycle-runtime:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove runtime authority boundary
+        run: |
+          set -eu
+          runtime=agent/src/local_goose_cycle_runtime_main.cpp
+          grep -q 'openai_bootstrap_budget_policy(), false' "$runtime"
+          grep -q 'provider_execution=false automatic_seed=false' "$runtime"
+          grep -q 'LocalGooseCycleService cycle_service' "$runtime"
+          grep -q 'LocalGooseCycleSchedulerBridge cycle_scheduler' "$runtime"
+          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' "$runtime"
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' "$runtime"
+          ! grep -q 'LocalGooseCycleService' agent/src/main.cpp
+          ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent.container
+          ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent-openai.container.in
+
+      - name: Build opt-in runtime
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build-runtime
+          cd build-runtime
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 src/gaudere-local-goose-cycle-runtime
+          test -x src/gaudere-local-goose-cycle-runtime
+          src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--cycle-sidecar PATH'
+
+      - name: Compile canonical preflight fixture
+        run: |
+          set -eu
+          c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Iagent/src \
+            agent/tests/local_goose_cycle_runtime_preflight_test.cpp \
+            agent/src/LocalGooseCycleStore.cpp \
+            -lsqlite3 \
+            -o /tmp/local-goose-cycle-runtime-preflight-fixture
+
+      - name: Prove dormant preflight without activation
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          state=/tmp/gaudere-cycle-runtime-state.db
+          cycle=/tmp/gaudere-cycle-runtime.db
+          model=/tmp/gaudere-cycle-runtime-model.gguf
+          governance=/tmp/gaudere-cycle-runtime-governance.db
+          socket=/tmp/gaudere-cycle-runtime.sock
+          /tmp/local-goose-cycle-runtime-preflight-fixture \
+            "$state" "$cycle" "$model" "$governance"
+          output=$(agent/build-runtime/src/gaudere-local-goose-cycle-runtime \
+            --state "$state" \
+            --cycle-sidecar "$cycle" \
+            --model "$model" \
+            --model-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --governance "$governance" \
+            --control-socket "$socket" \
+            --check)
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -q \
+            'ready state=dormant generation=0 provider_execution=false automatic_seed=false'
+          test ! -e "$socket"
