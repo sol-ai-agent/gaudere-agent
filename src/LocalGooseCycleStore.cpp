@@ -71,10 +71,8 @@ bool prefixed_sha256(const std::string& value, const char* prefix) noexcept
 
 bool predecessor_shape(const LocalGooseCycleCursor& cursor) noexcept
 {
-    if (cursor.generation == 0)
+    if (cursor.generation <= 1)
         return !cursor.predecessor_task_id && !cursor.predecessor_result_sha256;
-    if (!cursor.predecessor_task_id && !cursor.predecessor_result_sha256)
-        return cursor.generation == 1;
     return cursor.predecessor_task_id && cursor.predecessor_result_sha256
         && prefixed_sha256(*cursor.predecessor_task_id, cycle_prefix)
         && lowercase_sha256(*cursor.predecessor_result_sha256);
@@ -114,6 +112,16 @@ bool same_predecessor(const LocalGooseCycleCursor& left,
         && left.predecessor_result_sha256 == right.predecessor_result_sha256;
 }
 
+bool same_opportunity(const LocalGooseCycleCursor& left,
+                      const LocalGooseCycleCursor& right) noexcept
+{
+    return left.generation == right.generation
+        && same_predecessor(left, right)
+        && left.due_at_ms == right.due_at_ms
+        && left.captured_at_ms == right.captured_at_ms
+        && left.current_task_id == right.current_task_id;
+}
+
 void bind_text(sqlite3* database, sqlite3_stmt* statement,
                const int index, const std::string& value)
 {
@@ -123,7 +131,8 @@ void bind_text(sqlite3* database, sqlite3_stmt* statement,
 }
 
 void bind_optional_text(sqlite3* database, sqlite3_stmt* statement,
-                        const int index, const std::optional<std::string>& value)
+                        const int index,
+                        const std::optional<std::string>& value)
 {
     const int result = value
         ? sqlite3_bind_text64(statement, index, value->data(), value->size(),
@@ -133,7 +142,8 @@ void bind_optional_text(sqlite3* database, sqlite3_stmt* statement,
 }
 
 void bind_optional_int64(sqlite3* database, sqlite3_stmt* statement,
-                         const int index, const std::optional<std::int64_t> value)
+                         const int index,
+                         const std::optional<std::int64_t> value)
 {
     const int result = value
         ? sqlite3_bind_int64(statement, index, *value)
@@ -302,7 +312,7 @@ bool valid_local_goose_cycle_transition(
         return false;
 
     if (replacement.state == LocalGooseCycleState::blocked)
-        return replacement.generation == expected.generation;
+        return same_opportunity(expected, replacement);
 
     switch (expected.state) {
     case LocalGooseCycleState::dormant:
