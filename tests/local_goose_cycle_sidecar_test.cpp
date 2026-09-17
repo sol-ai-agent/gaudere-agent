@@ -69,6 +69,14 @@ int main()
         scheduled.state = LocalGooseCycleState::scheduled;
         scheduled.due_at_ms = 10'000;
         assert(valid_local_goose_cycle_transition(seed, scheduled));
+
+        auto invalid_first_predecessor = scheduled;
+        invalid_first_predecessor.predecessor_task_id =
+            "cognition.local-goose-cycle.v1:" + hex('c');
+        invalid_first_predecessor.predecessor_result_sha256 = hex('d');
+        assert(!valid_local_goose_cycle_cursor(invalid_first_predecessor));
+        assert(!valid_local_goose_cycle_transition(seed, invalid_first_predecessor));
+
         const auto scheduled_write = store.replace(seed, scheduled);
         assert(scheduled_write.result == LocalGooseCycleStoreResult::accepted);
 
@@ -108,6 +116,7 @@ int main()
         dormant.due_at_ms.reset();
         dormant.captured_at_ms.reset();
         dormant.current_task_id.clear();
+        assert(valid_local_goose_cycle_cursor(dormant));
         assert(valid_local_goose_cycle_transition(prepared, dormant));
         assert(store.replace(prepared, dormant).result
                == LocalGooseCycleStoreResult::accepted);
@@ -120,6 +129,13 @@ int main()
         assert(valid_local_goose_cycle_transition(dormant, next));
         assert(store.replace(dormant, next).result
                == LocalGooseCycleStoreResult::accepted);
+
+        auto mutated_blocked = next;
+        mutated_blocked.revision = 5;
+        mutated_blocked.state = LocalGooseCycleState::blocked;
+        mutated_blocked.due_at_ms = 20'001;
+        mutated_blocked.blocked_reason = "mutated opportunity";
+        assert(!valid_local_goose_cycle_transition(next, mutated_blocked));
 
         auto blocked = next;
         blocked.revision = 5;
