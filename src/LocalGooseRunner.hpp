@@ -40,8 +40,23 @@ struct GooseCliInvocation {
     std::vector<std::string> environment;
 };
 
+struct GooseStructuredOutputInspection {
+    bool eligible = false;
+    std::string response;
+    std::string detail;
+};
+
 [[nodiscard]] GooseCliInvocation make_goose_cli_invocation(
     const LocalGooseRunRequest& request);
+
+/**
+ * Inspect Goose 1.49 `--quiet --output-format json` output and extract the
+ * unique text content of the final assistant message. Tool/thinking messages
+ * remain part of Goose's machine envelope and are never treated as Gaudere's
+ * final decision text.
+ */
+[[nodiscard]] GooseStructuredOutputInspection inspect_goose_structured_output(
+    const std::string& raw) noexcept;
 
 class LocalGooseRunner {
 public:
