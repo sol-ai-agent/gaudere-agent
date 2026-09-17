@@ -76,7 +76,7 @@ jobs:
           mkdir build-runtime
           cd build-runtime
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 src/gaudere-local-goose-cycle-runtime
+          make --jobs=2 -C src gaudere-local-goose-cycle-runtime
           test -x src/gaudere-local-goose-cycle-runtime
           src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--cycle-sidecar PATH'
 
