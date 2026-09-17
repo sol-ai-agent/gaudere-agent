@@ -57,8 +57,7 @@ int main()
 
     const std::string expected_decision =
         R"({"assessment":"Policy inspected.","decision":"idle","next_wake_after_ms":null,"openai_request":null,"reason":"No action required.","schema":"gaudere.cognition.local-goose.decision.v1"})";
-    const std::string structured_output =
-        R"({
+    const std::string structured_output = R"({
   "messages": [
     {
       "role": "user",
