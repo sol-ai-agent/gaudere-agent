@@ -71,11 +71,25 @@ bool prefixed_sha256(const std::string& value, const char* prefix) noexcept
 
 bool predecessor_shape(const LocalGooseCycleCursor& cursor) noexcept
 {
-    if (cursor.generation <= 1)
-        return !cursor.predecessor_task_id && !cursor.predecessor_result_sha256;
-    return cursor.predecessor_task_id && cursor.predecessor_result_sha256
+    const bool absent = !cursor.predecessor_task_id
+        && !cursor.predecessor_result_sha256;
+    const bool present = cursor.predecessor_task_id
+        && cursor.predecessor_result_sha256
         && prefixed_sha256(*cursor.predecessor_task_id, cycle_prefix)
         && lowercase_sha256(*cursor.predecessor_result_sha256);
+
+    if (cursor.generation == 0) return absent;
+
+    switch (cursor.state) {
+    case LocalGooseCycleState::dormant:
+        return present;
+    case LocalGooseCycleState::scheduled:
+    case LocalGooseCycleState::prepared:
+        return cursor.generation == 1 ? absent : present;
+    case LocalGooseCycleState::blocked:
+        return cursor.generation == 1 ? (absent || present) : present;
+    }
+    return false;
 }
 
 bool same_cursor(const LocalGooseCycleCursor& left,
