@@ -55,7 +55,7 @@ jobs:
       - name: Prove local Goose boundary source
         run: |
           set -eu
-          cognition_files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCycle.cpp agent/src/LocalGooseCycle.hpp agent/src/LocalGooseCycleStore.cpp agent/src/LocalGooseCycleStore.hpp agent/src/LocalGooseCycleSidecarInspection.cpp agent/src/LocalGooseCycleHandler.cpp agent/src/LocalGooseCycleHandler.hpp agent/src/LocalGooseCycleService.cpp agent/src/LocalGooseCycleService.hpp agent/src/LocalGooseCycleSchedulerBridge.cpp agent/src/LocalGooseCycleSchedulerBridge.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp'
+          cognition_files='agent/src/LocalGooseCognition.cpp agent/src/LocalGooseCognition.hpp agent/src/LocalGooseCycle.cpp agent/src/LocalGooseCycle.hpp agent/src/LocalGooseCycleStore.cpp agent/src/LocalGooseCycleStore.hpp agent/src/LocalGooseCycleSidecarInspection.cpp agent/src/LocalGooseCycleHandler.cpp agent/src/LocalGooseCycleHandler.hpp agent/src/LocalGooseCycleService.cpp agent/src/LocalGooseCycleService.hpp agent/src/LocalGooseCycleSchedulerBridge.cpp agent/src/LocalGooseCycleSchedulerBridge.hpp agent/src/LocalGooseCognitionHandler.cpp agent/src/LocalGooseCognitionHandler.hpp agent/src/LocalGooseCognitionService.cpp agent/src/LocalGooseCognitionService.hpp agent/src/LocalGooseRunner.cpp agent/src/LocalGooseRunner.hpp agent/src/local_goose_cycle_runtime_main.cpp'
           tool_files='agent/src/GooseGovernanceStore.cpp agent/src/GooseGovernanceStore.hpp agent/src/GooseToolsMcp.cpp agent/src/GooseToolsMcp.hpp agent/src/goose_tools_mcp_main.cpp'
           grep -q 'request.tools_enabled ? "auto" : "chat"' agent/src/LocalGooseRunner.cpp
           grep -q '"--provider", "local"' agent/src/LocalGooseRunner.cpp
@@ -67,6 +67,8 @@ jobs:
           grep -q 'posix_spawn' agent/src/LocalGooseRunner.cpp
           grep -q 'local_risk_promotion_allowed.*, false' agent/src/GooseToolsMcp.cpp
           grep -q 'arbitrary_shell_allowed.*, false' agent/src/GooseToolsMcp.cpp
+          grep -q 'provider_execution=false automatic_seed=false' agent/src/local_goose_cycle_runtime_main.cpp
+          grep -q 'openai_bootstrap_budget_policy(), false' agent/src/local_goose_cycle_runtime_main.cpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' $cognition_files $tool_files
           ! grep -Eq '/bin/(sh|bash)|developer' agent/src/LocalGooseRunner.cpp $tool_files
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' $cognition_files $tool_files
@@ -176,6 +178,8 @@ jobs:
           make --jobs=2
           test -x src/gaudere-agent
           test -x src/gaudere-goose-tools-mcp
+          test -x src/gaudere-local-goose-cycle-runtime
+          src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--cycle-sidecar PATH'
 
       - name: Prove pinned Goose runtime and opt-in service gate
         run: |
@@ -187,6 +191,9 @@ jobs:
           grep -q 'local_goose_requested' agent/src/main.cpp
           grep -q 'local Goose requires --local-activity-sidecar PATH' agent/src/main.cpp
           grep -q 'local Goose typed tools require --control-socket PATH' agent/src/main.cpp
+          grep -q 'gaudere-local-goose-cycle-runtime' agent/src/Makefile.am
+          grep -q 'LocalGooseCycleService cycle_service' agent/src/local_goose_cycle_runtime_main.cpp
+          grep -q 'LocalGooseCycleSchedulerBridge cycle_scheduler' agent/src/local_goose_cycle_runtime_main.cpp
           test -x agent/scripts/prepare-local-goose-model.sh
           grep -q 'huggingface_home=$container_root/cache/huggingface' agent/scripts/prepare-local-goose-model.sh
           grep -q -- '--env "HF_HOME=$huggingface_home"' agent/scripts/prepare-local-goose-model.sh
