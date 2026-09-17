@@ -1,6 +1,7 @@
 #ifndef GAUDERE_AGENT_LOCAL_GOOSE_CYCLE_SERVICE_HPP
 #define GAUDERE_AGENT_LOCAL_GOOSE_CYCLE_SERVICE_HPP
 
+#include "LocalGooseCognition.hpp"
 #include "LocalGooseCycleHandler.hpp"
 #include "LocalGooseCycleStore.hpp"
 
