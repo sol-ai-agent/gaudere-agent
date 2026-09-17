@@ -280,7 +280,7 @@ int main()
     assert(invocation.argv == std::vector<std::string>({
         "/usr/local/bin/goose", "run", "--no-profile", "--no-session",
         "--provider", "local", "--model", model_id,
-        "--quiet", "--text", "canonical test prompt"}));
+        "--quiet", "--output-format", "json", "--text", "canonical test prompt"}));
     assert(contains(invocation.environment, "GOOSE_MODE=chat"));
     assert(contains(invocation.environment, "GOOSE_PROVIDER=local"));
     assert(contains(invocation.environment, "GOOSE_MODEL=" + model_id));
