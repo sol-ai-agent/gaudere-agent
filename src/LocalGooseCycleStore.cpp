@@ -78,18 +78,8 @@ bool predecessor_shape(const LocalGooseCycleCursor& cursor) noexcept
         && prefixed_sha256(*cursor.predecessor_task_id, cycle_prefix)
         && lowercase_sha256(*cursor.predecessor_result_sha256);
 
-    if (cursor.generation == 0) return absent;
-
-    switch (cursor.state) {
-    case LocalGooseCycleState::dormant:
-        return present;
-    case LocalGooseCycleState::scheduled:
-    case LocalGooseCycleState::prepared:
-        return cursor.generation == 1 ? absent : present;
-    case LocalGooseCycleState::blocked:
-        return cursor.generation == 1 ? (absent || present) : present;
-    }
-    return false;
+    if (cursor.generation <= 1) return absent;
+    return present;
 }
 
 bool same_cursor(const LocalGooseCycleCursor& left,
@@ -295,7 +285,8 @@ bool valid_local_goose_cycle_cursor(const LocalGooseCycleCursor& cursor) noexcep
 
     switch (cursor.state) {
     case LocalGooseCycleState::dormant:
-        return !cursor.due_at_ms && !cursor.captured_at_ms
+        return cursor.generation != 1
+            && !cursor.due_at_ms && !cursor.captured_at_ms
             && cursor.current_task_id.empty() && cursor.blocked_reason.empty();
     case LocalGooseCycleState::scheduled:
         return cursor.generation >= 1 && cursor.due_at_ms
@@ -329,10 +320,14 @@ bool valid_local_goose_cycle_transition(
         return same_opportunity(expected, replacement);
 
     switch (expected.state) {
-    case LocalGooseCycleState::dormant:
+    case LocalGooseCycleState::dormant: {
+        const auto scheduled_generation = expected.generation == 0
+            ? std::uint64_t{1}
+            : expected.generation;
         return replacement.state == LocalGooseCycleState::scheduled
-            && replacement.generation == expected.generation + 1
+            && replacement.generation == scheduled_generation
             && same_predecessor(expected, replacement);
+    }
 
     case LocalGooseCycleState::scheduled:
         return replacement.state == LocalGooseCycleState::prepared
@@ -346,11 +341,9 @@ bool valid_local_goose_cycle_transition(
                 == std::optional<std::string>{expected.current_task_id}
             && replacement.predecessor_result_sha256.has_value();
         if (!predecessor_advanced) return false;
-        if (replacement.state == LocalGooseCycleState::dormant)
-            return replacement.generation == expected.generation;
-        if (replacement.state == LocalGooseCycleState::scheduled)
-            return replacement.generation == expected.generation + 1;
-        return false;
+        return (replacement.state == LocalGooseCycleState::dormant
+                || replacement.state == LocalGooseCycleState::scheduled)
+            && replacement.generation == expected.generation + 1;
     }
 
     case LocalGooseCycleState::blocked:
