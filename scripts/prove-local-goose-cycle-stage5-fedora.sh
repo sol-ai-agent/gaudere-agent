@@ -287,7 +287,7 @@ print(f"STAGE5_NEXT_STATE={'dormant' if cursor[1] == 0 else 'scheduled'}")
 PY
 
 printf '\n=== PRODUCTION PRESERVATION ===\n'
-[ "$($systemctl_command --user is-active gaudere-agent.service)" = "active" ] || fail "production service stopped during proof"
+[ "$($systemctl_command --user is-active gaudere-agent.service)" = "active" ] || fail "production service is not active after proof"
 production_image_after=$($podman_command inspect gaudere-agent --format '{{.Image}}' 2>/dev/null | sed 's/^sha256://')
 [ "$production_image_after" = "$expected_production_image" ] || fail "production image changed during proof"
 provider_after=$(sqlite3 -readonly "$state_database" "SELECT COUNT(*) FROM budget_consumptions WHERE scope='provider.call:openai.responses';")
