@@ -46,7 +46,7 @@ void usage(const char* program)
     std::cout
         << "Usage: " << program
         << " --state PATH --cycle-sidecar PATH"
-        << " --model PATH --model-sha256 SHA256"
+        << " --model MODEL --model-sha256 SHA256"
         << " --governance PATH --control-socket PATH [--check]\n";
 }
 
@@ -95,7 +95,8 @@ Options parse_options(const int argc, char* argv[])
     if (options.state_path.front() != '/' || options.cycle_sidecar.front() != '/'
         || options.model.front() != '/' || options.governance.front() != '/'
         || options.control_socket.front() != '/') {
-        throw std::invalid_argument("all runtime paths must be absolute");
+        throw std::invalid_argument(
+            "runtime paths and Local Goose model selector must use absolute form");
     }
     if (!canonical_sha256(options.model_sha256)) {
         throw std::invalid_argument(
@@ -149,9 +150,13 @@ const char* state_name(const gaudere_agent::LocalGooseCycleState state) noexcept
 
 void validate_files(const Options& options)
 {
+    // options.model is the absolute-form Goose registry selector already used
+    // by the existing Local Goose runtime (for example /vendor/model:quant).
+    // The model weights are resolved by Goose below goose_path_root; the
+    // selector itself is deliberately not required to exist as a filesystem
+    // object.
     require_regular_non_symlink(options.state_path, "state database");
     require_regular_non_symlink(options.cycle_sidecar, "Local Goose cycle sidecar");
-    require_regular_non_symlink(options.model, "Local Goose model");
     require_regular_non_symlink(options.governance, "Local Goose governance sidecar");
 
     require_distinct(options.state_path, options.cycle_sidecar,
