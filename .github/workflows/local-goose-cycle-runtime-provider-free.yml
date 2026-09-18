@@ -140,7 +140,10 @@ jobs:
       - name: Prove production activation gate remains explicit and provider-free
         run: |
           set -eu
-          test -f agent/scripts/activate-local-goose-cycle-production.sh
+          test -x agent/scripts/activate-local-goose-cycle-production.sh
+          test -f agent/scripts/backup-state.sh
+          test ! -x agent/scripts/backup-state.sh
+          grep -q '\[ -f "\$backup_script" \]' agent/scripts/activate-local-goose-cycle-production.sh
           sh -n agent/scripts/activate-local-goose-cycle-production.sh
           grep -q 'AUTHORIZED_LOCAL_GOOSE_CYCLE_PRODUCTION' agent/scripts/activate-local-goose-cycle-production.sh
           grep -q 'GAUDERE_EXPECTED_PROVIDER_TOTAL' agent/scripts/activate-local-goose-cycle-production.sh

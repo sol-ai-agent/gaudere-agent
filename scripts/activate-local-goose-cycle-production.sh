@@ -55,9 +55,12 @@ provider_total()
 for command in "$podman_command" "$systemctl_command" git python3 sqlite3         sha256sum tar install mkdir mktemp mv rm sed grep awk sleep date tail; do
     command -v "$command" >/dev/null 2>&1         || fail "required command not found: $command"
 done
-[ -x "$backup_script" ] || fail "backup script is missing"
-[ -x "$build_script" ] || fail "image build script is missing"
-[ -x "$provenance_script" ] || fail "image provenance verifier is missing"
+[ -f "$backup_script" ] && [ ! -L "$backup_script" ] \
+    || fail "backup script is missing or unsafe"
+[ -f "$build_script" ] && [ ! -L "$build_script" ] \
+    || fail "image build script is missing or unsafe"
+[ -f "$provenance_script" ] && [ ! -L "$provenance_script" ] \
+    || fail "image provenance verifier is missing or unsafe"
 [ -f "$state_database" ] && [ ! -L "$state_database" ]     || fail "production state database is missing or unsafe"
 [ -f "$activity_sidecar" ] && [ ! -L "$activity_sidecar" ]     || fail "local activity sidecar is missing or unsafe"
 [ -f "$governance_sidecar" ] && [ ! -L "$governance_sidecar" ]     || fail "Goose governance sidecar is missing or unsafe"
