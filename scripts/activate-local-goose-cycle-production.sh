@@ -52,7 +52,7 @@ provider_total()
 
 [ "$authorization" = "AUTHORIZED_LOCAL_GOOSE_CYCLE_PRODUCTION" ]     || fail "explicit production authorization token is required"
 
-for command in "$podman_command" "$systemctl_command" git python3 sqlite3         sha256sum tar install mkdir mktemp mv rm sed grep awk sleep date; do
+for command in "$podman_command" "$systemctl_command" git python3 sqlite3         sha256sum tar install mkdir mktemp mv rm sed grep awk sleep date tail; do
     command -v "$command" >/dev/null 2>&1         || fail "required command not found: $command"
 done
 [ -x "$backup_script" ] || fail "backup script is missing"
@@ -245,7 +245,6 @@ backup_archive=$(GAUDERE_STATE_DIR="$state_directory" sh "$backup_script")
 printf 'BACKUP=%s\n' "$backup_archive"
 
 seed_output=$("$podman_command" run --rm --network none     --userns=keep-id --read-only --read-only-tmpfs     --security-opt=no-new-privileges --cap-drop=all     --volume "$state_directory:/var/lib/gaudere:Z"     --entrypoint /usr/local/bin/gaudere-local-goose-cycle-seed     "$candidate_id"     --state /var/lib/gaudere/state.db     --activity-sidecar /var/lib/gaudere/local-activity-pulse.db     --cycle-sidecar /var/lib/gaudere/local-goose-cycle.db)
-state_mutated=1
 printf '%s\n' "$seed_output"
 printf '%s\n' "$seed_output" | grep -q '"state":"dormant"'     || fail "explicit seed did not produce dormant state"
 
