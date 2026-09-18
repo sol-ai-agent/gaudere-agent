@@ -131,4 +131,6 @@ jobs:
           grep -q -- '--network=none' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
           grep -q -- '--once' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
           grep -q 'GAUDERE_EXPECTED_PROVIDER_TOTAL' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          grep -q '\$proof_runtime/runtime.log' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          ! grep -q '\$proof_runtime/log"' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
           ! grep -Eq -- '--user[[:space:]]+(stop|restart)([[:space:]]|$)' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
