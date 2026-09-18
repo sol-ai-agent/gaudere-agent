@@ -15,6 +15,10 @@
 #include "LocalEchoHandler.hpp"
 #include "LocalGooseCognitionHandler.hpp"
 #include "LocalGooseCognitionService.hpp"
+#include "LocalGooseCycleHandler.hpp"
+#include "LocalGooseCycleSchedulerBridge.hpp"
+#include "LocalGooseCycleService.hpp"
+#include "LocalGooseCycleStore.hpp"
 #include "LocalGooseRunner.hpp"
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
@@ -76,6 +80,7 @@ struct Options {
     std::string local_goose_model;
     std::string local_goose_model_sha256;
     std::string local_goose_governance;
+    std::string local_goose_cycle_sidecar;
 };
 
 void usage(const char* program)
@@ -92,6 +97,7 @@ void usage(const char* program)
         << "[--local-activity-sidecar PATH] "
         << "[--local-goose-model PATH --local-goose-model-sha256 SHA256 "
         << "--local-goose-governance PATH] "
+        << "[--local-goose-cycle-sidecar PATH] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -158,6 +164,8 @@ Options parse_options(const int argc, char* argv[])
             options.local_goose_model_sha256 = argv[++index];
         } else if (argument == "--local-goose-governance" && index + 1 < argc) {
             options.local_goose_governance = argv[++index];
+        } else if (argument == "--local-goose-cycle-sidecar" && index + 1 < argc) {
+            options.local_goose_cycle_sidecar = argv[++index];
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -203,7 +211,8 @@ Options parse_options(const int argc, char* argv[])
         throw std::invalid_argument(
             "--local-activity-sidecar is only valid in service mode");
     }
-    if (local_goose_requested(options) && modes != 0) {
+    if ((local_goose_requested(options) || !options.local_goose_cycle_sidecar.empty())
+        && modes != 0) {
         throw std::invalid_argument(
             "local Goose cognition is only valid in service mode");
     }
@@ -231,6 +240,12 @@ Options parse_options(const int argc, char* argv[])
         && !gaudere_agent::parse_local_wait_duration(options.text)) {
         throw std::invalid_argument(
             "--enqueue-wait MS must be an integer from 1 to 5000");
+    }
+
+    if (!options.local_goose_cycle_sidecar.empty()
+        && !local_goose_requested(options)) {
+        throw std::invalid_argument(
+            "--local-goose-cycle-sidecar requires the complete local Goose configuration");
     }
 
     if (local_goose_requested(options)) {
@@ -380,6 +395,43 @@ void require_distinct_regular_local_activity_sidecar(const Options& options)
     }
 }
 
+void require_distinct_regular_local_goose_cycle_sidecar(const Options& options)
+{
+    if (options.local_goose_cycle_sidecar.empty()) return;
+
+    const auto sidecar_status =
+        std::filesystem::symlink_status(options.local_goose_cycle_sidecar);
+    if (!std::filesystem::is_regular_file(sidecar_status)) {
+        throw std::invalid_argument(
+            "Local Goose cycle sidecar must already exist as a regular non-symlink file");
+    }
+
+    const auto cycle = std::filesystem::weakly_canonical(
+        options.local_goose_cycle_sidecar);
+    const auto state = std::filesystem::weakly_canonical(options.state_path);
+    const auto activity = std::filesystem::weakly_canonical(
+        options.local_activity_sidecar);
+    const auto governance = std::filesystem::weakly_canonical(
+        options.local_goose_governance);
+    if (cycle == state || cycle == activity || cycle == governance) {
+        throw std::invalid_argument(
+            "Local Goose cycle sidecar must be distinct from state/activity/governance databases");
+    }
+    if (!options.autonomous_pulse_sidecar.empty()
+        && cycle == std::filesystem::weakly_canonical(
+            options.autonomous_pulse_sidecar)) {
+        throw std::invalid_argument(
+            "Local Goose cycle sidecar must be distinct from autonomous pulse database");
+    }
+
+    const auto inspection = gaudere_agent::inspect_local_goose_cycle_sidecar(
+        options.local_goose_cycle_sidecar);
+    if (!inspection.eligible || !inspection.cursor) {
+        throw std::invalid_argument(
+            "Local Goose cycle sidecar is not eligible: " + inspection.detail);
+    }
+}
+
 void require_distinct_local_goose_governance(const Options& options)
 {
     if (!local_goose_requested(options)) return;
@@ -388,7 +440,10 @@ void require_distinct_local_goose_governance(const Options& options)
     const auto state = std::filesystem::weakly_canonical(options.state_path);
     const auto activity = std::filesystem::weakly_canonical(
         options.local_activity_sidecar);
-    if (governance == state || governance == activity) {
+    if (governance == state || governance == activity
+        || (!options.local_goose_cycle_sidecar.empty()
+            && governance == std::filesystem::weakly_canonical(
+                options.local_goose_cycle_sidecar))) {
         throw std::invalid_argument(
             "local Goose governance sidecar must be distinct from state/pulse databases");
     }
@@ -515,6 +570,7 @@ int main(int argc, char* argv[])
         std::cout << std::unitbuf;
         require_distinct_regular_pulse_sidecar(options);
         require_distinct_regular_local_activity_sidecar(options);
+        require_distinct_regular_local_goose_cycle_sidecar(options);
         require_distinct_local_goose_governance(options);
 
         sigset_t signals{};
