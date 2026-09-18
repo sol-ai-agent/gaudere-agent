@@ -60,6 +60,8 @@ jobs:
           grep -q 'provider_execution=false automatic_seed=false' "$runtime"
           grep -q 'LocalGooseCycleService cycle_service' "$runtime"
           grep -q 'LocalGooseCycleSchedulerBridge cycle_scheduler' "$runtime"
+          grep -q 'options.once' "$runtime"
+          grep -q 'once=complete' "$runtime"
           ! grep -q 'require_regular_non_symlink(options.model' "$runtime"
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' "$runtime"
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' "$runtime"
@@ -81,6 +83,7 @@ jobs:
           test -x src/gaudere-local-goose-cycle-runtime
           src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--cycle-sidecar PATH'
           src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--model MODEL'
+          src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--once'
 
       - name: Compile canonical preflight fixture
         run: |
@@ -117,3 +120,17 @@ jobs:
             'ready state=dormant generation=0 provider_execution=false automatic_seed=false'
           test ! -e "$model"
           test ! -e "$socket"
+
+      - name: Prove stage-5 Fedora harness remains isolated
+        run: |
+          set -eu
+          grep -q 'gaudere-local-goose-cycle-runtime /opt/runtime/bin' agent/Containerfile ||             grep -q 'gaudere-local-goose-cycle-runtime /opt/runtime/bin/' agent/Containerfile
+          grep -q '/usr/local/bin/gaudere-local-goose-cycle-runtime' agent/Containerfile
+          test -f agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          sh -n agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          grep -q -- '--network=none' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          grep -q -- '--once' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          grep -q 'GAUDERE_EXPECTED_PROVIDER_TOTAL' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          grep -q '\$proof_runtime/runtime.log' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          ! grep -q '\$proof_runtime/log"' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+          ! grep -Eq -- '--user[[:space:]]+(stop|restart)([[:space:]]|$)' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh

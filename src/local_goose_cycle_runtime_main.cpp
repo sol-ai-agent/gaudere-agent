@@ -39,6 +39,7 @@ struct Options {
     std::string governance;
     std::string control_socket;
     bool check_only = false;
+    bool once = false;
 };
 
 void usage(const char* program)
@@ -47,7 +48,7 @@ void usage(const char* program)
         << "Usage: " << program
         << " --state PATH --cycle-sidecar PATH"
         << " --model MODEL --model-sha256 SHA256"
-        << " --governance PATH --control-socket PATH [--check]\n";
+        << " --governance PATH --control-socket PATH [--check | --once]\n";
 }
 
 bool canonical_sha256(const std::string& value)
@@ -78,6 +79,8 @@ Options parse_options(const int argc, char* argv[])
             options.control_socket = argv[++index];
         } else if (argument == "--check") {
             options.check_only = true;
+        } else if (argument == "--once") {
+            options.once = true;
         } else if (argument == "--help") {
             usage(argv[0]);
             std::exit(0);
@@ -101,6 +104,9 @@ Options parse_options(const int argc, char* argv[])
     if (!canonical_sha256(options.model_sha256)) {
         throw std::invalid_argument(
             "model SHA256 must be 64 lowercase hexadecimal characters");
+    }
+    if (options.check_only && options.once) {
+        throw std::invalid_argument("--check and --once are mutually exclusive");
     }
     return options;
 }
@@ -276,6 +282,8 @@ int main(int argc, char* argv[])
         }
 
         bool cycle_monitoring = true;
+        bool once_terminal = false;
+        bool once_succeeded = false;
         const auto step_cycle = [&]() {
             const auto step = cycle_service.step();
             auto cursor = step.cursor;
@@ -296,6 +304,15 @@ int main(int argc, char* argv[])
             if (step.decision) {
                 std::cout << "gaudere-local-goose-cycle-runtime: decision="
                           << step.decision->decision << '\n';
+                if (options.once) {
+                    once_terminal = true;
+                    once_succeeded = true;
+                }
+            }
+            if (options.once
+                && step.result == gaudere_agent::LocalGooseCycleServiceResult::blocked) {
+                once_terminal = true;
+                once_succeeded = false;
             }
             if (!step.detail.empty()) {
                 std::cout << "gaudere-local-goose-cycle-runtime: "
@@ -346,7 +363,7 @@ int main(int argc, char* argv[])
             work_controller.stop();
         });
 
-        if (!step_cycle()) {
+        if (!step_cycle() || once_terminal) {
             stop_requested.store(true);
             work_controller.stop();
             internal_wake.store(true);
@@ -376,12 +393,15 @@ int main(int argc, char* argv[])
                 continue;
             }
 
-            if (cycle_monitoring && !step_cycle()) {
-                stop_requested.store(true);
-                work_controller.stop();
-                internal_wake.store(true);
-                if (pthread_kill(signal_waiter.native_handle(), SIGUSR1) != 0)
-                    signal_wait_failed.store(true);
+            if (cycle_monitoring) {
+                const bool cycle_ok = step_cycle();
+                if (!cycle_ok || once_terminal) {
+                    stop_requested.store(true);
+                    work_controller.stop();
+                    internal_wake.store(true);
+                    if (pthread_kill(signal_waiter.native_handle(), SIGUSR1) != 0)
+                        signal_wait_failed.store(true);
+                }
             }
         }
 
@@ -405,6 +425,11 @@ int main(int argc, char* argv[])
                 << "gaudere-local-goose-cycle-runtime: work controller state conflict\n";
             return 2;
         }
+        if (options.once && once_terminal && !once_succeeded) {
+            std::cerr
+                << "gaudere-local-goose-cycle-runtime: once cycle failed closed\n";
+            return 3;
+        }
 
         work_runtime.request_shutdown();
         if (!work_runtime.try_mark_safe()) {
@@ -413,6 +438,9 @@ int main(int argc, char* argv[])
             return 2;
         }
 
+        if (options.once && once_succeeded) {
+            std::cout << "gaudere-local-goose-cycle-runtime: once=complete\n";
+        }
         std::cout << "gaudere-local-goose-cycle-runtime: safe\n";
         return 0;
     } catch (const std::exception& error) {
