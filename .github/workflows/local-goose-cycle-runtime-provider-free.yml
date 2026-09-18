@@ -60,6 +60,7 @@ jobs:
           grep -q 'provider_execution=false automatic_seed=false' "$runtime"
           grep -q 'LocalGooseCycleService cycle_service' "$runtime"
           grep -q 'LocalGooseCycleSchedulerBridge cycle_scheduler' "$runtime"
+          ! grep -q 'require_regular_non_symlink(options.model' "$runtime"
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' "$runtime"
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' "$runtime"
           ! grep -q 'LocalGooseCycleService' agent/src/main.cpp
@@ -79,6 +80,7 @@ jobs:
           make --jobs=2 -C src gaudere-local-goose-cycle-runtime
           test -x src/gaudere-local-goose-cycle-runtime
           src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--cycle-sidecar PATH'
+          src/gaudere-local-goose-cycle-runtime --help | grep -q -- '--model MODEL'
 
       - name: Compile canonical preflight fixture
         run: |
@@ -96,11 +98,12 @@ jobs:
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           state=/tmp/gaudere-cycle-runtime-state.db
           cycle=/tmp/gaudere-cycle-runtime.db
-          model=/tmp/gaudere-cycle-runtime-model.gguf
+          model=/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M
           governance=/tmp/gaudere-cycle-runtime-governance.db
           socket=/tmp/gaudere-cycle-runtime.sock
           /tmp/local-goose-cycle-runtime-preflight-fixture \
             "$state" "$cycle" "$model" "$governance"
+          test ! -e "$model"
           output=$(agent/build-runtime/src/gaudere-local-goose-cycle-runtime \
             --state "$state" \
             --cycle-sidecar "$cycle" \
@@ -112,4 +115,5 @@ jobs:
           printf '%s\n' "$output"
           printf '%s\n' "$output" | grep -q \
             'ready state=dormant generation=0 provider_execution=false automatic_seed=false'
+          test ! -e "$model"
           test ! -e "$socket"

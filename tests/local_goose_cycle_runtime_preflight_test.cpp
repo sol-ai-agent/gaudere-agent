@@ -30,7 +30,6 @@ int main(int argc, char* argv[])
     std::remove(governance.c_str());
 
     std::ofstream(state).put('\n');
-    std::ofstream(model).put('\n');
     std::ofstream(governance).put('\n');
 
     gaudere_agent::LocalGooseCycleCursor cursor;
