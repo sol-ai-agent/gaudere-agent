@@ -252,7 +252,7 @@ cat "$proof_runtime/runtime.log"
 grep -q 'provider_execution=false automatic_seed=false' "$proof_runtime/runtime.log" || fail "provider-free runtime marker missing"
 grep -q 'gaudere-local-goose-cycle-runtime: decision=' "$proof_runtime/runtime.log" || fail "no canonical local decision was emitted"
 grep -q 'gaudere-local-goose-cycle-runtime: once=complete' "$proof_runtime/runtime.log" || fail "one-cycle completion marker missing"
-grep -q 'gaudere-local-goose-cycle-runtime: safe' "$proof_runtime/log" || fail "safe shutdown marker missing"
+grep -q 'gaudere-local-goose-cycle-runtime: safe' "$proof_runtime/runtime.log" || fail "safe shutdown marker missing"
 [ ! -e "$proof_runtime/control.sock" ] || fail "control socket remained after runtime shutdown"
 
 python3 - "$proof_runtime/state.db" "$proof_runtime/local-goose-cycle.db" "$expected_provider_total" <<'PY'
