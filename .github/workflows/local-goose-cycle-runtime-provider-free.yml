@@ -65,7 +65,9 @@ jobs:
           ! grep -q 'require_regular_non_symlink(options.model' "$runtime"
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' "$runtime"
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' "$runtime"
-          ! grep -q 'LocalGooseCycleService' agent/src/main.cpp
+          grep -q 'LocalGooseCycleService' agent/src/main.cpp
+          grep -q -- '--local-goose-cycle-sidecar' agent/src/main.cpp
+          grep -q 'provider_execution=false automatic_seed=false' agent/src/main.cpp
           ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent-openai.container.in
 
