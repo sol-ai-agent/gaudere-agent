@@ -72,6 +72,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-local-activity-seed /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-activity-status /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-goose-tools-mcp /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-runtime /opt/runtime/bin/ \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1-prepare \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1 \
@@ -81,7 +82,8 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && test -x /opt/runtime/bin/gaudere-continuity-delta-checkpoint \
     && test -x /opt/runtime/bin/gaudere-local-activity-seed \
     && test -x /opt/runtime/bin/gaudere-local-activity-status \
-    && test -x /opt/runtime/bin/gaudere-goose-tools-mcp
+    && test -x /opt/runtime/bin/gaudere-goose-tools-mcp \
+    && test -x /opt/runtime/bin/gaudere-local-goose-cycle-runtime
 
 # Goose is pinned independently of the Gaudere source tree. Keep the download
 # and archive verification in a disposable stage so the final runtime image does
@@ -131,6 +133,7 @@ RUN test -x /usr/local/bin/gaudere-resume-after-wake \
     && test -x /usr/local/bin/gaudere-local-activity-seed \
     && test -x /usr/local/bin/gaudere-local-activity-status \
     && test -x /usr/local/bin/gaudere-goose-tools-mcp \
+    && test -x /usr/local/bin/gaudere-local-goose-cycle-runtime \
     && test -x /usr/local/bin/goose \
     && /usr/local/bin/goose --version \
     && echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
