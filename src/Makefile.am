@@ -347,3 +347,55 @@ gaudere_goose_tools_mcp_SOURCES = \
 
 gaudere_goose_tools_mcp_LDADD = $(JSON_LIBS) -lsqlite3
 gaudere_goose_tools_mcp_LDFLAGS = -pthread
+
+bin_PROGRAMS += gaudere-local-goose-cycle-runtime
+
+gaudere_local_goose_cycle_runtime_SOURCES = \
+	local_goose_cycle_runtime_main.cpp \
+	BoundedReflection.cpp \
+	BoundedReflection.hpp \
+	ExplicitWake.cpp \
+	ExplicitWake.hpp \
+	LiveControl.cpp \
+	LiveControl.hpp \
+	LiveControlProcessor.cpp \
+	LiveControlProcessor.hpp \
+	LocalContinuityObservation.cpp \
+	LocalContinuityObservation.hpp \
+	LocalEchoHandler.cpp \
+	LocalEchoHandler.hpp \
+	LocalGooseCognition.cpp \
+	LocalGooseCognition.hpp \
+	LocalGooseCycle.cpp \
+	LocalGooseCycle.hpp \
+	LocalGooseCycleHandler.cpp \
+	LocalGooseCycleHandler.hpp \
+	LocalGooseCycleSchedulerBridge.cpp \
+	LocalGooseCycleSchedulerBridge.hpp \
+	LocalGooseCycleService.cpp \
+	LocalGooseCycleService.hpp \
+	LocalGooseCycleSidecarInspection.cpp \
+	LocalGooseCycleStore.cpp \
+	LocalGooseCycleStore.hpp \
+	LocalGooseRunner.cpp \
+	LocalGooseRunner.hpp \
+	OpenAIBudget.hpp \
+	OpenAITask.cpp \
+	OpenAITask.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskDispatcher.cpp \
+	TaskDispatcher.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp \
+	TaskReport.cpp \
+	TaskReport.hpp \
+	WakeSourceDecision.cpp \
+	WakeSourceDecision.hpp \
+	WorkController.cpp \
+	WorkController.hpp
+
+gaudere_local_goose_cycle_runtime_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+gaudere_local_goose_cycle_runtime_LDFLAGS = -pthread
