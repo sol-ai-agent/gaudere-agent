@@ -65,7 +65,9 @@ jobs:
           ! grep -q 'require_regular_non_symlink(options.model' "$runtime"
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource' "$runtime"
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' "$runtime"
-          ! grep -q 'LocalGooseCycleService' agent/src/main.cpp
+          grep -q 'LocalGooseCycleService' agent/src/main.cpp
+          grep -q -- '--local-goose-cycle-sidecar' agent/src/main.cpp
+          grep -q 'provider_execution=false automatic_seed=false' agent/src/main.cpp
           ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent-openai.container.in
 
@@ -134,3 +136,23 @@ jobs:
           grep -q '\$proof_runtime/runtime.log' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
           ! grep -q '\$proof_runtime/log"' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
           ! grep -Eq -- '--user[[:space:]]+(stop|restart)([[:space:]]|$)' agent/scripts/prove-local-goose-cycle-stage5-fedora.sh
+
+      - name: Prove production activation gate remains explicit and provider-free
+        run: |
+          set -eu
+          test -f agent/scripts/activate-local-goose-cycle-production.sh
+          sh -n agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q 'AUTHORIZED_LOCAL_GOOSE_CYCLE_PRODUCTION' agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q 'GAUDERE_EXPECTED_PROVIDER_TOTAL' agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q -- '--network none' agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q 'backup-state.sh' agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q 'gaudere-local-goose-cycle-seed' agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q 'gaudere-local-goose-cycle-activate' agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_CYCLE_PRODUCTION=PASS' agent/scripts/activate-local-goose-cycle-production.sh
+          grep -q 'provider_execution=false automatic_seed=false' agent/src/main.cpp
+          grep -q -- '--local-goose-cycle-sidecar' agent/src/main.cpp
+          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource'             agent/src/LocalGooseCycleBootstrap.cpp             agent/src/LocalGooseCycleBootstrap.hpp             agent/src/local_goose_cycle_seed_main.cpp             agent/src/local_goose_cycle_activate_main.cpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseCycleBootstrap.cpp             agent/src/local_goose_cycle_seed_main.cpp             agent/src/local_goose_cycle_activate_main.cpp
+          ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent.container
+          ! grep -q 'local-goose-cycle' agent/deploy/quadlet/gaudere-agent-openai.container.in
+
