@@ -105,6 +105,17 @@ gaudere_agent_SOURCES += \
 	LocalGooseCognitionHandler.hpp \
 	LocalGooseCognitionService.cpp \
 	LocalGooseCognitionService.hpp \
+	LocalGooseCycle.cpp \
+	LocalGooseCycle.hpp \
+	LocalGooseCycleHandler.cpp \
+	LocalGooseCycleHandler.hpp \
+	LocalGooseCycleSchedulerBridge.cpp \
+	LocalGooseCycleSchedulerBridge.hpp \
+	LocalGooseCycleService.cpp \
+	LocalGooseCycleService.hpp \
+	LocalGooseCycleSidecarInspection.cpp \
+	LocalGooseCycleStore.cpp \
+	LocalGooseCycleStore.hpp \
 	LocalGooseRunner.cpp \
 	LocalGooseRunner.hpp
 
@@ -399,3 +410,40 @@ gaudere_local_goose_cycle_runtime_SOURCES = \
 
 gaudere_local_goose_cycle_runtime_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 gaudere_local_goose_cycle_runtime_LDFLAGS = -pthread
+
+bin_PROGRAMS += gaudere-local-goose-cycle-seed gaudere-local-goose-cycle-activate
+
+gaudere_local_goose_cycle_seed_SOURCES = \
+	local_goose_cycle_seed_main.cpp \
+	LocalActivityPulseStore.cpp \
+	LocalActivityPulseStore.hpp \
+	LocalActivityPulseSidecarInspection.cpp \
+	LocalContinuityObservation.cpp \
+	LocalContinuityObservation.hpp \
+	LocalGooseCycleBootstrap.cpp \
+	LocalGooseCycleBootstrap.hpp \
+	LocalGooseCycleStore.cpp \
+	LocalGooseCycleStore.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
+	StateLock.cpp \
+	StateLock.hpp
+
+gaudere_local_goose_cycle_seed_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+
+gaudere_local_goose_cycle_activate_SOURCES = \
+	local_goose_cycle_activate_main.cpp \
+	LocalActivityPulseStore.cpp \
+	LocalActivityPulseStore.hpp \
+	LocalContinuityObservation.cpp \
+	LocalContinuityObservation.hpp \
+	LocalGooseCycleBootstrap.cpp \
+	LocalGooseCycleBootstrap.hpp \
+	LocalGooseCycleStore.cpp \
+	LocalGooseCycleStore.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
+	StateLock.cpp \
+	StateLock.hpp
+
+gaudere_local_goose_cycle_activate_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
