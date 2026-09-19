@@ -1,0 +1,80 @@
+name: Local Goose dormant stimulus provider-free gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-local-goose-stimulus:
+    runs-on: ubuntu-latest
+    container: fedora:44
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Prove dormant stimulus authority boundary
+        run: |
+          set -eu
+          grep -q 'cognition.local-goose-cycle.stimulus.v1' agent/src/LocalGooseCycleStimulusStore.hpp
+          grep -q 'explicit_local_recheck' agent/src/LocalGooseCycleStimulusStore.hpp
+          grep -q 'SQLITE_OPEN_READONLY' agent/src/LocalGooseCycleStimulusStore.cpp
+          grep -q 'target cursor revision already has an accepted stimulus' agent/src/LocalGooseCycleStimulusStore.cpp
+          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource|ProviderTaskHandler'             agent/src/LocalGooseCycleStimulusStore.cpp             agent/src/LocalGooseCycleStimulusStore.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseCycleStimulusStore.cpp
+          ! grep -Eq 'podman|systemctl|AF_INET|SOCK_STREAM'             agent/src/LocalGooseCycleStimulusStore.cpp             agent/src/LocalGooseCycleStimulusStore.hpp
+          ! grep -q 'LocalGooseCycleStimulusStore' agent/src/main.cpp
+          ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent.container
+          ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent-openai.container.in
+
+      - name: Build and run store test with warnings as errors
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build-stimulus
+          cd build-stimulus
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 -C tests local_goose_cycle_stimulus_store_test
+          tests/local_goose_cycle_stimulus_store_test | grep -Fx 'local_goose_cycle_stimulus_store_test: PASS'

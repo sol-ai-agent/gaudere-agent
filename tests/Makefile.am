@@ -9,6 +9,7 @@ check_PROGRAMS = \
 	file_secret_source_test \
 	live_control_test \
 	live_control_processor_test \
+	local_goose_cycle_stimulus_store_test \
 	local_wait_handler_test \
 	openai_activation_test \
 	openai_json_schema_transport_test \
@@ -141,6 +142,14 @@ live_control_processor_test_SOURCES = \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
 live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+local_goose_cycle_stimulus_store_test_SOURCES = \
+	local_goose_cycle_stimulus_store_test.cpp \
+	../src/LocalGooseCycleStimulusStore.cpp \
+	../src/LocalGooseCycleStimulusStore.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+local_goose_cycle_stimulus_store_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 local_wait_handler_test_SOURCES = \
 	local_wait_handler_test.cpp \
