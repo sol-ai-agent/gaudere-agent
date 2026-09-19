@@ -14,7 +14,7 @@ void usage(const char* program)
         << "Usage: " << program << " --socket PATH "
         << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | task ID | "
         << "budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | "
-        << "wake WAKE_ID | wake-status]\n";
+        << "wake WAKE_ID | wake-status | stimulate-local-goose-cycle REQUEST_ID]\n";
 }
 
 } // namespace
@@ -61,6 +61,10 @@ int main(int argc, char* argv[])
         } else if (operation == "wake-status" && argc == 4) {
             command.operation = gaudere_agent::LiveControlOperation::inspect_wake_status;
             command.id = "current";
+        } else if (operation == "stimulate-local-goose-cycle" && argc == 5) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::stimulate_local_goose_cycle;
+            command.id = argv[4];
         } else {
             usage(argv[0]);
             return 2;
