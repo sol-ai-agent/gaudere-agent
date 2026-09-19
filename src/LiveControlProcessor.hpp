@@ -3,7 +3,6 @@
 
 #include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
-#include "LocalGooseCycleStimulusService.hpp"
 
 #include <gaudere/budget/Store.hpp>
 #include <gaudere/work/Runtime.hpp>
@@ -34,6 +33,8 @@ class LiveControlProcessor {
 public:
     using SchedulerNext = std::function<
         std::optional<gaudere::scheduling::wake::WakeIntentTimePoint>()>;
+    using LocalGooseStimulus =
+        std::function<LiveControlReply(const std::string&)>;
 
     LiveControlProcessor(gaudere::work::Runtime& runtime,
                          gaudere::work::TaskStore& store,
@@ -42,7 +43,7 @@ public:
                          bool openai_enabled,
                          ExplicitWake* explicit_wake = nullptr,
                          SchedulerNext scheduler_next = {},
-                         LocalGooseCycleStimulusService* local_goose_stimulus = nullptr);
+                         LocalGooseStimulus local_goose_stimulus = {});
 
     [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
 
@@ -60,7 +61,7 @@ private:
     bool openai_enabled_;
     ExplicitWake* explicit_wake_;
     SchedulerNext scheduler_next_;
-    LocalGooseCycleStimulusService* local_goose_stimulus_;
+    LocalGooseStimulus local_goose_stimulus_;
 };
 
 } // namespace gaudere_agent
