@@ -293,6 +293,64 @@ void test_duplicate_preserves_original_definition()
            "durable idempotency preserves original task definition");
 }
 
+void test_local_goose_stimulus_requires_explicit_capability()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false);
+    auto pending = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::stimulate_local_goose_cycle,
+            "recheck-disabled", {}});
+    const auto processed = harness.processor.process(harness.mailbox);
+    const auto reply = pending->wait();
+
+    expect(processed.processed == 1
+               && !processed.local_goose_cycle_may_have_changed,
+           "disabled Local Goose stimulus changes no cycle scheduling state");
+    expect(!reply.ok && reply.code == 4
+               && reply.body.find("not enabled") != std::string::npos,
+           "Local Goose stimulus is rejected until a bounded worker handler is installed");
+}
+
+void test_local_goose_stimulus_runs_only_on_worker_callback()
+{
+    TemporaryDatabase database;
+    gaudere::persistence::sqlite::TaskStore store(database.path.string());
+    gaudere::persistence::sqlite::BudgetStore budget_store(
+        database.path.string());
+    gaudere::work::Runtime runtime(
+        store, [] { return std::chrono::system_clock::now(); });
+    runtime.recover();
+
+    std::string observed_request;
+    LiveControlProcessor processor(
+        runtime, store, budget_store,
+        OpenAIActivation::bootstrap_budget_policy(), false, nullptr, {},
+        [&](const std::string& request_id) {
+            observed_request = request_id;
+            return LiveControlReply{true, 0, "result=consumed\n"};
+        });
+    LiveControlMailbox mailbox;
+
+    auto pending = mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::stimulate_local_goose_cycle,
+            "recheck-worker-001", {}});
+    const auto processed = processor.process(mailbox);
+    const auto reply = pending->wait();
+
+    expect(processed.processed == 1
+               && processed.local_goose_cycle_may_have_changed
+               && !processed.work_may_be_pending
+               && !processed.wake_deadline_may_have_changed,
+           "stimulus callback requests conservative cycle refresh only");
+    expect(observed_request == "recheck-worker-001",
+           "sole worker callback receives exactly the bounded request identity");
+    expect(reply.ok && reply.code == 0
+               && reply.body == "result=consumed\n",
+           "worker callback owns the complete stimulus reply");
+}
+
 void test_wake_commands_require_explicit_capability_activation()
 {
     TemporaryDatabase database;
@@ -404,6 +462,8 @@ int main()
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
+    test_local_goose_stimulus_requires_explicit_capability();
+    test_local_goose_stimulus_runs_only_on_worker_callback();
     test_wake_commands_require_explicit_capability_activation();
     test_stop_source_is_permanently_ineligible();
     test_accept_inspect_revoke_wake_lifecycle();
