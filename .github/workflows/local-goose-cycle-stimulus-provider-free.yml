@@ -71,7 +71,7 @@ jobs:
           set -eu
           grep -q 'accept_explicit_recheck' agent/src/LocalGooseCycleStimulusService.cpp
           grep -q 'canonical_local_goose_cycle_success' agent/src/LocalGooseCycleStimulusService.cpp
-          grep -q 'LocalGooseCycleState::scheduled' agent/src/LocalGooseCycleStimulusService.cpp
+          grep -q 'scheduled.state = CycleState::scheduled' agent/src/LocalGooseCycleStimulusService.cpp
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource|ProviderTaskHandler|LocalGooseRunner' \
             agent/src/LocalGooseCycleStimulusService.cpp \
             agent/src/LocalGooseCycleStimulusService.hpp
