@@ -28,52 +28,11 @@ gaudere::work::Task make_live_echo_task(const LiveControlCommand& command)
                 false, 4,
                 "gaudere-agent: Local Goose stimulus capability is not enabled in this service\n"};
         }
-
-        const auto observed_at_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        const auto acceptance =
-            local_goose_stimulus_->accept_explicit_recheck(
-                command.id, observed_at_ms);
-
-        if (acceptance.result
-                != LocalGooseCycleStimulusServiceResult::accepted
-            && acceptance.result
-                != LocalGooseCycleStimulusServiceResult::duplicate) {
-            return LiveControlReply{
-                false, 4,
-                "gaudere-agent: Local Goose stimulus acceptance="
-                    + std::string{
-                        local_goose_stimulus_result_name(acceptance.result)}
-                    + "\n" + local_goose_stimulus_report(acceptance)};
-        }
-        if (!acceptance.stimulus) {
-            throw std::runtime_error(
-                "accepted Local Goose stimulus lacks durable record");
-        }
-
-        // Once durable acceptance exists, reconciliation may have committed the
-        // cycle CAS even if a later durable write reports an error. Conservatively
-        // force the owner loop to re-read/re-arm the cycle after this command.
+        // The callback runs synchronously on this sole owner worker. It may have
+        // durably accepted or reconciled a stimulus before returning or throwing,
+        // so force the caller to re-read/re-arm the cycle conservatively.
         local_goose_cycle_may_have_changed = true;
-        const auto reconciled = local_goose_stimulus_->reconcile(
-            acceptance.stimulus->id, observed_at_ms);
-
-        if (reconciled.result
-            == LocalGooseCycleStimulusServiceResult::consumed) {
-            return LiveControlReply{
-                true, 0,
-                "acceptance="
-                    + std::string{
-                        local_goose_stimulus_result_name(acceptance.result)}
-                    + "\n" + local_goose_stimulus_report(reconciled)};
-        }
-        return LiveControlReply{
-            false, 4,
-            "acceptance="
-                + std::string{
-                    local_goose_stimulus_result_name(acceptance.result)}
-                + "\n" + local_goose_stimulus_report(reconciled)};
+        return local_goose_stimulus_(command.id);
     }
 
     gaudere::work::Task task;
@@ -230,86 +189,6 @@ std::string wake_revoke_name(
     throw std::invalid_argument("unknown wake-intent revoke result");
 }
 
-const char* local_goose_stimulus_result_name(
-    const LocalGooseCycleStimulusServiceResult result) noexcept
-{
-    using Result = LocalGooseCycleStimulusServiceResult;
-    switch (result) {
-    case Result::accepted: return "accepted";
-    case Result::duplicate: return "duplicate";
-    case Result::consumed: return "consumed";
-    case Result::superseded: return "superseded";
-    case Result::manual_review: return "manual_review";
-    case Result::conflict: return "conflict";
-    case Result::invalid: return "invalid";
-    case Result::unavailable: return "unavailable";
-    }
-    return "unknown";
-}
-
-const char* local_goose_stimulus_status_name(
-    const LocalGooseCycleStimulusStatus status) noexcept
-{
-    using Status = LocalGooseCycleStimulusStatus;
-    switch (status) {
-    case Status::accepted: return "accepted";
-    case Status::consumed: return "consumed";
-    case Status::superseded: return "superseded";
-    case Status::manual_review: return "manual_review";
-    }
-    return "unknown";
-}
-
-const char* local_goose_cycle_state_name(
-    const LocalGooseCycleState state) noexcept
-{
-    using State = LocalGooseCycleState;
-    switch (state) {
-    case State::dormant: return "dormant";
-    case State::scheduled: return "scheduled";
-    case State::prepared: return "prepared";
-    case State::blocked: return "blocked";
-    }
-    return "unknown";
-}
-
-std::string local_goose_stimulus_report(
-    const LocalGooseCycleStimulusServiceStep& step)
-{
-    std::ostringstream output;
-    output << "result=" << local_goose_stimulus_result_name(step.result) << '\n';
-    if (step.stimulus) {
-        output << "stimulus_id=\"" << step.stimulus->id << "\"\n"
-               << "source_id=\"" << step.stimulus->source_id << "\"\n"
-               << "stimulus_status="
-               << local_goose_stimulus_status_name(step.stimulus->status) << '\n'
-               << "target_cycle_revision="
-               << step.stimulus->target_cycle_revision << '\n'
-               << "target_cycle_generation="
-               << step.stimulus->target_cycle_generation << '\n';
-        if (step.stimulus->resulting_cycle_revision) {
-            output << "resulting_cycle_revision="
-                   << *step.stimulus->resulting_cycle_revision << '\n';
-        } else {
-            output << "resulting_cycle_revision=none\n";
-        }
-    }
-    if (step.cursor) {
-        output << "cycle_revision=" << step.cursor->revision << '\n'
-               << "cycle_generation=" << step.cursor->generation << '\n'
-               << "cycle_state="
-               << local_goose_cycle_state_name(step.cursor->state) << '\n';
-        if (step.cursor->due_at_ms) {
-            output << "cycle_due_at_ms=" << *step.cursor->due_at_ms << '\n';
-        } else {
-            output << "cycle_due_at_ms=none\n";
-        }
-    }
-    if (!step.detail.empty()) {
-        output << "detail=\"" << step.detail << "\"\n";
-    }
-    return output.str();
-}
 
 } // namespace
 
@@ -320,8 +199,7 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            const bool openai_enabled,
                                            ExplicitWake* explicit_wake,
                                            SchedulerNext scheduler_next,
-                                           LocalGooseCycleStimulusService*
-                                               local_goose_stimulus)
+                                           LocalGooseStimulus local_goose_stimulus)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
@@ -329,7 +207,7 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
       openai_enabled_(openai_enabled),
       explicit_wake_(explicit_wake),
       scheduler_next_(std::move(scheduler_next)),
-      local_goose_stimulus_(local_goose_stimulus)
+      local_goose_stimulus_(std::move(local_goose_stimulus))
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
