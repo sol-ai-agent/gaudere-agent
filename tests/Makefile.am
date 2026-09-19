@@ -152,6 +152,8 @@ local_goose_cycle_stimulus_service_test_SOURCES = \
 	../src/LocalGooseCognition.hpp \
 	../src/LocalGooseCycle.cpp \
 	../src/LocalGooseCycle.hpp \
+	../src/LocalGooseCycleStimulusControl.cpp \
+	../src/LocalGooseCycleStimulusControl.hpp \
 	../src/LocalGooseCycleStimulusService.cpp \
 	../src/LocalGooseCycleStimulusService.hpp \
 	../src/LocalGooseCycleStimulusStore.cpp \
