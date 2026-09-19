@@ -116,6 +116,8 @@ gaudere_agent_SOURCES += \
 	LocalGooseCycleSidecarInspection.cpp \
 	LocalGooseCycleStore.cpp \
 	LocalGooseCycleStore.hpp \
+	LocalGooseCycleStimulusService.cpp \
+	LocalGooseCycleStimulusService.hpp \
 	LocalGooseCycleStimulusStore.cpp \
 	LocalGooseCycleStimulusStore.hpp \
 	LocalGooseRunner.cpp \

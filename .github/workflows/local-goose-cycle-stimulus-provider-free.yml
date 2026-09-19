@@ -66,7 +66,24 @@ jobs:
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent-openai.container.in
 
-      - name: Build and run store test with warnings as errors
+      - name: Prove re-arm service remains provider-free and unwired
+        run: |
+          set -eu
+          grep -q 'accept_explicit_recheck' agent/src/LocalGooseCycleStimulusService.cpp
+          grep -q 'canonical_local_goose_cycle_success' agent/src/LocalGooseCycleStimulusService.cpp
+          grep -q 'scheduled.state = CycleState::scheduled' agent/src/LocalGooseCycleStimulusService.cpp
+          ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource|ProviderTaskHandler|LocalGooseRunner' \
+            agent/src/LocalGooseCycleStimulusService.cpp \
+            agent/src/LocalGooseCycleStimulusService.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseCycleStimulusService.cpp
+          ! grep -Eq 'podman|systemctl|AF_INET|SOCK_STREAM' \
+            agent/src/LocalGooseCycleStimulusService.cpp \
+            agent/src/LocalGooseCycleStimulusService.hpp
+          ! grep -q 'LocalGooseCycleStimulusService' agent/src/main.cpp
+          ! grep -q 'LocalGooseCycleStimulusService' agent/src/local_goose_cycle_runtime_main.cpp
+
+      - name: Build and run stimulus tests with warnings as errors
         run: |
           set -eu
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
@@ -76,5 +93,8 @@ jobs:
           mkdir build-stimulus
           cd build-stimulus
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 -C tests local_goose_cycle_stimulus_store_test
+          make --jobs=2 -C tests \
+            local_goose_cycle_stimulus_store_test \
+            local_goose_cycle_stimulus_service_test
           tests/local_goose_cycle_stimulus_store_test | grep -Fx 'local_goose_cycle_stimulus_store_test: PASS'
+          tests/local_goose_cycle_stimulus_service_test | grep -Fx 'local_goose_cycle_stimulus_service_test: PASS'
