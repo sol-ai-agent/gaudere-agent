@@ -3,6 +3,7 @@
 
 #include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
+#include "LocalGooseCycleStimulusService.hpp"
 
 #include <gaudere/budget/Store.hpp>
 #include <gaudere/work/Runtime.hpp>
@@ -18,6 +19,7 @@ struct LiveControlProcessResult {
     std::size_t processed = 0;
     bool work_may_be_pending = false;
     bool wake_deadline_may_have_changed = false;
+    bool local_goose_cycle_may_have_changed = false;
 };
 
 /**
@@ -39,14 +41,17 @@ public:
                          gaudere::budget::Policy budget_policy,
                          bool openai_enabled,
                          ExplicitWake* explicit_wake = nullptr,
-                         SchedulerNext scheduler_next = {});
+                         SchedulerNext scheduler_next = {},
+                         LocalGooseCycleStimulusService* local_goose_stimulus = nullptr);
 
     [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
 
 private:
-    [[nodiscard]] LiveControlReply process_one(const LiveControlCommand& command,
-                                               bool& work_may_be_pending,
-                                               bool& wake_deadline_may_have_changed);
+    [[nodiscard]] LiveControlReply process_one(
+        const LiveControlCommand& command,
+        bool& work_may_be_pending,
+        bool& wake_deadline_may_have_changed,
+        bool& local_goose_cycle_may_have_changed);
 
     gaudere::work::Runtime& runtime_;
     gaudere::work::TaskStore& store_;
@@ -55,6 +60,7 @@ private:
     bool openai_enabled_;
     ExplicitWake* explicit_wake_;
     SchedulerNext scheduler_next_;
+    LocalGooseCycleStimulusService* local_goose_stimulus_;
 };
 
 } // namespace gaudere_agent
