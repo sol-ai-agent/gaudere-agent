@@ -1,4 +1,5 @@
 #include "LocalGooseCycle.hpp"
+#include "LocalGooseCycleStimulusControl.hpp"
 #include "LocalGooseCycleStimulusService.hpp"
 #include "LocalGooseCycleStimulusStore.hpp"
 #include "LocalGooseCycleStore.hpp"
@@ -356,6 +357,54 @@ void test_changed_cursor_is_superseded()
     remove_if_present(stimulus_path);
 }
 
+void test_live_control_adapter_consumes_one_bounded_recheck()
+{
+    const auto cycle_path = temporary_path("cycle-control");
+    const auto stimulus_path = temporary_path("stimulus-control");
+    remove_if_present(cycle_path);
+    remove_if_present(stimulus_path);
+
+    FakeTaskStore tasks;
+    const auto predecessor = canonical_generation_one_predecessor();
+    tasks.save(predecessor);
+
+    {
+        LocalGooseCycleStore cycle_store(cycle_path);
+        const auto dormant =
+            make_dormant_generation_two(cycle_store, predecessor);
+        LocalGooseCycleStimulusStore stimulus_store(stimulus_path);
+        LocalGooseCycleStimulusService service(
+            stimulus_store, cycle_store, tasks);
+        gaudere_agent::LocalGooseCycleStimulusControl control(
+            service, [] { return std::int64_t{5000}; });
+
+        const auto reply = control.stimulate("control-recheck-001");
+        assert(reply.ok && reply.code == 0);
+        assert(reply.body.find("acceptance=accepted") != std::string::npos);
+        assert(reply.body.find("result=consumed") != std::string::npos);
+        assert(reply.body.find("cycle_state=scheduled") != std::string::npos);
+
+        const auto cursor =
+            cycle_store.find(gaudere_agent::local_goose_cycle_scope);
+        assert(cursor
+            && cursor->revision == dormant.revision + 1
+            && cursor->generation == dormant.generation
+            && cursor->state == LocalGooseCycleState::scheduled
+            && cursor->due_at_ms == std::optional<std::int64_t>{5000});
+
+        const auto retry = control.stimulate("control-recheck-001");
+        assert(retry.ok && retry.code == 0);
+        assert(retry.body.find("acceptance=duplicate") != std::string::npos);
+        assert(retry.body.find("result=consumed") != std::string::npos);
+        const auto unchanged =
+            cycle_store.find(gaudere_agent::local_goose_cycle_scope);
+        assert(unchanged && unchanged->revision == dormant.revision + 1);
+    }
+
+    remove_if_present(cycle_path);
+    remove_if_present(stimulus_path);
+}
+
 void test_missing_predecessor_is_rejected_without_stimulus()
 {
     const auto cycle_path = temporary_path("cycle-missing-pred");
@@ -395,6 +444,7 @@ int main()
     test_accept_and_consume();
     test_restart_after_cycle_cas_before_stimulus_terminal();
     test_changed_cursor_is_superseded();
+    test_live_control_adapter_consumes_one_bounded_recheck();
     test_missing_predecessor_is_rejected_without_stimulus();
     std::cout << "local_goose_cycle_stimulus_service_test: PASS\n";
     return 0;
