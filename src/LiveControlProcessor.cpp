@@ -21,6 +21,61 @@ constexpr const char* goose_sync_echo_prefix = "goose-local-echo:";
 
 gaudere::work::Task make_live_echo_task(const LiveControlCommand& command)
 {
+    if (command.operation
+        == LiveControlOperation::stimulate_local_goose_cycle) {
+        if (!local_goose_stimulus_) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose stimulus capability is not enabled in this service\n"};
+        }
+
+        const auto observed_at_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        const auto acceptance =
+            local_goose_stimulus_->accept_explicit_recheck(
+                command.id, observed_at_ms);
+
+        if (acceptance.result
+                != LocalGooseCycleStimulusServiceResult::accepted
+            && acceptance.result
+                != LocalGooseCycleStimulusServiceResult::duplicate) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose stimulus acceptance="
+                    + std::string{
+                        local_goose_stimulus_result_name(acceptance.result)}
+                    + "\n" + local_goose_stimulus_report(acceptance)};
+        }
+        if (!acceptance.stimulus) {
+            throw std::runtime_error(
+                "accepted Local Goose stimulus lacks durable record");
+        }
+
+        // Once durable acceptance exists, reconciliation may have committed the
+        // cycle CAS even if a later durable write reports an error. Conservatively
+        // force the owner loop to re-read/re-arm the cycle after this command.
+        local_goose_cycle_may_have_changed = true;
+        const auto reconciled = local_goose_stimulus_->reconcile(
+            acceptance.stimulus->id, observed_at_ms);
+
+        if (reconciled.result
+            == LocalGooseCycleStimulusServiceResult::consumed) {
+            return LiveControlReply{
+                true, 0,
+                "acceptance="
+                    + std::string{
+                        local_goose_stimulus_result_name(acceptance.result)}
+                    + "\n" + local_goose_stimulus_report(reconciled)};
+        }
+        return LiveControlReply{
+            false, 4,
+            "acceptance="
+                + std::string{
+                    local_goose_stimulus_result_name(acceptance.result)}
+                + "\n" + local_goose_stimulus_report(reconciled)};
+    }
+
     gaudere::work::Task task;
     task.id = command.id;
     task.idempotency_key = "local.echo:" + command.id;
@@ -175,6 +230,87 @@ std::string wake_revoke_name(
     throw std::invalid_argument("unknown wake-intent revoke result");
 }
 
+const char* local_goose_stimulus_result_name(
+    const LocalGooseCycleStimulusServiceResult result) noexcept
+{
+    using Result = LocalGooseCycleStimulusServiceResult;
+    switch (result) {
+    case Result::accepted: return "accepted";
+    case Result::duplicate: return "duplicate";
+    case Result::consumed: return "consumed";
+    case Result::superseded: return "superseded";
+    case Result::manual_review: return "manual_review";
+    case Result::conflict: return "conflict";
+    case Result::invalid: return "invalid";
+    case Result::unavailable: return "unavailable";
+    }
+    return "unknown";
+}
+
+const char* local_goose_stimulus_status_name(
+    const LocalGooseCycleStimulusStatus status) noexcept
+{
+    using Status = LocalGooseCycleStimulusStatus;
+    switch (status) {
+    case Status::accepted: return "accepted";
+    case Status::consumed: return "consumed";
+    case Status::superseded: return "superseded";
+    case Status::manual_review: return "manual_review";
+    }
+    return "unknown";
+}
+
+const char* local_goose_cycle_state_name(
+    const LocalGooseCycleState state) noexcept
+{
+    using State = LocalGooseCycleState;
+    switch (state) {
+    case State::dormant: return "dormant";
+    case State::scheduled: return "scheduled";
+    case State::prepared: return "prepared";
+    case State::blocked: return "blocked";
+    }
+    return "unknown";
+}
+
+std::string local_goose_stimulus_report(
+    const LocalGooseCycleStimulusServiceStep& step)
+{
+    std::ostringstream output;
+    output << "result=" << local_goose_stimulus_result_name(step.result) << '\n';
+    if (step.stimulus) {
+        output << "stimulus_id=\"" << step.stimulus->id << "\"\n"
+               << "source_id=\"" << step.stimulus->source_id << "\"\n"
+               << "stimulus_status="
+               << local_goose_stimulus_status_name(step.stimulus->status) << '\n'
+               << "target_cycle_revision="
+               << step.stimulus->target_cycle_revision << '\n'
+               << "target_cycle_generation="
+               << step.stimulus->target_cycle_generation << '\n';
+        if (step.stimulus->resulting_cycle_revision) {
+            output << "resulting_cycle_revision="
+                   << *step.stimulus->resulting_cycle_revision << '\n';
+        } else {
+            output << "resulting_cycle_revision=none\n";
+        }
+    }
+    if (step.cursor) {
+        output << "cycle_revision=" << step.cursor->revision << '\n'
+               << "cycle_generation=" << step.cursor->generation << '\n'
+               << "cycle_state="
+               << local_goose_cycle_state_name(step.cursor->state) << '\n';
+        if (step.cursor->due_at_ms) {
+            output << "cycle_due_at_ms=" << *step.cursor->due_at_ms << '\n';
+        } else {
+            output << "cycle_due_at_ms=none\n";
+        }
+    }
+    if (!step.detail.empty()) {
+        output << "detail=\"" << step.detail << "\"\n";
+    }
+    return output.str();
+}
+
 } // namespace
 
 LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
@@ -183,14 +319,17 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            gaudere::budget::Policy budget_policy,
                                            const bool openai_enabled,
                                            ExplicitWake* explicit_wake,
-                                           SchedulerNext scheduler_next)
+                                           SchedulerNext scheduler_next,
+                                           LocalGooseCycleStimulusService*
+                                               local_goose_stimulus)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
       budget_policy_(std::move(budget_policy)),
       openai_enabled_(openai_enabled),
       explicit_wake_(explicit_wake),
-      scheduler_next_(std::move(scheduler_next))
+      scheduler_next_(std::move(scheduler_next)),
+      local_goose_stimulus_(local_goose_stimulus)
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -204,6 +343,7 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
         ++result.processed;
         bool work_may_be_pending = false;
         bool wake_deadline_may_have_changed = false;
+        bool local_goose_cycle_may_have_changed = false;
         const auto operation = pending->command().operation;
         const bool task_submission_may_have_committed =
             operation == LiveControlOperation::submit_echo
@@ -212,15 +352,20 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
         const bool wake_transition_may_have_committed =
             operation == LiveControlOperation::accept_wake
             || operation == LiveControlOperation::revoke_wake;
+        const bool local_goose_transition_may_have_committed =
+            operation == LiveControlOperation::stimulate_local_goose_cycle;
         try {
             pending->complete(process_one(
                 pending->command(), work_may_be_pending,
-                wake_deadline_may_have_changed));
+                wake_deadline_may_have_changed,
+                local_goose_cycle_may_have_changed));
         } catch (const std::exception& error) {
             work_may_be_pending = task_submission_may_have_committed
                 && !goose_synchronous_echo(pending->command());
             wake_deadline_may_have_changed =
                 wake_transition_may_have_committed;
+            local_goose_cycle_may_have_changed =
+                local_goose_transition_may_have_committed;
             pending->complete(LiveControlReply{
                 false, 1, std::string("gaudere-agent: live control command failed: ")
                               + error.what() + "\n"});
@@ -229,6 +374,8 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
                 && !goose_synchronous_echo(pending->command());
             wake_deadline_may_have_changed =
                 wake_transition_may_have_committed;
+            local_goose_cycle_may_have_changed =
+                local_goose_transition_may_have_committed;
             pending->complete(LiveControlReply{
                 false, 1,
                 "gaudere-agent: live control command failed with non-standard exception\n"});
@@ -237,13 +384,18 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
         result.wake_deadline_may_have_changed =
             result.wake_deadline_may_have_changed
             || wake_deadline_may_have_changed;
+        result.local_goose_cycle_may_have_changed =
+            result.local_goose_cycle_may_have_changed
+            || local_goose_cycle_may_have_changed;
     }
     return result;
 }
 
-LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& command,
-                                                   bool& work_may_be_pending,
-                                                   bool& wake_deadline_may_have_changed)
+LiveControlReply LiveControlProcessor::process_one(
+    const LiveControlCommand& command,
+    bool& work_may_be_pending,
+    bool& wake_deadline_may_have_changed,
+    bool& local_goose_cycle_may_have_changed)
 {
     if (command.operation == LiveControlOperation::inspect_task) {
         const auto task = store_.find(command.id);
@@ -369,6 +521,7 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
     case LiveControlOperation::revoke_wake:
     case LiveControlOperation::inspect_wake:
     case LiveControlOperation::inspect_wake_status:
+    case LiveControlOperation::stimulate_local_goose_cycle:
         throw std::logic_error(
             "non-submit operation unexpectedly reached submit path");
     }
