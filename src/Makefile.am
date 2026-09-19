@@ -392,6 +392,12 @@ gaudere_local_goose_cycle_runtime_SOURCES = \
 	LocalGooseCycleSidecarInspection.cpp \
 	LocalGooseCycleStore.cpp \
 	LocalGooseCycleStore.hpp \
+	LocalGooseCycleStimulusControl.cpp \
+	LocalGooseCycleStimulusControl.hpp \
+	LocalGooseCycleStimulusService.cpp \
+	LocalGooseCycleStimulusService.hpp \
+	LocalGooseCycleStimulusStore.cpp \
+	LocalGooseCycleStimulusStore.hpp \
 	LocalGooseRunner.cpp \
 	LocalGooseRunner.hpp \
 	OpenAIBudget.hpp \
