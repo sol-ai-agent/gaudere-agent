@@ -43,6 +43,8 @@ std::string operation_name(const LiveControlOperation operation)
         return "inspect_wake";
     case LiveControlOperation::inspect_wake_status:
         return "inspect_wake_status";
+    case LiveControlOperation::stimulate_local_goose_cycle:
+        return "stimulate_local_goose_cycle";
     }
     throw std::invalid_argument("unknown live control operation");
 }
@@ -75,6 +77,9 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "inspect_wake_status") {
         return LiveControlOperation::inspect_wake_status;
+    }
+    if (value == "stimulate_local_goose_cycle") {
+        return LiveControlOperation::stimulate_local_goose_cycle;
     }
     throw std::invalid_argument("unsupported live control operation");
 }
@@ -162,6 +167,12 @@ void validate_command(const LiveControlCommand& command)
         if (command.id != "current" || !command.text.empty()) {
             throw std::invalid_argument(
                 "inspect_wake_status accepts only id 'current' and no text");
+        }
+        break;
+    case LiveControlOperation::stimulate_local_goose_cycle:
+        if (!command.text.empty()) {
+            throw std::invalid_argument(
+                "stimulate_local_goose_cycle accepts only a bounded request id");
         }
         break;
     }
