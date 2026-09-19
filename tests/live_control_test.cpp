@@ -192,6 +192,77 @@ void test_wake_operation_round_trip()
     ::rmdir(directory.c_str());
 }
 
+void test_local_goose_stimulus_operation_round_trip()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "Local Goose stimulus protocol server starts");
+
+    std::ostringstream output;
+    std::ostringstream error;
+    int client_result = -1;
+    std::thread client([&] {
+        client_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::stimulate_local_goose_cycle,
+                "recheck-001", {}},
+            output, error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "Local Goose stimulus wakes the sole worker callback");
+    }
+
+    const auto pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "Local Goose stimulus crosses the bounded mailbox exactly once");
+    if (pending.size() == 1) {
+        expect(pending.front()->command().operation
+                   == LiveControlOperation::stimulate_local_goose_cycle
+                   && pending.front()->command().id == "recheck-001"
+                   && pending.front()->command().text.empty(),
+               "Local Goose stimulus carries only its bounded request identity");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "result=consumed\n"});
+    }
+
+    client.join();
+    expect(client_result == 0
+               && output.str() == "result=consumed\n"
+               && error.str().empty(),
+           "Local Goose stimulus client receives worker reply");
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
+void test_local_goose_stimulus_rejects_text_before_connect()
+{
+    std::ostringstream output;
+    std::ostringstream error;
+    const int result = run_live_control_client(
+        "/tmp/does-not-matter.sock",
+        LiveControlCommand{
+            LiveControlOperation::stimulate_local_goose_cycle,
+            "recheck-002", "free form text"},
+        output, error);
+    expect(result != 0,
+           "Local Goose stimulus rejects free-form text");
+    expect(error.str().find("only a bounded request id") != std::string::npos,
+           "Local Goose stimulus text rejection is explicit");
+}
+
 void test_invalid_wake_revocation_reason_is_rejected_before_connect()
 {
     std::ostringstream output;
@@ -256,6 +327,8 @@ int main()
     test_invalid_id_is_rejected_before_connect();
     test_oversized_reflection_is_rejected_before_connect();
     test_wake_operation_round_trip();
+    test_local_goose_stimulus_operation_round_trip();
+    test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();
     test_existing_regular_file_is_never_unlinked();
     test_idle_server_stops_without_polling_timeout();
