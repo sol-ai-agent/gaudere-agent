@@ -66,22 +66,33 @@ jobs:
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent-openai.container.in
 
-      - name: Prove re-arm service remains provider-free and unwired
+      - name: Prove re-arm live-control remains provider-free and production-unwired
         run: |
           set -eu
           grep -q 'accept_explicit_recheck' agent/src/LocalGooseCycleStimulusService.cpp
           grep -q 'canonical_local_goose_cycle_success' agent/src/LocalGooseCycleStimulusService.cpp
           grep -q 'scheduled.state = CycleState::scheduled' agent/src/LocalGooseCycleStimulusService.cpp
+          grep -q 'stimulate_local_goose_cycle' agent/src/LiveControl.cpp
+          grep -q 'stimulate-local-goose-cycle' agent/src/control_main.cpp
+          grep -q -- '--stimulus-sidecar PATH' agent/src/local_goose_cycle_runtime_main.cpp
+          grep -q 'LocalGooseCycleStimulusControl' agent/src/local_goose_cycle_runtime_main.cpp
+          grep -q 'local_goose_cycle_may_have_changed' agent/src/local_goose_cycle_runtime_main.cpp
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource|ProviderTaskHandler|LocalGooseRunner' \
             agent/src/LocalGooseCycleStimulusService.cpp \
-            agent/src/LocalGooseCycleStimulusService.hpp
+            agent/src/LocalGooseCycleStimulusService.hpp \
+            agent/src/LocalGooseCycleStimulusControl.cpp \
+            agent/src/LocalGooseCycleStimulusControl.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
-            agent/src/LocalGooseCycleStimulusService.cpp
+            agent/src/LocalGooseCycleStimulusService.cpp \
+            agent/src/LocalGooseCycleStimulusControl.cpp
           ! grep -Eq 'podman|systemctl|AF_INET|SOCK_STREAM' \
             agent/src/LocalGooseCycleStimulusService.cpp \
-            agent/src/LocalGooseCycleStimulusService.hpp
+            agent/src/LocalGooseCycleStimulusService.hpp \
+            agent/src/LocalGooseCycleStimulusControl.cpp \
+            agent/src/LocalGooseCycleStimulusControl.hpp
           ! grep -q 'LocalGooseCycleStimulusService' agent/src/main.cpp
-          ! grep -q 'LocalGooseCycleStimulusService' agent/src/local_goose_cycle_runtime_main.cpp
+          ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent.container
+          ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent-openai.container.in
 
       - name: Build and run stimulus tests with warnings as errors
         run: |
@@ -95,6 +106,11 @@ jobs:
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
           make --jobs=2 -C tests \
             local_goose_cycle_stimulus_store_test \
-            local_goose_cycle_stimulus_service_test
+            local_goose_cycle_stimulus_service_test \
+            live_control_test \
+            live_control_processor_test
+          make --jobs=2 -C src gaudere-control gaudere-local-goose-cycle-runtime
           tests/local_goose_cycle_stimulus_store_test | grep -Fx 'local_goose_cycle_stimulus_store_test: PASS'
           tests/local_goose_cycle_stimulus_service_test | grep -Fx 'local_goose_cycle_stimulus_service_test: PASS'
+          tests/live_control_test | grep -Fx 'All live control tests passed'
+          tests/live_control_processor_test | grep -Fx 'All live control processor tests passed'
