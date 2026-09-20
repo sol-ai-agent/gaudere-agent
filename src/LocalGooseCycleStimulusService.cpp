@@ -277,6 +277,16 @@ LocalGooseCycleStimulusService::reconcile(
                 observed_at_ms, cursor->revision, {}, cursor);
         }
 
+        if (accepted.target_cycle_revision
+                < std::numeric_limits<std::uint64_t>::max()
+            && cursor->revision == accepted.target_cycle_revision + 1
+            && cursor->generation == accepted.target_cycle_generation) {
+            return manual_review(
+                stimulus_store_, accepted, observed_at_ms,
+                "successor Local Goose cycle cursor differs from exact stimulus re-arm",
+                cursor);
+        }
+
         if (cursor->revision != accepted.target_cycle_revision
             || cursor->generation != accepted.target_cycle_generation) {
             return supersede(
