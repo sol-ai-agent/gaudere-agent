@@ -109,8 +109,26 @@ jobs:
             local_goose_cycle_stimulus_service_test \
             live_control_test \
             live_control_processor_test
-          make --jobs=2 -C src gaudere-control gaudere-local-goose-cycle-runtime
+          make --jobs=2 -C src \
+            gaudere-control \
+            gaudere-local-goose-cycle-runtime \
+            gaudere-local-goose-cycle-stimulus-proof
+          src/gaudere-local-goose-cycle-stimulus-proof --help 2>&1 \
+            | grep -q -- '--stimulus-sidecar PATH'
           tests/local_goose_cycle_stimulus_store_test | grep -Fx 'local_goose_cycle_stimulus_store_test: PASS'
           tests/local_goose_cycle_stimulus_service_test | grep -Fx 'local_goose_cycle_stimulus_service_test: PASS'
           tests/live_control_test | grep -Fx 'All live control tests passed'
           tests/live_control_processor_test | grep -Fx 'All live control processor tests passed'
+
+      - name: Prove isolated Fedora helper boundary
+        run: |
+          set -eu
+          sh -n agent/scripts/prove-local-goose-stimulus-fedora.sh
+          grep -q -- '--target builder' agent/scripts/prove-local-goose-stimulus-fedora.sh
+          grep -q -- '--network none' agent/scripts/prove-local-goose-stimulus-fedora.sh
+          grep -q 'stimulate-local-goose-cycle' agent/scripts/prove-local-goose-stimulus-fedora.sh
+          grep -q 'production_cursor_after.*production_cursor_before' agent/scripts/prove-local-goose-stimulus-fedora.sh
+          grep -q 'provider_after.*provider_before' agent/scripts/prove-local-goose-stimulus-fedora.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_STIMULUS_ISOLATED=PASS' agent/scripts/prove-local-goose-stimulus-fedora.sh
+          ! grep -q 'gaudere-local-goose-cycle-stimulus-proof /opt/runtime/bin' agent/Containerfile
+          ! grep -q '/usr/local/bin/gaudere-local-goose-cycle-stimulus-proof' agent/Containerfile
