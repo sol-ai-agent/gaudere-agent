@@ -154,5 +154,5 @@ jobs:
           grep -q -- '--local-goose-cycle-stimulus-sidecar' agent/scripts/deploy-local-goose-stimulus-production.sh
           grep -q 'provider_after.*provider_before' agent/scripts/deploy-local-goose-stimulus-production.sh
           grep -q 'cursor_after.*cursor_before' agent/scripts/deploy-local-goose-stimulus-production.sh
-          ! grep -Eq 'stimulate-local-goose-cycle[[:space:]]+[^)]' agent/scripts/deploy-local-goose-stimulus-production.sh
+          ! grep -q 'stimulate-local-goose-cycle' agent/scripts/deploy-local-goose-stimulus-production.sh
           grep -q '/usr/local/bin/gaudere-local-goose-cycle-stimulus-init' agent/Containerfile
