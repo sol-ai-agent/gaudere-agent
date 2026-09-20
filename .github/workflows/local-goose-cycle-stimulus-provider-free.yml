@@ -62,11 +62,12 @@ jobs:
           ! grep -Eq 'OpenAIResponsesProvider|CurlHttpTransport|SecretSource|ProviderTaskHandler'             agent/src/LocalGooseCycleStimulusStore.cpp             agent/src/LocalGooseCycleStimulusStore.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseCycleStimulusStore.cpp
           ! grep -Eq 'podman|systemctl|AF_INET|SOCK_STREAM'             agent/src/LocalGooseCycleStimulusStore.cpp             agent/src/LocalGooseCycleStimulusStore.hpp
-          ! grep -q 'LocalGooseCycleStimulusStore' agent/src/main.cpp
+          grep -q 'LocalGooseCycleStimulusStore' agent/src/main.cpp
+          grep -q -- '--local-goose-cycle-stimulus-sidecar' agent/src/main.cpp
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent-openai.container.in
 
-      - name: Prove re-arm live-control remains provider-free and production-unwired
+      - name: Prove re-arm live-control remains provider-free and explicitly wired
         run: |
           set -eu
           grep -q 'accept_explicit_recheck' agent/src/LocalGooseCycleStimulusService.cpp
@@ -90,7 +91,9 @@ jobs:
             agent/src/LocalGooseCycleStimulusService.hpp \
             agent/src/LocalGooseCycleStimulusControl.cpp \
             agent/src/LocalGooseCycleStimulusControl.hpp
-          ! grep -q 'LocalGooseCycleStimulusService' agent/src/main.cpp
+          grep -q 'LocalGooseCycleStimulusService' agent/src/main.cpp
+          grep -q 'LocalGooseCycleStimulusControl' agent/src/main.cpp
+          grep -q 'local_goose_cycle_may_have_changed' agent/src/main.cpp
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent.container
           ! grep -q 'local-goose-cycle-stimulus' agent/deploy/quadlet/gaudere-agent-openai.container.in
 
@@ -110,9 +113,15 @@ jobs:
             live_control_test \
             live_control_processor_test
           make --jobs=2 -C src \
+            gaudere-agent \
             gaudere-control \
             gaudere-local-goose-cycle-runtime \
-            gaudere-local-goose-cycle-stimulus-proof
+            gaudere-local-goose-cycle-stimulus-proof \
+            gaudere-local-goose-cycle-stimulus-init
+          src/gaudere-agent --help \
+            | grep -q -- '--local-goose-cycle-stimulus-sidecar PATH'
+          src/gaudere-local-goose-cycle-stimulus-init --help 2>&1 \
+            | grep -q -- '--stimulus-sidecar PATH'
           src/gaudere-local-goose-cycle-stimulus-proof --help 2>&1 \
             | grep -q -- '--stimulus-sidecar PATH'
           tests/local_goose_cycle_stimulus_store_test | grep -Fx 'local_goose_cycle_stimulus_store_test: PASS'
@@ -133,3 +142,17 @@ jobs:
           grep -q 'FEDORA_LOCAL_GOOSE_STIMULUS_ISOLATED=PASS' agent/scripts/prove-local-goose-stimulus-fedora.sh
           ! grep -q 'gaudere-local-goose-cycle-stimulus-proof /opt/runtime/bin' agent/Containerfile
           ! grep -q '/usr/local/bin/gaudere-local-goose-cycle-stimulus-proof' agent/Containerfile
+
+      - name: Prove production code-deploy gate cannot stimulate
+        run: |
+          set -eu
+          sh -n agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q 'AUTHORIZED_LOCAL_GOOSE_STIMULUS_CODE_DEPLOY' agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q 'STIMULI=0' agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_STIMULUS_CODE_DEPLOY=PASS' agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q -- '--network none' agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q -- '--local-goose-cycle-stimulus-sidecar' agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q 'provider_after.*provider_before' agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q 'cursor_after.*cursor_before' agent/scripts/deploy-local-goose-stimulus-production.sh
+          ! grep -Eq 'stimulate-local-goose-cycle[[:space:]]+[^)]' agent/scripts/deploy-local-goose-stimulus-production.sh
+          grep -q '/usr/local/bin/gaudere-local-goose-cycle-stimulus-init' agent/Containerfile
