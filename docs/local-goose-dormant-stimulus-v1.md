@@ -127,11 +127,10 @@ The explicit source identity is a bounded request identifier. The stimulus ID is
 derived from the fixed scope, fixed source kind, source identity, and the exact
 target cycle cursor revision/generation.
 
-Retrying the same request against the same cursor is a duplicate and returns the
-same record.
-
-Reusing the same source identity against a different cursor is rejected rather
-than silently meaning a second wake.
+Retrying the same request returns the original durable record. A source identity
+is single-use across the lifetime of the ledger: once used, it never acquires a
+new meaning on a later cursor. A new cursor therefore requires a fresh request
+identity.
 
 ## Acceptance preconditions
 
@@ -155,12 +154,16 @@ Acceptance persists the stimulus before any in-memory scheduling action.
 Consumption runs on the sole main worker. It re-reads both durable stores and
 requires the exact cursor revision/generation captured by the stimulus.
 
+Acceptance samples the worker clock once and persists that value as
+`accepted_at_ms`. Consumption deliberately reuses that durable timestamp so
+crash recovery can recognize the exact scheduled successor deterministically.
+
 If the cursor is still the same canonical `dormant` cursor:
 
-1. sample the worker clock once;
+1. use the durable `accepted_at_ms` as the immediate scheduling timestamp;
 2. construct the existing canonical dormant -> scheduled transition;
 3. keep the same generation and predecessor evidence;
-4. set `due_at_ms` to that sampled time;
+4. set `due_at_ms` to `accepted_at_ms`;
 5. commit the cycle cursor CAS;
 6. mark the stimulus `consumed` with the resulting cursor revision;
 7. re-arm the existing `LocalGooseCycleSchedulerBridge`.

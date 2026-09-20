@@ -19,6 +19,9 @@
 #include "LocalGooseCycleSchedulerBridge.hpp"
 #include "LocalGooseCycleService.hpp"
 #include "LocalGooseCycleStore.hpp"
+#include "LocalGooseCycleStimulusControl.hpp"
+#include "LocalGooseCycleStimulusService.hpp"
+#include "LocalGooseCycleStimulusStore.hpp"
 #include "LocalGooseRunner.hpp"
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
@@ -52,6 +55,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -81,6 +85,7 @@ struct Options {
     std::string local_goose_model_sha256;
     std::string local_goose_governance;
     std::string local_goose_cycle_sidecar;
+    std::string local_goose_cycle_stimulus_sidecar;
 };
 
 void usage(const char* program)
@@ -98,6 +103,7 @@ void usage(const char* program)
         << "[--local-goose-model PATH --local-goose-model-sha256 SHA256 "
         << "--local-goose-governance PATH] "
         << "[--local-goose-cycle-sidecar PATH] "
+        << "[--local-goose-cycle-stimulus-sidecar PATH] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -166,6 +172,9 @@ Options parse_options(const int argc, char* argv[])
             options.local_goose_governance = argv[++index];
         } else if (argument == "--local-goose-cycle-sidecar" && index + 1 < argc) {
             options.local_goose_cycle_sidecar = argv[++index];
+        } else if (argument == "--local-goose-cycle-stimulus-sidecar"
+                   && index + 1 < argc) {
+            options.local_goose_cycle_stimulus_sidecar = argv[++index];
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -211,7 +220,9 @@ Options parse_options(const int argc, char* argv[])
         throw std::invalid_argument(
             "--local-activity-sidecar is only valid in service mode");
     }
-    if ((local_goose_requested(options) || !options.local_goose_cycle_sidecar.empty())
+    if ((local_goose_requested(options)
+         || !options.local_goose_cycle_sidecar.empty()
+         || !options.local_goose_cycle_stimulus_sidecar.empty())
         && modes != 0) {
         throw std::invalid_argument(
             "local Goose cognition is only valid in service mode");
@@ -246,6 +257,11 @@ Options parse_options(const int argc, char* argv[])
         && !local_goose_requested(options)) {
         throw std::invalid_argument(
             "--local-goose-cycle-sidecar requires the complete local Goose configuration");
+    }
+    if (!options.local_goose_cycle_stimulus_sidecar.empty()
+        && options.local_goose_cycle_sidecar.empty()) {
+        throw std::invalid_argument(
+            "--local-goose-cycle-stimulus-sidecar requires --local-goose-cycle-sidecar");
     }
 
     if (local_goose_requested(options)) {
@@ -432,6 +448,49 @@ void require_distinct_regular_local_goose_cycle_sidecar(const Options& options)
     }
 }
 
+void require_distinct_regular_local_goose_cycle_stimulus_sidecar(
+    const Options& options)
+{
+    if (options.local_goose_cycle_stimulus_sidecar.empty()) return;
+
+    const auto status = std::filesystem::symlink_status(
+        options.local_goose_cycle_stimulus_sidecar);
+    if (!std::filesystem::is_regular_file(status)) {
+        throw std::invalid_argument(
+            "Local Goose cycle stimulus sidecar must already exist as a regular non-symlink file");
+    }
+
+    const auto stimulus = std::filesystem::weakly_canonical(
+        options.local_goose_cycle_stimulus_sidecar);
+    const auto state = std::filesystem::weakly_canonical(options.state_path);
+    const auto activity = std::filesystem::weakly_canonical(
+        options.local_activity_sidecar);
+    const auto governance = std::filesystem::weakly_canonical(
+        options.local_goose_governance);
+    const auto cycle = std::filesystem::weakly_canonical(
+        options.local_goose_cycle_sidecar);
+    if (stimulus == state || stimulus == activity
+        || stimulus == governance || stimulus == cycle) {
+        throw std::invalid_argument(
+            "Local Goose stimulus sidecar must be distinct from state/activity/governance/cycle databases");
+    }
+    if (!options.autonomous_pulse_sidecar.empty()
+        && stimulus == std::filesystem::weakly_canonical(
+            options.autonomous_pulse_sidecar)) {
+        throw std::invalid_argument(
+            "Local Goose stimulus sidecar must be distinct from autonomous pulse database");
+    }
+
+    const auto inspection =
+        gaudere_agent::inspect_local_goose_cycle_stimulus_sidecar(
+            options.local_goose_cycle_stimulus_sidecar);
+    if (!inspection.eligible) {
+        throw std::invalid_argument(
+            "Local Goose cycle stimulus sidecar is not eligible: "
+            + inspection.detail);
+    }
+}
+
 void require_distinct_local_goose_governance(const Options& options)
 {
     if (!local_goose_requested(options)) return;
@@ -580,6 +639,7 @@ int main(int argc, char* argv[])
         require_distinct_regular_pulse_sidecar(options);
         require_distinct_regular_local_activity_sidecar(options);
         require_distinct_regular_local_goose_cycle_sidecar(options);
+        require_distinct_regular_local_goose_cycle_stimulus_sidecar(options);
         require_distinct_local_goose_governance(options);
 
         sigset_t signals{};
@@ -920,6 +980,71 @@ int main(int argc, char* argv[])
                 work_runtime, task_store, work_controller,
                 options.task_id, options.text);
         } else {
+            const auto cycle_now_ms = [] {
+                return std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count();
+            };
+
+            std::unique_ptr<gaudere_agent::LocalGooseCycleStore>
+                local_goose_cycle_store;
+            std::unique_ptr<gaudere_agent::LocalGooseCycleStimulusStore>
+                local_goose_stimulus_store;
+            std::unique_ptr<gaudere_agent::LocalGooseCycleStimulusService>
+                local_goose_stimulus_service;
+            std::unique_ptr<gaudere_agent::LocalGooseCycleStimulusControl>
+                local_goose_stimulus_control;
+
+            if (!options.local_goose_cycle_sidecar.empty()) {
+                local_goose_cycle_store =
+                    std::make_unique<gaudere_agent::LocalGooseCycleStore>(
+                        options.local_goose_cycle_sidecar);
+            }
+            if (!options.local_goose_cycle_stimulus_sidecar.empty()) {
+                if (!local_goose_cycle_store) {
+                    throw std::runtime_error(
+                        "Local Goose stimulus requires initialized cycle store");
+                }
+                local_goose_stimulus_store =
+                    std::make_unique<gaudere_agent::LocalGooseCycleStimulusStore>(
+                        options.local_goose_cycle_stimulus_sidecar);
+                local_goose_stimulus_service =
+                    std::make_unique<gaudere_agent::LocalGooseCycleStimulusService>(
+                        *local_goose_stimulus_store,
+                        *local_goose_cycle_store,
+                        task_store);
+                local_goose_stimulus_control =
+                    std::make_unique<gaudere_agent::LocalGooseCycleStimulusControl>(
+                        *local_goose_stimulus_service, cycle_now_ms);
+
+                if (!options.check_only) {
+                    const auto inspection =
+                        gaudere_agent::inspect_local_goose_cycle_stimulus_sidecar(
+                            options.local_goose_cycle_stimulus_sidecar);
+                    for (const auto& stimulus : inspection.stimuli) {
+                        if (stimulus.status
+                            != gaudere_agent::LocalGooseCycleStimulusStatus::accepted) {
+                            continue;
+                        }
+                        const auto recovered =
+                            local_goose_stimulus_service->reconcile(
+                                stimulus.id, cycle_now_ms());
+                        using StimulusResult =
+                            gaudere_agent::LocalGooseCycleStimulusServiceResult;
+                        if (recovered.result != StimulusResult::consumed
+                            && recovered.result != StimulusResult::superseded
+                            && recovered.result != StimulusResult::manual_review) {
+                            throw std::runtime_error(
+                                "Local Goose stimulus startup reconciliation failed: "
+                                + recovered.detail);
+                        }
+                    }
+                }
+                std::cout
+                    << "gaudere-agent: local Goose stimulus control enabled sidecar="
+                    << options.local_goose_cycle_stimulus_sidecar
+                    << " provider_execution=false automatic_stimulus=false\n";
+            }
+
             std::unique_ptr<gaudere_agent::LiveControlMailbox> control_mailbox;
             std::unique_ptr<gaudere_agent::LiveControlProcessor> control_processor;
             std::unique_ptr<gaudere_agent::LiveControlServer> control_server;
@@ -929,11 +1054,22 @@ int main(int argc, char* argv[])
                         "live control provider budget store is unavailable");
                 }
                 control_mailbox = std::make_unique<gaudere_agent::LiveControlMailbox>();
+                gaudere_agent::LiveControlProcessor::LocalGooseStimulus
+                    stimulus_callback;
+                if (local_goose_stimulus_control) {
+                    stimulus_callback =
+                        [&local_goose_stimulus_control](
+                            const std::string& request_id) {
+                            return local_goose_stimulus_control->stimulate(
+                                request_id);
+                        };
+                }
                 control_processor = std::make_unique<gaudere_agent::LiveControlProcessor>(
                     work_runtime, task_store, *provider_budget_store,
                     gaudere_agent::OpenAIActivation::bootstrap_budget_policy(),
                     options.openai_enabled, explicit_wake.get(),
-                    [&work_scheduler] { return work_scheduler.next(); });
+                    [&work_scheduler] { return work_scheduler.next(); },
+                    std::move(stimulus_callback));
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.interrupt(); });
@@ -951,8 +1087,6 @@ int main(int argc, char* argv[])
                 local_goose_handler;
             std::unique_ptr<gaudere_agent::LocalGooseCognitionService>
                 local_goose_service;
-            std::unique_ptr<gaudere_agent::LocalGooseCycleStore>
-                local_goose_cycle_store;
             std::unique_ptr<gaudere_agent::LocalGooseCycleHandler>
                 local_goose_cycle_handler;
             std::unique_ptr<gaudere_agent::LocalGooseCycleService>
@@ -973,6 +1107,9 @@ int main(int argc, char* argv[])
                 }
                 if (control.wake_deadline_may_have_changed) {
                     work_controller.refresh_deadlines();
+                }
+                if (control.local_goose_cycle_may_have_changed) {
+                    work_controller.interrupt();
                 }
             };
 
@@ -1012,9 +1149,10 @@ int main(int argc, char* argv[])
                     << " typed_tools=true provider=local\n";
 
                 if (!options.local_goose_cycle_sidecar.empty()) {
-                    local_goose_cycle_store =
-                        std::make_unique<gaudere_agent::LocalGooseCycleStore>(
-                            options.local_goose_cycle_sidecar);
+                    if (!local_goose_cycle_store) {
+                        throw std::runtime_error(
+                            "Local Goose cycle store was not initialized");
+                    }
                     local_goose_cycle_handler =
                         std::make_unique<gaudere_agent::LocalGooseCycleHandler>(
                             *local_goose_runner,
@@ -1023,10 +1161,6 @@ int main(int argc, char* argv[])
                             true,
                             options.control_socket,
                             options.local_goose_governance);
-                    const auto cycle_now_ms = [] {
-                        return std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::system_clock::now().time_since_epoch()).count();
-                    };
                     local_goose_cycle_service =
                         std::make_unique<gaudere_agent::LocalGooseCycleService>(
                             *local_goose_cycle_store,
@@ -1176,6 +1310,24 @@ int main(int argc, char* argv[])
                     }
                     if (control.wake_deadline_may_have_changed) {
                         work_controller.refresh_deadlines();
+                    }
+                    if (control.local_goose_cycle_may_have_changed
+                        && local_goose_cycle_service) {
+                        local_goose_cycle_monitoring = true;
+                        if (!step_local_goose_cycle()) {
+                            work_conflict = true;
+                            local_goose_stop_requested.store(true);
+                            work_controller.stop();
+                            if (signal_waiter.joinable()) {
+                                internal_wake.store(true);
+                                if (pthread_kill(
+                                        signal_waiter.native_handle(),
+                                        SIGUSR1) != 0) {
+                                    signal_wait_failed.store(true);
+                                }
+                            }
+                            continue;
+                        }
                     }
                 }
 

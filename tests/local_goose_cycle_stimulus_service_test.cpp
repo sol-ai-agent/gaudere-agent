@@ -309,7 +309,7 @@ void test_restart_after_cycle_cas_before_stimulus_terminal()
     remove_if_present(stimulus_path);
 }
 
-void test_changed_cursor_is_superseded()
+void test_changed_successor_requires_manual_review()
 {
     const auto cycle_path = temporary_path("cycle-superseded");
     const auto stimulus_path = temporary_path("stimulus-superseded");
@@ -342,10 +342,10 @@ void test_changed_cursor_is_superseded()
         const auto step =
             service.reconcile(accepted.stimulus->id, 3001);
         assert(step.result
-            == LocalGooseCycleStimulusServiceResult::superseded);
+            == LocalGooseCycleStimulusServiceResult::manual_review);
         assert(step.stimulus
             && step.stimulus->status
-                == LocalGooseCycleStimulusStatus::superseded);
+                == LocalGooseCycleStimulusStatus::manual_review);
         const auto current =
             cycle_store.find(gaudere_agent::local_goose_cycle_scope);
         assert(current && current->revision == 4
@@ -443,7 +443,7 @@ int main()
 {
     test_accept_and_consume();
     test_restart_after_cycle_cas_before_stimulus_terminal();
-    test_changed_cursor_is_superseded();
+    test_changed_successor_requires_manual_review();
     test_live_control_adapter_consumes_one_bounded_recheck();
     test_missing_predecessor_is_rejected_without_stimulus();
     std::cout << "local_goose_cycle_stimulus_service_test: PASS\n";
