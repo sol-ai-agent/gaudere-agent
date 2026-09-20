@@ -19,6 +19,9 @@
 #include "LocalGooseCycleSchedulerBridge.hpp"
 #include "LocalGooseCycleService.hpp"
 #include "LocalGooseCycleStore.hpp"
+#include "LocalGooseCycleStimulusControl.hpp"
+#include "LocalGooseCycleStimulusService.hpp"
+#include "LocalGooseCycleStimulusStore.hpp"
 #include "LocalGooseRunner.hpp"
 #include "LocalWaitHandler.hpp"
 #include "OpenAIActivation.hpp"
@@ -81,6 +84,7 @@ struct Options {
     std::string local_goose_model_sha256;
     std::string local_goose_governance;
     std::string local_goose_cycle_sidecar;
+    std::string local_goose_cycle_stimulus_sidecar;
 };
 
 void usage(const char* program)
@@ -98,6 +102,7 @@ void usage(const char* program)
         << "[--local-goose-model PATH --local-goose-model-sha256 SHA256 "
         << "--local-goose-governance PATH] "
         << "[--local-goose-cycle-sidecar PATH] "
+        << "[--local-goose-cycle-stimulus-sidecar PATH] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -166,6 +171,9 @@ Options parse_options(const int argc, char* argv[])
             options.local_goose_governance = argv[++index];
         } else if (argument == "--local-goose-cycle-sidecar" && index + 1 < argc) {
             options.local_goose_cycle_sidecar = argv[++index];
+        } else if (argument == "--local-goose-cycle-stimulus-sidecar"
+                   && index + 1 < argc) {
+            options.local_goose_cycle_stimulus_sidecar = argv[++index];
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -211,7 +219,9 @@ Options parse_options(const int argc, char* argv[])
         throw std::invalid_argument(
             "--local-activity-sidecar is only valid in service mode");
     }
-    if ((local_goose_requested(options) || !options.local_goose_cycle_sidecar.empty())
+    if ((local_goose_requested(options)
+         || !options.local_goose_cycle_sidecar.empty()
+         || !options.local_goose_cycle_stimulus_sidecar.empty())
         && modes != 0) {
         throw std::invalid_argument(
             "local Goose cognition is only valid in service mode");
@@ -246,6 +256,11 @@ Options parse_options(const int argc, char* argv[])
         && !local_goose_requested(options)) {
         throw std::invalid_argument(
             "--local-goose-cycle-sidecar requires the complete local Goose configuration");
+    }
+    if (!options.local_goose_cycle_stimulus_sidecar.empty()
+        && options.local_goose_cycle_sidecar.empty()) {
+        throw std::invalid_argument(
+            "--local-goose-cycle-stimulus-sidecar requires --local-goose-cycle-sidecar");
     }
 
     if (local_goose_requested(options)) {
@@ -432,6 +447,49 @@ void require_distinct_regular_local_goose_cycle_sidecar(const Options& options)
     }
 }
 
+void require_distinct_regular_local_goose_cycle_stimulus_sidecar(
+    const Options& options)
+{
+    if (options.local_goose_cycle_stimulus_sidecar.empty()) return;
+
+    const auto status = std::filesystem::symlink_status(
+        options.local_goose_cycle_stimulus_sidecar);
+    if (!std::filesystem::is_regular_file(status)) {
+        throw std::invalid_argument(
+            "Local Goose cycle stimulus sidecar must already exist as a regular non-symlink file");
+    }
+
+    const auto stimulus = std::filesystem::weakly_canonical(
+        options.local_goose_cycle_stimulus_sidecar);
+    const auto state = std::filesystem::weakly_canonical(options.state_path);
+    const auto activity = std::filesystem::weakly_canonical(
+        options.local_activity_sidecar);
+    const auto governance = std::filesystem::weakly_canonical(
+        options.local_goose_governance);
+    const auto cycle = std::filesystem::weakly_canonical(
+        options.local_goose_cycle_sidecar);
+    if (stimulus == state || stimulus == activity
+        || stimulus == governance || stimulus == cycle) {
+        throw std::invalid_argument(
+            "Local Goose stimulus sidecar must be distinct from state/activity/governance/cycle databases");
+    }
+    if (!options.autonomous_pulse_sidecar.empty()
+        && stimulus == std::filesystem::weakly_canonical(
+            options.autonomous_pulse_sidecar)) {
+        throw std::invalid_argument(
+            "Local Goose stimulus sidecar must be distinct from autonomous pulse database");
+    }
+
+    const auto inspection =
+        gaudere_agent::inspect_local_goose_cycle_stimulus_sidecar(
+            options.local_goose_cycle_stimulus_sidecar);
+    if (!inspection.eligible) {
+        throw std::invalid_argument(
+            "Local Goose cycle stimulus sidecar is not eligible: "
+            + inspection.detail);
+    }
+}
+
 void require_distinct_local_goose_governance(const Options& options)
 {
     if (!local_goose_requested(options)) return;
@@ -580,6 +638,7 @@ int main(int argc, char* argv[])
         require_distinct_regular_pulse_sidecar(options);
         require_distinct_regular_local_activity_sidecar(options);
         require_distinct_regular_local_goose_cycle_sidecar(options);
+        require_distinct_regular_local_goose_cycle_stimulus_sidecar(options);
         require_distinct_local_goose_governance(options);
 
         sigset_t signals{};
