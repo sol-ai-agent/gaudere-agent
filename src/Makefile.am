@@ -116,6 +116,8 @@ gaudere_agent_SOURCES += \
 	LocalGooseCycleSidecarInspection.cpp \
 	LocalGooseCycleStore.cpp \
 	LocalGooseCycleStore.hpp \
+	LocalGooseCycleStimulusControl.cpp \
+	LocalGooseCycleStimulusControl.hpp \
 	LocalGooseCycleStimulusService.cpp \
 	LocalGooseCycleStimulusService.hpp \
 	LocalGooseCycleStimulusStore.cpp \
@@ -448,6 +450,18 @@ gaudere_local_goose_cycle_stimulus_proof_LDADD = \
 	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 gaudere_local_goose_cycle_stimulus_proof_LDFLAGS = -pthread
+
+bin_PROGRAMS += gaudere-local-goose-cycle-stimulus-init
+
+gaudere_local_goose_cycle_stimulus_init_SOURCES = \
+	local_goose_cycle_stimulus_init_main.cpp \
+	LocalGooseCycleStimulusStore.cpp \
+	LocalGooseCycleStimulusStore.hpp \
+	Sha256.cpp \
+	Sha256.hpp
+
+gaudere_local_goose_cycle_stimulus_init_LDADD = \
+	$(JSON_LIBS) -lsqlite3
 
 bin_PROGRAMS += gaudere-local-goose-cycle-seed gaudere-local-goose-cycle-activate
 
