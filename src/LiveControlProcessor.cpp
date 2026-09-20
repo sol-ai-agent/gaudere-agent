@@ -21,20 +21,6 @@ constexpr const char* goose_sync_echo_prefix = "goose-local-echo:";
 
 gaudere::work::Task make_live_echo_task(const LiveControlCommand& command)
 {
-    if (command.operation
-        == LiveControlOperation::stimulate_local_goose_cycle) {
-        if (!local_goose_stimulus_) {
-            return LiveControlReply{
-                false, 4,
-                "gaudere-agent: Local Goose stimulus capability is not enabled in this service\n"};
-        }
-        // The callback runs synchronously on this sole owner worker. It may have
-        // durably accepted or reconciled a stimulus before returning or throwing,
-        // so force the caller to re-read/re-arm the cycle conservatively.
-        local_goose_cycle_may_have_changed = true;
-        return local_goose_stimulus_(command.id);
-    }
-
     gaudere::work::Task task;
     task.id = command.id;
     task.idempotency_key = "local.echo:" + command.id;
@@ -366,6 +352,20 @@ LiveControlReply LiveControlProcessor::process_one(
             body += wake_intent_report(*wake);
         }
         return LiveControlReply{false, 4, std::move(body)};
+    }
+
+    if (command.operation
+        == LiveControlOperation::stimulate_local_goose_cycle) {
+        if (!local_goose_stimulus_) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose stimulus capability is not enabled in this service\n"};
+        }
+        // The callback runs synchronously on this sole owner worker. It may have
+        // durably accepted or reconciled a stimulus before returning or throwing,
+        // so force the caller to re-read/re-arm the cycle conservatively.
+        local_goose_cycle_may_have_changed = true;
+        return local_goose_stimulus_(command.id);
     }
 
     gaudere::work::Task task;
