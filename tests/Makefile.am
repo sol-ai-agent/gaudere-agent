@@ -9,6 +9,7 @@ check_PROGRAMS = \
 	file_secret_source_test \
 	live_control_test \
 	live_control_processor_test \
+	local_goose_dialogue_test \
 	local_goose_cycle_stimulus_service_test \
 	local_goose_cycle_stimulus_store_test \
 	local_wait_handler_test \
@@ -143,6 +144,14 @@ live_control_processor_test_SOURCES = \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
 live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+local_goose_dialogue_test_SOURCES = \
+	local_goose_dialogue_test.cpp \
+	../src/LocalGooseDialogue.cpp \
+	../src/LocalGooseDialogue.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+local_goose_dialogue_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 
 local_goose_cycle_stimulus_service_test_SOURCES = \
 	local_goose_cycle_stimulus_service_test.cpp \
