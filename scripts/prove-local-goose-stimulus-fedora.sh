@@ -42,7 +42,7 @@ cleanup()
 }
 trap cleanup EXIT HUP INT TERM
 
-for command in "$podman_command" "$systemctl_command" git sqlite3 chmod mkdir mktemp rm grep awk cut sed tr sleep; do
+for command in "$podman_command" "$systemctl_command" git sqlite3 chmod mkdir mktemp rm grep awk cut sed tr sleep id; do
     command -v "$command" >/dev/null 2>&1         || fail "required command not found: $command"
 done
 
@@ -57,6 +57,8 @@ done
 agent_ref=$(git -C "$repository_root" rev-parse HEAD)
 core_ref=$(tr -d '\r\n' < "$repository_root/gaudere.ref")
 short_ref=$(printf '%s\n' "$agent_ref" | cut -c1-12)
+host_uid=$(id -u)
+host_gid=$(id -g)
 proof_tag="localhost/gaudere-agent:stimulus-proof-$short_ref"
 
 case "$agent_ref" in
@@ -115,7 +117,7 @@ proof_image_built=1
 "$podman_command" run --rm --network none     --entrypoint /usr/bin/test "$proof_tag"     -x /opt/gaudere-agent/bin/gaudere-local-goose-cycle-stimulus-proof     || fail "proof image lacks isolated stimulus proof runtime"
 
 printf '=== RUN ISOLATED NETWORK-NONE LIVE-CONTROL PROOF ===\n'
-"$podman_command" run -d     --name "$container_name"     --network none     --userns=keep-id     --read-only     --read-only-tmpfs     --security-opt=no-new-privileges     --cap-drop=all     --env LD_LIBRARY_PATH=/opt/gaudere/lib     --volume "$workspace:/proof:Z"     --entrypoint /opt/gaudere-agent/bin/gaudere-local-goose-cycle-stimulus-proof     "$proof_tag"     --state /proof/state.db     --cycle-sidecar /proof/local-goose-cycle.db     --stimulus-sidecar /proof/local-goose-cycle-stimulus.db     --control-socket /proof/control.sock >/dev/null
+"$podman_command" run -d     --name "$container_name"     --network none     --userns=keep-id     --user "$host_uid:$host_gid"     --read-only     --read-only-tmpfs     --security-opt=no-new-privileges     --cap-drop=all     --env LD_LIBRARY_PATH=/opt/gaudere/lib     --volume "$workspace:/proof:Z"     --entrypoint /opt/gaudere-agent/bin/gaudere-local-goose-cycle-stimulus-proof     "$proof_tag"     --state /proof/state.db     --cycle-sidecar /proof/local-goose-cycle.db     --stimulus-sidecar /proof/local-goose-cycle-stimulus.db     --control-socket /proof/control.sock >/dev/null
 proof_container_started=1
 
 proof_network=$("$podman_command" inspect "$container_name"     --format '{{.HostConfig.NetworkMode}}')
@@ -132,7 +134,7 @@ done
 }
 
 request_id="fedora-proof-$short_ref"
-client_output=$("$podman_command" exec     --env LD_LIBRARY_PATH=/opt/gaudere/lib     "$container_name"     /opt/gaudere-agent/bin/gaudere-control     --socket /proof/control.sock     stimulate-local-goose-cycle "$request_id")     || {
+client_output=$("$podman_command" exec     --user "$host_uid:$host_gid"     --env LD_LIBRARY_PATH=/opt/gaudere/lib     "$container_name"     /opt/gaudere-agent/bin/gaudere-control     --socket /proof/control.sock     stimulate-local-goose-cycle "$request_id")     || {
         "$podman_command" logs "$container_name" >&2 || true
         fail "bounded stimulus live-control request failed"
     }
