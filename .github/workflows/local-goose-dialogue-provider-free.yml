@@ -1,0 +1,81 @@
+name: Local Goose dialogue provider-free gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-local-goose-dialogue:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 30
+
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libcurl-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix"             CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2
+          make install
+
+      - name: Prove dialogue contract authority boundary
+        run: |
+          set -eu
+          grep -q 'cognition.local-goose-dialogue.v1' agent/src/LocalGooseDialogue.hpp
+          grep -q 'application/vnd.gaudere.local-goose-dialogue+json' agent/src/LocalGooseDialogue.hpp
+          grep -q 'request_id' agent/src/LocalGooseDialogue.cpp
+          grep -q 'message_sha256' agent/src/LocalGooseDialogue.cpp
+          grep -q 'model_sha256' agent/src/LocalGooseDialogue.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|LocalGooseRunner'             agent/src/LocalGooseDialogue.cpp             agent/src/LocalGooseDialogue.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseDialogue.cpp
+          ! grep -Eq 'podman|systemctl|AF_INET|SOCK_STREAM'             agent/src/LocalGooseDialogue.cpp             agent/src/LocalGooseDialogue.hpp
+          ! grep -q 'LocalGooseDialogue' agent/src/main.cpp
+          ! grep -q 'local-message' agent/src/control_main.cpp
+
+      - name: Build and run dialogue contract test
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build-dialogue
+          cd build-dialogue
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 -C tests local_goose_dialogue_test
+          tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
