@@ -126,6 +126,7 @@ jobs:
           sh -n agent/scripts/prove-local-goose-stimulus-fedora.sh
           grep -q -- '--target builder' agent/scripts/prove-local-goose-stimulus-fedora.sh
           grep -q -- '--network none' agent/scripts/prove-local-goose-stimulus-fedora.sh
+          grep -q -- '--user "$host_uid:$host_gid"' agent/scripts/prove-local-goose-stimulus-fedora.sh
           grep -q 'stimulate-local-goose-cycle' agent/scripts/prove-local-goose-stimulus-fedora.sh
           grep -q 'production_cursor_after.*production_cursor_before' agent/scripts/prove-local-goose-stimulus-fedora.sh
           grep -q 'provider_after.*provider_before' agent/scripts/prove-local-goose-stimulus-fedora.sh
