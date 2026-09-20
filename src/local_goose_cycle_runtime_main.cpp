@@ -4,6 +4,9 @@
 #include "LocalGooseCycleSchedulerBridge.hpp"
 #include "LocalGooseCycleService.hpp"
 #include "LocalGooseCycleStore.hpp"
+#include "LocalGooseCycleStimulusControl.hpp"
+#include "LocalGooseCycleStimulusService.hpp"
+#include "LocalGooseCycleStimulusStore.hpp"
 #include "LocalGooseRunner.hpp"
 #include "OpenAIBudget.hpp"
 #include "StateLock.hpp"
@@ -34,6 +37,7 @@ namespace {
 struct Options {
     std::string state_path;
     std::string cycle_sidecar;
+    std::string stimulus_sidecar;
     std::string model;
     std::string model_sha256;
     std::string governance;
@@ -47,6 +51,7 @@ void usage(const char* program)
     std::cout
         << "Usage: " << program
         << " --state PATH --cycle-sidecar PATH"
+        << " [--stimulus-sidecar PATH]"
         << " --model MODEL --model-sha256 SHA256"
         << " --governance PATH --control-socket PATH [--check | --once]\n";
 }
@@ -69,6 +74,8 @@ Options parse_options(const int argc, char* argv[])
             options.state_path = argv[++index];
         } else if (argument == "--cycle-sidecar" && index + 1 < argc) {
             options.cycle_sidecar = argv[++index];
+        } else if (argument == "--stimulus-sidecar" && index + 1 < argc) {
+            options.stimulus_sidecar = argv[++index];
         } else if (argument == "--model" && index + 1 < argc) {
             options.model = argv[++index];
         } else if (argument == "--model-sha256" && index + 1 < argc) {
@@ -96,6 +103,8 @@ Options parse_options(const int argc, char* argv[])
             "state, cycle sidecar, model, model SHA256, governance and control socket are required");
     }
     if (options.state_path.front() != '/' || options.cycle_sidecar.front() != '/'
+        || (!options.stimulus_sidecar.empty()
+            && options.stimulus_sidecar.front() != '/')
         || options.model.front() != '/' || options.governance.front() != '/'
         || options.control_socket.front() != '/') {
         throw std::invalid_argument(
@@ -164,6 +173,11 @@ void validate_files(const Options& options)
     require_regular_non_symlink(options.state_path, "state database");
     require_regular_non_symlink(options.cycle_sidecar, "Local Goose cycle sidecar");
     require_regular_non_symlink(options.governance, "Local Goose governance sidecar");
+    if (!options.stimulus_sidecar.empty()) {
+        require_regular_non_symlink(
+            options.stimulus_sidecar,
+            "Local Goose cycle stimulus sidecar");
+    }
 
     require_distinct(options.state_path, options.cycle_sidecar,
                      "Local Goose cycle sidecar must be distinct from state database");
@@ -171,6 +185,25 @@ void validate_files(const Options& options)
                      "Local Goose governance sidecar must be distinct from state database");
     require_distinct(options.cycle_sidecar, options.governance,
                      "Local Goose cycle and governance sidecars must be distinct");
+    if (!options.stimulus_sidecar.empty()) {
+        require_distinct(
+            options.state_path, options.stimulus_sidecar,
+            "Local Goose stimulus sidecar must be distinct from state database");
+        require_distinct(
+            options.cycle_sidecar, options.stimulus_sidecar,
+            "Local Goose stimulus and cycle sidecars must be distinct");
+        require_distinct(
+            options.governance, options.stimulus_sidecar,
+            "Local Goose stimulus and governance sidecars must be distinct");
+        const auto stimulus_inspection =
+            gaudere_agent::inspect_local_goose_cycle_stimulus_sidecar(
+                options.stimulus_sidecar);
+        if (!stimulus_inspection.eligible) {
+            throw std::invalid_argument(
+                "Local Goose cycle stimulus sidecar is not eligible: "
+                + stimulus_inspection.detail);
+        }
+    }
 
     const auto inspection = gaudere_agent::inspect_local_goose_cycle_sidecar(
         options.cycle_sidecar);
@@ -242,11 +275,39 @@ int main(int argc, char* argv[])
         gaudere_agent::WorkController work_controller(
             scheduler, work_runtime, task_dispatcher, "local-goose-cycle-runtime");
 
+        gaudere_agent::LocalGooseCycleStore cycle_store(options.cycle_sidecar);
+        std::unique_ptr<gaudere_agent::LocalGooseCycleStimulusStore>
+            stimulus_store;
+        std::unique_ptr<gaudere_agent::LocalGooseCycleStimulusService>
+            stimulus_service;
+        std::unique_ptr<gaudere_agent::LocalGooseCycleStimulusControl>
+            stimulus_control;
+        if (!options.stimulus_sidecar.empty()) {
+            stimulus_store =
+                std::make_unique<gaudere_agent::LocalGooseCycleStimulusStore>(
+                    options.stimulus_sidecar);
+            stimulus_service =
+                std::make_unique<gaudere_agent::LocalGooseCycleStimulusService>(
+                    *stimulus_store, cycle_store, task_store);
+            stimulus_control =
+                std::make_unique<gaudere_agent::LocalGooseCycleStimulusControl>(
+                    *stimulus_service, now_ms);
+        }
+
+        gaudere_agent::LiveControlProcessor::LocalGooseStimulus
+            stimulus_callback;
+        if (stimulus_control) {
+            stimulus_callback = [&stimulus_control](const std::string& request_id) {
+                return stimulus_control->stimulate(request_id);
+            };
+        }
+
         gaudere_agent::LiveControlMailbox control_mailbox;
         gaudere_agent::LiveControlProcessor control_processor(
             work_runtime, task_store, budget_store,
             gaudere_agent::openai_bootstrap_budget_policy(), false, nullptr,
-            [&scheduler] { return scheduler.next(); });
+            [&scheduler] { return scheduler.next(); },
+            std::move(stimulus_callback));
         gaudere_agent::LiveControlServer control_server(
             options.control_socket, control_mailbox,
             [&work_controller] { work_controller.interrupt(); });
@@ -261,13 +322,14 @@ int main(int argc, char* argv[])
             if (control.work_may_be_pending) work_controller.notify_work();
             if (control.wake_deadline_may_have_changed)
                 work_controller.refresh_deadlines();
+            if (control.local_goose_cycle_may_have_changed)
+                work_controller.interrupt();
         };
 
         gaudere_agent::PosixLocalGooseRunner runner(pump_local_goose_tools);
         gaudere_agent::LocalGooseCycleHandler handler(
             runner, options.model, options.model_sha256, true,
             options.control_socket, options.governance);
-        gaudere_agent::LocalGooseCycleStore cycle_store(options.cycle_sidecar);
         gaudere_agent::LocalGooseCycleService cycle_service(
             cycle_store, task_store, work_runtime, handler,
             options.model_sha256, now_ms);
@@ -380,6 +442,19 @@ int main(int argc, char* argv[])
             if (control.work_may_be_pending) work_controller.notify_work();
             if (control.wake_deadline_may_have_changed)
                 work_controller.refresh_deadlines();
+            if (control.local_goose_cycle_may_have_changed) {
+                cycle_monitoring = true;
+                if (!step_cycle() || once_terminal) {
+                    stop_requested.store(true);
+                    work_controller.stop();
+                    internal_wake.store(true);
+                    if (pthread_kill(
+                            signal_waiter.native_handle(), SIGUSR1) != 0) {
+                        signal_wait_failed.store(true);
+                    }
+                    continue;
+                }
+            }
 
             const auto result = work_controller.wait_and_run();
             if (result == gaudere_agent::WorkCycleResult::stopped) break;

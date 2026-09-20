@@ -175,6 +175,7 @@ std::string wake_revoke_name(
     throw std::invalid_argument("unknown wake-intent revoke result");
 }
 
+
 } // namespace
 
 LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
@@ -183,14 +184,16 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            gaudere::budget::Policy budget_policy,
                                            const bool openai_enabled,
                                            ExplicitWake* explicit_wake,
-                                           SchedulerNext scheduler_next)
+                                           SchedulerNext scheduler_next,
+                                           LocalGooseStimulus local_goose_stimulus)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
       budget_policy_(std::move(budget_policy)),
       openai_enabled_(openai_enabled),
       explicit_wake_(explicit_wake),
-      scheduler_next_(std::move(scheduler_next))
+      scheduler_next_(std::move(scheduler_next)),
+      local_goose_stimulus_(std::move(local_goose_stimulus))
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -204,6 +207,7 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
         ++result.processed;
         bool work_may_be_pending = false;
         bool wake_deadline_may_have_changed = false;
+        bool local_goose_cycle_may_have_changed = false;
         const auto operation = pending->command().operation;
         const bool task_submission_may_have_committed =
             operation == LiveControlOperation::submit_echo
@@ -212,15 +216,20 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
         const bool wake_transition_may_have_committed =
             operation == LiveControlOperation::accept_wake
             || operation == LiveControlOperation::revoke_wake;
+        const bool local_goose_transition_may_have_committed =
+            operation == LiveControlOperation::stimulate_local_goose_cycle;
         try {
             pending->complete(process_one(
                 pending->command(), work_may_be_pending,
-                wake_deadline_may_have_changed));
+                wake_deadline_may_have_changed,
+                local_goose_cycle_may_have_changed));
         } catch (const std::exception& error) {
             work_may_be_pending = task_submission_may_have_committed
                 && !goose_synchronous_echo(pending->command());
             wake_deadline_may_have_changed =
                 wake_transition_may_have_committed;
+            local_goose_cycle_may_have_changed =
+                local_goose_transition_may_have_committed;
             pending->complete(LiveControlReply{
                 false, 1, std::string("gaudere-agent: live control command failed: ")
                               + error.what() + "\n"});
@@ -229,6 +238,8 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
                 && !goose_synchronous_echo(pending->command());
             wake_deadline_may_have_changed =
                 wake_transition_may_have_committed;
+            local_goose_cycle_may_have_changed =
+                local_goose_transition_may_have_committed;
             pending->complete(LiveControlReply{
                 false, 1,
                 "gaudere-agent: live control command failed with non-standard exception\n"});
@@ -237,13 +248,18 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
         result.wake_deadline_may_have_changed =
             result.wake_deadline_may_have_changed
             || wake_deadline_may_have_changed;
+        result.local_goose_cycle_may_have_changed =
+            result.local_goose_cycle_may_have_changed
+            || local_goose_cycle_may_have_changed;
     }
     return result;
 }
 
-LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& command,
-                                                   bool& work_may_be_pending,
-                                                   bool& wake_deadline_may_have_changed)
+LiveControlReply LiveControlProcessor::process_one(
+    const LiveControlCommand& command,
+    bool& work_may_be_pending,
+    bool& wake_deadline_may_have_changed,
+    bool& local_goose_cycle_may_have_changed)
 {
     if (command.operation == LiveControlOperation::inspect_task) {
         const auto task = store_.find(command.id);
@@ -338,6 +354,20 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
         return LiveControlReply{false, 4, std::move(body)};
     }
 
+    if (command.operation
+        == LiveControlOperation::stimulate_local_goose_cycle) {
+        if (!local_goose_stimulus_) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose stimulus capability is not enabled in this service\n"};
+        }
+        // The callback runs synchronously on this sole owner worker. It may have
+        // durably accepted or reconciled a stimulus before returning or throwing,
+        // so force the caller to re-read/re-arm the cycle conservatively.
+        local_goose_cycle_may_have_changed = true;
+        return local_goose_stimulus_(command.id);
+    }
+
     gaudere::work::Task task;
     std::string description;
     switch (command.operation) {
@@ -369,6 +399,7 @@ LiveControlReply LiveControlProcessor::process_one(const LiveControlCommand& com
     case LiveControlOperation::revoke_wake:
     case LiveControlOperation::inspect_wake:
     case LiveControlOperation::inspect_wake_status:
+    case LiveControlOperation::stimulate_local_goose_cycle:
         throw std::logic_error(
             "non-submit operation unexpectedly reached submit path");
     }

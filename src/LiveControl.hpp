@@ -24,7 +24,8 @@ enum class LiveControlOperation {
     accept_wake,
     revoke_wake,
     inspect_wake,
-    inspect_wake_status
+    inspect_wake_status,
+    stimulate_local_goose_cycle
 };
 
 struct LiveControlCommand {

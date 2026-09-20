@@ -18,6 +18,7 @@ struct LiveControlProcessResult {
     std::size_t processed = 0;
     bool work_may_be_pending = false;
     bool wake_deadline_may_have_changed = false;
+    bool local_goose_cycle_may_have_changed = false;
 };
 
 /**
@@ -32,6 +33,8 @@ class LiveControlProcessor {
 public:
     using SchedulerNext = std::function<
         std::optional<gaudere::scheduling::wake::WakeIntentTimePoint>()>;
+    using LocalGooseStimulus =
+        std::function<LiveControlReply(const std::string&)>;
 
     LiveControlProcessor(gaudere::work::Runtime& runtime,
                          gaudere::work::TaskStore& store,
@@ -39,14 +42,17 @@ public:
                          gaudere::budget::Policy budget_policy,
                          bool openai_enabled,
                          ExplicitWake* explicit_wake = nullptr,
-                         SchedulerNext scheduler_next = {});
+                         SchedulerNext scheduler_next = {},
+                         LocalGooseStimulus local_goose_stimulus = {});
 
     [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
 
 private:
-    [[nodiscard]] LiveControlReply process_one(const LiveControlCommand& command,
-                                               bool& work_may_be_pending,
-                                               bool& wake_deadline_may_have_changed);
+    [[nodiscard]] LiveControlReply process_one(
+        const LiveControlCommand& command,
+        bool& work_may_be_pending,
+        bool& wake_deadline_may_have_changed,
+        bool& local_goose_cycle_may_have_changed);
 
     gaudere::work::Runtime& runtime_;
     gaudere::work::TaskStore& store_;
@@ -55,6 +61,7 @@ private:
     bool openai_enabled_;
     ExplicitWake* explicit_wake_;
     SchedulerNext scheduler_next_;
+    LocalGooseStimulus local_goose_stimulus_;
 };
 
 } // namespace gaudere_agent
