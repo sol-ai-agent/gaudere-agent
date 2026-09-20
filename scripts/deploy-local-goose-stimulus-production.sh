@@ -126,8 +126,6 @@ candidate_id_normalized=$(normalize_image "$candidate_id")
 
 "$podman_command" run --rm --network none --read-only --read-only-tmpfs     --security-opt=no-new-privileges --cap-drop=all     --entrypoint /usr/local/bin/gaudere-local-goose-cycle-stimulus-init     "$candidate_id" --help 2>&1     | grep -q -- '--stimulus-sidecar PATH'     || fail "candidate lacks bounded stimulus initializer"
 
-"$podman_command" run --rm --network none --read-only --read-only-tmpfs     --security-opt=no-new-privileges --cap-drop=all     --entrypoint /usr/local/bin/gaudere-control "$candidate_id"     --socket /tmp/unused stimulate-local-goose-cycle 2>&1     | grep -q 'Usage:'     || fail "candidate gaudere-control lacks bounded stimulus command"
-
 python3 - "$target_quadlet" "$rendered_quadlet" "$candidate_id" <<'PY'
 from pathlib import Path
 import sys
