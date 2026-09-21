@@ -19,6 +19,7 @@ enum class LiveControlOperation {
     submit_echo,
     submit_openai,
     submit_reflection,
+    submit_local_goose_dialogue,
     inspect_task,
     inspect_budget,
     accept_wake,
