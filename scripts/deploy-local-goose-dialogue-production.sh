@@ -64,7 +64,7 @@ stimulus_count()
 
 [ "$authorization" = "AUTHORIZED_LOCAL_GOOSE_DIALOGUE_CODE_DEPLOY" ] || fail "explicit code-deploy authorization token is required"
 
-for command in "$podman_command" "$systemctl_command" git python3 sqlite3 install mkdir mktemp rm sed grep sleep stat id; do
+for command in "$podman_command" "$systemctl_command" git python3 sqlite3 install mkdir mktemp rm sed grep sleep stat id tail; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 
