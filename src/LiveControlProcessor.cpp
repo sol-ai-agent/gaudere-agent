@@ -454,6 +454,12 @@ LiveControlReply LiveControlProcessor::process_one(
     if (!stored) {
         throw std::runtime_error(description + " task is missing after submission");
     }
+    if (command.operation == LiveControlOperation::submit_local_goose_dialogue
+        && !same_local_goose_dialogue_definition(*stored, task)) {
+        return LiveControlReply{
+            false, 4,
+            "gaudere-agent: Local Goose dialogue request conflicts with an existing Task\n"};
+    }
 
     if (goose_synchronous_echo(command)) {
         if (!same_local_echo_definition(*stored, task)) {
