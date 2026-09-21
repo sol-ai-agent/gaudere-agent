@@ -505,3 +505,45 @@ gaudere_local_goose_cycle_activate_SOURCES = \
 	StateLock.hpp
 
 gaudere_local_goose_cycle_activate_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+
+bin_PROGRAMS += gaudere-local-goose-dialogue-proof
+
+gaudere_local_goose_dialogue_proof_SOURCES = \
+	local_goose_dialogue_proof_main.cpp \
+	LiveControl.cpp \
+	LiveControl.hpp \
+	LiveControlProcessor.cpp \
+	LiveControlProcessor.hpp \
+	LocalGooseDialogue.cpp \
+	LocalGooseDialogue.hpp \
+	LocalGooseDialogueHandler.cpp \
+	LocalGooseDialogueHandler.hpp \
+	LocalGooseRunner.cpp \
+	LocalGooseRunner.hpp \
+	OpenAIBudget.hpp \
+	OpenAITask.cpp \
+	OpenAITask.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskDispatcher.cpp \
+	TaskDispatcher.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp \
+	TaskReport.cpp \
+	TaskReport.hpp \
+	WorkController.cpp \
+	WorkController.hpp \
+	BoundedReflection.cpp \
+	BoundedReflection.hpp \
+	ExplicitWake.cpp \
+	ExplicitWake.hpp \
+	LocalEchoHandler.cpp \
+	LocalEchoHandler.hpp \
+	WakeSourceDecision.cpp \
+	WakeSourceDecision.hpp
+
+gaudere_local_goose_dialogue_proof_LDADD = \
+	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+gaudere_local_goose_dialogue_proof_LDFLAGS = -pthread
