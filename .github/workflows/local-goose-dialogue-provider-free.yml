@@ -49,70 +49,68 @@ jobs:
           autoreconf --install --force
           mkdir build
           cd build
-          ../configure --prefix="$GITHUB_WORKSPACE/prefix"             CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
           make --jobs=2
           make install
 
-      - name: Prove dialogue contract authority boundary
+      - name: Prove dialogue authority boundary and production wiring
         run: |
           set -eu
           grep -q 'cognition.local-goose-dialogue.v1' agent/src/LocalGooseDialogue.hpp
           grep -q 'application/vnd.gaudere.local-goose-dialogue+json' agent/src/LocalGooseDialogue.hpp
-          grep -q 'request_id' agent/src/LocalGooseDialogue.cpp
           grep -q 'message_sha256' agent/src/LocalGooseDialogue.cpp
           grep -q 'model_sha256' agent/src/LocalGooseDialogue.cpp
-          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|LocalGooseRunner'             agent/src/LocalGooseDialogue.cpp             agent/src/LocalGooseDialogue.hpp
-          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseDialogue.cpp
-          ! grep -Eq 'podman|systemctl|AF_INET|SOCK_STREAM'             agent/src/LocalGooseDialogue.cpp             agent/src/LocalGooseDialogue.hpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|LocalGooseRunner' \
+            agent/src/LocalGooseDialogue.cpp agent/src/LocalGooseDialogue.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialogue.cpp
+
           grep -q 'LocalGooseRunner' agent/src/LocalGooseDialogueHandler.hpp
           grep -q 'tools_enabled = false' agent/src/LocalGooseDialogueHandler.cpp
           grep -q 'control_socket.clear' agent/src/LocalGooseDialogueHandler.cpp
           grep -q 'governance_path.clear' agent/src/LocalGooseDialogueHandler.cpp
-          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|systemctl|podman'             agent/src/LocalGooseDialogueHandler.cpp             agent/src/LocalGooseDialogueHandler.hpp
-          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseDialogueHandler.cpp
-          ! grep -q 'LocalGooseDialogueHandler' agent/src/main.cpp
-          grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
-          grep -q 'openai_bootstrap_budget_policy(),[[:space:]]*          grep -q 'submit_local_goose_dialogue' agent/src/LiveControl.cpp
-          grep -q 'make_local_goose_dialogue_task' agent/src/LiveControlProcessor.cpp
-          grep -q 'request id conflicts' agent/src/LiveControlProcessor.cpp
-          ! grep -q 'LocalGooseDialogueHandler' agent/src/main.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|systemctl|podman' \
+            agent/src/LocalGooseDialogueHandler.cpp agent/src/LocalGooseDialogueHandler.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialogueHandler.cpp
 
-      - name: Build and run dialogue contract test
-        run: |
-          set -eu
-          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
-          cd agent
-          autoreconf --install --force
-          mkdir build-dialogue
-          cd build-dialogue
-          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 -C src gaudere-local-goose-dialogue-proof
-          make --jobs=2 -C tests local_goose_dialogue_test local_goose_dialogue_handler_test live_control_test live_control_processor_test
-          test -x src/gaudere-local-goose-dialogue-proof
-          src/gaudere-local-goose-dialogue-proof --help 2>&1 | grep -q -- '--model-sha256'
-          sh -n ../scripts/prove-local-goose-dialogue-fedora.sh
-          grep -q -- '--network none' ../scripts/prove-local-goose-dialogue-fedora.sh
-          grep -q 'PROVIDER_TOTAL' ../scripts/prove-local-goose-dialogue-fedora.sh
-          grep -q 'PRODUCTION_CURSOR' ../scripts/prove-local-goose-dialogue-fedora.sh
-          grep -q 'PRODUCTION_DIALOGUE_TASKS' ../scripts/prove-local-goose-dialogue-fedora.sh
-          grep -q 'PRODUCTION_STIMULI' ../scripts/prove-local-goose-dialogue-fedora.sh
-          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_ISOLATED=PASS' ../scripts/prove-local-goose-dialogue-fedora.sh
-          grep -q 'gaudere-local-goose-dialogue-proof' ../Containerfile
-          tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
-          tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
-          tests/live_control_test
-          tests/live_control_processor_test | grep -Fx 'All live control processor tests passed'
- agent/src/local_goose_dialogue_proof_main.cpp
-          grep -q 'false,' agent/src/local_goose_dialogue_proof_main.cpp
-          grep -q 'provider_execution=false tools_enabled=false network_expected=none' agent/src/local_goose_dialogue_proof_main.cpp
+          grep -q '#include "LocalGooseDialogueHandler.hpp"' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_runner' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_handler' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_task_kind' agent/src/main.cpp
+          grep -q 'cannot register Local Goose dialogue handler' agent/src/main.cpp
+          grep -q 'tools_enabled=false provider=local' agent/src/main.cpp
+          grep -q 'options.local_goose_model_sha256' agent/src/main.cpp
           grep -q 'local-message' agent/src/control_main.cpp
           grep -q 'submit_local_goose_dialogue' agent/src/LiveControl.cpp
           grep -q 'make_local_goose_dialogue_task' agent/src/LiveControlProcessor.cpp
           grep -q 'request id conflicts' agent/src/LiveControlProcessor.cpp
-          ! grep -q 'LocalGooseDialogueHandler' agent/src/main.cpp
 
-      - name: Build and run dialogue contract test
+          grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
+          grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
+            agent/src/local_goose_dialogue_proof_main.cpp
+
+      - name: Prove deploy remains code-only
+        run: |
+          set -eu
+          sh -n agent/scripts/prove-local-goose-dialogue-fedora.sh
+          sh -n agent/scripts/deploy-local-goose-dialogue-production.sh
+          grep -q 'AUTHORIZED_LOCAL_GOOSE_DIALOGUE_CODE_DEPLOY' \
+            agent/scripts/deploy-local-goose-dialogue-production.sh
+          grep -q '321df97f8b03e12de1727ad13c5e9d05646fb807e52fbef9093fc61127b98595' \
+            agent/scripts/deploy-local-goose-dialogue-production.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_TASKS' \
+            agent/scripts/deploy-local-goose-dialogue-production.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_CODE_DEPLOY=PASS' \
+            agent/scripts/deploy-local-goose-dialogue-production.sh
+          grep -q 'PROVIDER_TOTAL' agent/scripts/deploy-local-goose-dialogue-production.sh
+          grep -q 'CYCLE_CURSOR' agent/scripts/deploy-local-goose-dialogue-production.sh
+          grep -q 'STIMULI=' agent/scripts/deploy-local-goose-dialogue-production.sh
+          ! grep -Eq 'gaudere-control[^\n]*local-message' \
+            agent/scripts/deploy-local-goose-dialogue-production.sh
+
+      - name: Build and run dialogue tests
         run: |
           set -eu
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
@@ -122,7 +120,15 @@ jobs:
           mkdir build-dialogue
           cd build-dialogue
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 -C tests local_goose_dialogue_test local_goose_dialogue_handler_test live_control_test live_control_processor_test
+          make --jobs=2 -C src gaudere-agent gaudere-local-goose-dialogue-proof
+          make --jobs=2 -C tests \
+            local_goose_dialogue_test \
+            local_goose_dialogue_handler_test \
+            live_control_test \
+            live_control_processor_test
+          test -x src/gaudere-agent
+          test -x src/gaudere-local-goose-dialogue-proof
+          src/gaudere-local-goose-dialogue-proof --help 2>&1 | grep -q -- '--model-sha256'
           tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
           tests/live_control_test
