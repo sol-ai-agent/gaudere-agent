@@ -15,6 +15,8 @@
 #include "LocalEchoHandler.hpp"
 #include "LocalGooseCognitionHandler.hpp"
 #include "LocalGooseCognitionService.hpp"
+#include "LocalGooseDialogue.hpp"
+#include "LocalGooseDialogueHandler.hpp"
 #include "LocalGooseCycleHandler.hpp"
 #include "LocalGooseCycleSchedulerBridge.hpp"
 #include "LocalGooseCycleService.hpp"
@@ -1045,6 +1047,30 @@ int main(int argc, char* argv[])
                     << " provider_execution=false automatic_stimulus=false\n";
             }
 
+            std::unique_ptr<gaudere_agent::PosixLocalGooseRunner>
+                local_goose_dialogue_runner;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueHandler>
+                local_goose_dialogue_handler;
+            if (local_goose_requested(options)) {
+                local_goose_dialogue_runner =
+                    std::make_unique<gaudere_agent::PosixLocalGooseRunner>();
+                local_goose_dialogue_handler =
+                    std::make_unique<gaudere_agent::LocalGooseDialogueHandler>(
+                        *local_goose_dialogue_runner,
+                        options.local_goose_model,
+                        options.local_goose_model_sha256);
+                if (!task_dispatcher.register_handler(
+                        gaudere_agent::local_goose_dialogue_task_kind,
+                        *local_goose_dialogue_handler)) {
+                    throw std::runtime_error(
+                        "cannot register Local Goose dialogue handler");
+                }
+                std::cout
+                    << "gaudere-agent: local Goose dialogue enabled model="
+                    << options.local_goose_model
+                    << " tools_enabled=false provider=local\n";
+            }
+
             std::unique_ptr<gaudere_agent::LiveControlMailbox> control_mailbox;
             std::unique_ptr<gaudere_agent::LiveControlProcessor> control_processor;
             std::unique_ptr<gaudere_agent::LiveControlServer> control_server;
@@ -1069,7 +1095,10 @@ int main(int argc, char* argv[])
                     gaudere_agent::OpenAIActivation::bootstrap_budget_policy(),
                     options.openai_enabled, explicit_wake.get(),
                     [&work_scheduler] { return work_scheduler.next(); },
-                    std::move(stimulus_callback));
+                    std::move(stimulus_callback),
+                    local_goose_requested(options)
+                        ? options.local_goose_model_sha256
+                        : std::string{});
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.interrupt(); });
