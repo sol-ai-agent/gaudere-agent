@@ -387,6 +387,8 @@ gaudere_local_goose_cycle_runtime_SOURCES = \
 	LocalEchoHandler.hpp \
 	LocalGooseCognition.cpp \
 	LocalGooseCognition.hpp \
+	LocalGooseDialogue.cpp \
+	LocalGooseDialogue.hpp \
 	LocalGooseCycle.cpp \
 	LocalGooseCycle.hpp \
 	LocalGooseCycleHandler.cpp \
