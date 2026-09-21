@@ -31,6 +31,8 @@ std::string operation_name(const LiveControlOperation operation)
         return "submit_openai";
     case LiveControlOperation::submit_reflection:
         return "submit_reflection";
+    case LiveControlOperation::submit_local_goose_dialogue:
+        return "submit_local_goose_dialogue";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
@@ -59,6 +61,9 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "submit_reflection") {
         return LiveControlOperation::submit_reflection;
+    }
+    if (value == "submit_local_goose_dialogue") {
+        return LiveControlOperation::submit_local_goose_dialogue;
     }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
@@ -135,6 +140,12 @@ void validate_command(const LiveControlCommand& command)
         if (command.text.empty() || command.text.size() > 4096) {
             throw std::invalid_argument(
                 "bounded reflection objective must be 1..4096 bytes");
+        }
+        break;
+    case LiveControlOperation::submit_local_goose_dialogue:
+        if (command.text.empty() || command.text.size() > 4096) {
+            throw std::invalid_argument(
+                "Local Goose dialogue message must be 1..4096 bytes");
         }
         break;
     case LiveControlOperation::inspect_task:
