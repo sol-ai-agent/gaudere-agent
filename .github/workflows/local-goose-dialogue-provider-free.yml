@@ -71,6 +71,41 @@ jobs:
           ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|systemctl|podman'             agent/src/LocalGooseDialogueHandler.cpp             agent/src/LocalGooseDialogueHandler.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseDialogueHandler.cpp
           ! grep -q 'LocalGooseDialogueHandler' agent/src/main.cpp
+          grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
+          grep -q 'openai_bootstrap_budget_policy(),[[:space:]]*          grep -q 'submit_local_goose_dialogue' agent/src/LiveControl.cpp
+          grep -q 'make_local_goose_dialogue_task' agent/src/LiveControlProcessor.cpp
+          grep -q 'request id conflicts' agent/src/LiveControlProcessor.cpp
+          ! grep -q 'LocalGooseDialogueHandler' agent/src/main.cpp
+
+      - name: Build and run dialogue contract test
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build-dialogue
+          cd build-dialogue
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 -C src gaudere-local-goose-dialogue-proof
+          make --jobs=2 -C tests local_goose_dialogue_test local_goose_dialogue_handler_test live_control_test live_control_processor_test
+          test -x src/gaudere-local-goose-dialogue-proof
+          src/gaudere-local-goose-dialogue-proof --help 2>&1 | grep -q -- '--model-sha256'
+          sh -n ../scripts/prove-local-goose-dialogue-fedora.sh
+          grep -q -- '--network none' ../scripts/prove-local-goose-dialogue-fedora.sh
+          grep -q 'PROVIDER_TOTAL' ../scripts/prove-local-goose-dialogue-fedora.sh
+          grep -q 'PRODUCTION_CURSOR' ../scripts/prove-local-goose-dialogue-fedora.sh
+          grep -q 'PRODUCTION_DIALOGUE_TASKS' ../scripts/prove-local-goose-dialogue-fedora.sh
+          grep -q 'PRODUCTION_STIMULI' ../scripts/prove-local-goose-dialogue-fedora.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_ISOLATED=PASS' ../scripts/prove-local-goose-dialogue-fedora.sh
+          grep -q 'gaudere-local-goose-dialogue-proof' ../Containerfile
+          tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
+          tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
+          tests/live_control_test
+          tests/live_control_processor_test | grep -Fx 'All live control processor tests passed'
+ agent/src/local_goose_dialogue_proof_main.cpp
+          grep -q 'false,' agent/src/local_goose_dialogue_proof_main.cpp
+          grep -q 'provider_execution=false tools_enabled=false network_expected=none' agent/src/local_goose_dialogue_proof_main.cpp
           grep -q 'local-message' agent/src/control_main.cpp
           grep -q 'submit_local_goose_dialogue' agent/src/LiveControl.cpp
           grep -q 'make_local_goose_dialogue_task' agent/src/LiveControlProcessor.cpp
