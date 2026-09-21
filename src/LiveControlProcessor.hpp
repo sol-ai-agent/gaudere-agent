@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <string>
 
 namespace gaudere_agent {
 
