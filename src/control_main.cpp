@@ -12,7 +12,7 @@ void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | task ID | "
+        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | task ID | "
         << "budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | "
         << "wake WAKE_ID | wake-status | stimulate-local-goose-cycle REQUEST_ID]\n";
 }
@@ -40,6 +40,11 @@ int main(int argc, char* argv[])
             command.text = argv[5];
         } else if (operation == "reflect" && argc == 6) {
             command.operation = gaudere_agent::LiveControlOperation::submit_reflection;
+            command.id = argv[4];
+            command.text = argv[5];
+        } else if (operation == "local-message" && argc == 6) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::submit_local_goose_dialogue;
             command.id = argv[4];
             command.text = argv[5];
         } else if (operation == "task" && argc == 5) {

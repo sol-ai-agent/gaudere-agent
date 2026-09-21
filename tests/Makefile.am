@@ -96,6 +96,10 @@ explicit_wake_integration_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogue.cpp \
+	../src/LocalGooseDialogue.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
 	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \
@@ -136,6 +140,10 @@ live_control_processor_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogue.cpp \
+	../src/LocalGooseDialogue.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
 	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \
@@ -341,6 +349,10 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogue.cpp \
+	../src/LocalGooseDialogue.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
 	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \
@@ -368,6 +380,10 @@ wake_status_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogue.cpp \
+	../src/LocalGooseDialogue.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
 	../src/LocalEchoHandler.hpp \
 	../src/OpenAITask.cpp \

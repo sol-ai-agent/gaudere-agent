@@ -2,6 +2,7 @@
 
 #include "BoundedReflection.hpp"
 #include "LocalEchoHandler.hpp"
+#include "LocalGooseDialogue.hpp"
 #include "OpenAIBudget.hpp"
 #include "OpenAITask.hpp"
 #include "TaskExecutor.hpp"
@@ -42,6 +43,21 @@ bool goose_synchronous_echo(const LiveControlCommand& command) noexcept
 
 bool same_local_echo_definition(const gaudere::work::Task& stored,
                                 const gaudere::work::Task& expected) noexcept
+{
+    return stored.id == expected.id
+        && stored.idempotency_key == expected.idempotency_key
+        && stored.kind == expected.kind
+        && stored.input_content_type == expected.input_content_type
+        && stored.input == expected.input
+        && stored.limits.max_input_bytes == expected.limits.max_input_bytes
+        && stored.limits.max_output_bytes == expected.limits.max_output_bytes
+        && stored.limits.max_runtime == expected.limits.max_runtime
+        && stored.limits.max_attempts == expected.limits.max_attempts;
+}
+
+bool same_local_goose_dialogue_definition(
+    const gaudere::work::Task& stored,
+    const gaudere::work::Task& expected) noexcept
 {
     return stored.id == expected.id
         && stored.idempotency_key == expected.idempotency_key
@@ -185,7 +201,8 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            const bool openai_enabled,
                                            ExplicitWake* explicit_wake,
                                            SchedulerNext scheduler_next,
-                                           LocalGooseStimulus local_goose_stimulus)
+                                           LocalGooseStimulus local_goose_stimulus,
+                                           std::string local_goose_dialogue_model_sha256)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
@@ -193,7 +210,9 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
       openai_enabled_(openai_enabled),
       explicit_wake_(explicit_wake),
       scheduler_next_(std::move(scheduler_next)),
-      local_goose_stimulus_(std::move(local_goose_stimulus))
+      local_goose_stimulus_(std::move(local_goose_stimulus)),
+      local_goose_dialogue_model_sha256_(
+          std::move(local_goose_dialogue_model_sha256))
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -212,7 +231,8 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
         const bool task_submission_may_have_committed =
             operation == LiveControlOperation::submit_echo
             || operation == LiveControlOperation::submit_openai
-            || operation == LiveControlOperation::submit_reflection;
+            || operation == LiveControlOperation::submit_reflection
+            || operation == LiveControlOperation::submit_local_goose_dialogue;
         const bool wake_transition_may_have_committed =
             operation == LiveControlOperation::accept_wake
             || operation == LiveControlOperation::revoke_wake;
@@ -393,6 +413,16 @@ LiveControlReply LiveControlProcessor::process_one(
         task = make_bounded_reflection_task(command.id, command.text);
         description = "bounded reflection";
         break;
+    case LiveControlOperation::submit_local_goose_dialogue:
+        if (local_goose_dialogue_model_sha256_.empty()) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue capability is not enabled in this service\n"};
+        }
+        task = make_local_goose_dialogue_task(
+            command.id, command.text, local_goose_dialogue_model_sha256_);
+        description = "Local Goose dialogue";
+        break;
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
     case LiveControlOperation::accept_wake:
@@ -405,6 +435,14 @@ LiveControlReply LiveControlProcessor::process_one(
     }
 
     const auto id = task.id;
+    if (command.operation == LiveControlOperation::submit_local_goose_dialogue) {
+        const auto existing = store_.find_by_idempotency_key(task.idempotency_key);
+        if (existing && !same_local_goose_dialogue_definition(*existing, task)) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue request id conflicts with an existing Task\n"};
+        }
+    }
     const auto submit = runtime_.submit(task);
     if (submit != gaudere::work::SubmitResult::accepted
         && submit != gaudere::work::SubmitResult::duplicate) {
@@ -415,6 +453,12 @@ LiveControlReply LiveControlProcessor::process_one(
     auto stored = store_.find(id);
     if (!stored) {
         throw std::runtime_error(description + " task is missing after submission");
+    }
+    if (command.operation == LiveControlOperation::submit_local_goose_dialogue
+        && !same_local_goose_dialogue_definition(*stored, task)) {
+        return LiveControlReply{
+            false, 4,
+            "gaudere-agent: Local Goose dialogue request conflicts with an existing Task\n"};
     }
 
     if (goose_synchronous_echo(command)) {

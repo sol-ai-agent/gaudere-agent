@@ -57,14 +57,17 @@ int main()
     const auto changed_message = make_local_goose_dialogue_task(
         "dialogue-001", "Bonjour autrement.", model);
     assert(changed_message.id != task.id);
+    assert(changed_message.idempotency_key == task.idempotency_key);
 
     const auto changed_model = make_local_goose_dialogue_task(
         "dialogue-001", "Bonjour Gaudere.", hex('b'));
     assert(changed_model.id != task.id);
+    assert(changed_model.idempotency_key == task.idempotency_key);
 
     const auto changed_request = make_local_goose_dialogue_task(
         "dialogue-002", "Bonjour Gaudere.", model);
     assert(changed_request.id != task.id);
+    assert(changed_request.idempotency_key != task.idempotency_key);
 
     auto tampered = task;
     tampered.input += " ";

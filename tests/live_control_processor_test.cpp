@@ -1,6 +1,7 @@
 #include "BoundedReflection.hpp"
 #include "ExplicitWake.hpp"
 #include "LiveControlProcessor.hpp"
+#include "LocalGooseDialogue.hpp"
 #include "OpenAIActivation.hpp"
 
 #include <gaudere/persistence/sqlite/BudgetStore.hpp>
@@ -48,7 +49,8 @@ struct TemporaryDatabase {
 struct Harness {
     Harness(const std::filesystem::path& path,
             const bool openai_enabled,
-            const bool wake_enabled = false)
+            const bool wake_enabled = false,
+            std::string local_goose_dialogue_model_sha256 = {})
         : store(path.string()),
           budget_store(path.string()),
           wake_store(path.string()),
@@ -58,7 +60,8 @@ struct Harness {
           explicit_wake(store, wake_runtime),
           processor(runtime, store, budget_store,
                     OpenAIActivation::bootstrap_budget_policy(), openai_enabled,
-                    wake_enabled ? &explicit_wake : nullptr)
+                    wake_enabled ? &explicit_wake : nullptr, {}, {},
+                    std::move(local_goose_dialogue_model_sha256))
     {
         runtime.recover();
     }
@@ -204,6 +207,80 @@ void test_reflection_submission_is_bounded_and_explicit()
                && task->limits.max_output_bytes == 4096
                && task->limits.max_attempts == 2,
            "reflection live control applies hard task limits");
+}
+
+void test_local_goose_dialogue_requires_explicit_capability()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false);
+    auto pending = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue,
+            "dialogue-disabled", "Bonjour Gaudere."});
+
+    const auto processed = harness.processor.process(harness.mailbox);
+    const auto reply = pending->wait();
+
+    expect(processed.processed == 1 && !processed.work_may_be_pending,
+           "disabled local dialogue creates no dispatchable work");
+    expect(!reply.ok && reply.code == 4
+               && reply.body.find("not enabled") != std::string::npos,
+           "local dialogue is rejected until a fixed model hash is configured");
+}
+
+void test_local_goose_dialogue_submission_is_durable_and_idempotent()
+{
+    TemporaryDatabase database;
+    const std::string model_sha(64, 'a');
+    Harness harness(database.path, false, false, model_sha);
+
+    const auto expected = make_local_goose_dialogue_task(
+        "dialogue-live-001", "Bonjour Gaudere.", model_sha);
+
+    auto first = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue,
+            "dialogue-live-001", "Bonjour Gaudere."});
+    const auto first_processed = harness.processor.process(harness.mailbox);
+    const auto first_reply = first->wait();
+    const auto stored = harness.store.find(expected.id);
+
+    expect(first_processed.work_may_be_pending && first_reply.ok,
+           "local dialogue submission creates pending provider-free work");
+    expect(stored && stored->kind == local_goose_dialogue_task_kind,
+           "local dialogue command persists canonical dialogue Task");
+    expect(stored && stored->idempotency_key == expected.idempotency_key,
+           "local dialogue request identity is durable and single-use");
+    expect(first_reply.body.find(expected.id) != std::string::npos,
+           "local dialogue acknowledgement returns durable Task identity");
+
+    auto retry = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue,
+            "dialogue-live-001", "Bonjour Gaudere."});
+    const auto retry_processed = harness.processor.process(harness.mailbox);
+    const auto retry_reply = retry->wait();
+
+    expect(retry_processed.work_may_be_pending && retry_reply.ok,
+           "exact local dialogue retry is idempotently acknowledged");
+    expect(retry_reply.body.find(expected.id) != std::string::npos,
+           "exact retry refers to the original durable dialogue Task");
+
+    const auto conflicting = make_local_goose_dialogue_task(
+        "dialogue-live-001", "Message différent.", model_sha);
+    auto conflict = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue,
+            "dialogue-live-001", "Message différent."});
+    const auto conflict_processed = harness.processor.process(harness.mailbox);
+    const auto conflict_reply = conflict->wait();
+
+    expect(!conflict_processed.work_may_be_pending
+               && !conflict_reply.ok && conflict_reply.code == 4
+               && conflict_reply.body.find("conflict") != std::string::npos,
+           "reusing a dialogue request id with different bytes fails closed");
+    expect(!harness.store.find(conflicting.id),
+           "conflicting dialogue retry creates no second Task");
 }
 
 void test_inspect_reads_durable_task_without_submission()
@@ -459,6 +536,8 @@ int main()
     test_openai_submission_uses_bounded_task_factory();
     test_reflection_submission_requires_activated_provider();
     test_reflection_submission_is_bounded_and_explicit();
+    test_local_goose_dialogue_requires_explicit_capability();
+    test_local_goose_dialogue_submission_is_durable_and_idempotent();
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();

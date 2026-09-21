@@ -112,8 +112,11 @@ Task make_local_goose_dialogue_task(
 
     Task task;
     task.id = std::string{local_goose_dialogue_task_prefix} + identity;
+    // Request identity is single-use independently of message/model content.
+    // Runtime duplicate detection can therefore distinguish a true retry from
+    // reuse of the same request id with different bytes or model evidence.
     task.idempotency_key = std::string{local_goose_dialogue_task_prefix}
-        + "request:" + identity;
+        + "request-id:" + sha256_hex(request_id);
     task.kind = local_goose_dialogue_task_kind;
     task.input_content_type = local_goose_dialogue_content_type;
     task.input = encoded;
@@ -173,7 +176,7 @@ LocalGooseDialogueInspection inspect_local_goose_dialogue_task(
         if (task.id != std::string{local_goose_dialogue_task_prefix} + identity
             || task.idempotency_key
                 != std::string{local_goose_dialogue_task_prefix}
-                    + "request:" + identity) {
+                    + "request-id:" + sha256_hex(out.request_id)) {
             out.detail = "local Goose dialogue Task identity differs";
             return out;
         }

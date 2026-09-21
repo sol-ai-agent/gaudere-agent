@@ -71,7 +71,11 @@ jobs:
           ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|systemctl|podman'             agent/src/LocalGooseDialogueHandler.cpp             agent/src/LocalGooseDialogueHandler.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\('             agent/src/LocalGooseDialogueHandler.cpp
           ! grep -q 'LocalGooseDialogueHandler' agent/src/main.cpp
-          ! grep -q 'local-message' agent/src/control_main.cpp
+          grep -q 'local-message' agent/src/control_main.cpp
+          grep -q 'submit_local_goose_dialogue' agent/src/LiveControl.cpp
+          grep -q 'make_local_goose_dialogue_task' agent/src/LiveControlProcessor.cpp
+          grep -q 'request id conflicts' agent/src/LiveControlProcessor.cpp
+          ! grep -q 'LocalGooseDialogueHandler' agent/src/main.cpp
 
       - name: Build and run dialogue contract test
         run: |
@@ -83,6 +87,8 @@ jobs:
           mkdir build-dialogue
           cd build-dialogue
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 -C tests local_goose_dialogue_test local_goose_dialogue_handler_test
+          make --jobs=2 -C tests local_goose_dialogue_test local_goose_dialogue_handler_test live_control_test live_control_processor_test
           tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
+          tests/live_control_test
+          tests/live_control_processor_test | grep -Fx 'All live control processor tests passed'
