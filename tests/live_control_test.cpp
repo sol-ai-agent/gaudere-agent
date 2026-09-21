@@ -192,6 +192,92 @@ void test_wake_operation_round_trip()
     ::rmdir(directory.c_str());
 }
 
+void test_local_goose_dialogue_operation_round_trip()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "Local Goose dialogue protocol server starts");
+
+    std::ostringstream output;
+    std::ostringstream error;
+    int client_result = -1;
+    std::thread client([&] {
+        client_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::submit_local_goose_dialogue,
+                "dialogue-001", "Bonjour Gaudere."},
+            output, error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "Local Goose dialogue wakes the sole worker callback");
+    }
+
+    const auto pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "Local Goose dialogue crosses the bounded mailbox exactly once");
+    if (pending.size() == 1) {
+        expect(pending.front()->command().operation
+                   == LiveControlOperation::submit_local_goose_dialogue
+                   && pending.front()->command().id == "dialogue-001"
+                   && pending.front()->command().text == "Bonjour Gaudere.",
+               "Local Goose dialogue preserves bounded request id and message");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "status=pending\n"});
+    }
+
+    client.join();
+    expect(client_result == 0
+               && output.str() == "status=pending\n"
+               && error.str().empty(),
+           "Local Goose dialogue client receives worker reply");
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
+void test_local_goose_dialogue_rejects_invalid_message_before_connect()
+{
+    std::ostringstream output;
+    std::ostringstream error;
+    const int empty = run_live_control_client(
+        "/tmp/does-not-matter.sock",
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue,
+            "dialogue-empty", {}},
+        output, error);
+    expect(empty != 0,
+           "Local Goose dialogue rejects an empty message");
+    expect(error.str().find("1..4096") != std::string::npos,
+           "empty local dialogue rejection is explicit");
+
+    output.str({});
+    output.clear();
+    error.str({});
+    error.clear();
+    const int oversized = run_live_control_client(
+        "/tmp/does-not-matter.sock",
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue,
+            "dialogue-large", std::string(4097, 'x')},
+        output, error);
+    expect(oversized != 0,
+           "Local Goose dialogue rejects an oversized message");
+    expect(error.str().find("1..4096") != std::string::npos,
+           "oversized local dialogue rejection is explicit");
+}
+
 void test_local_goose_stimulus_operation_round_trip()
 {
     const auto directory = temporary_directory();
@@ -327,6 +413,8 @@ int main()
     test_invalid_id_is_rejected_before_connect();
     test_oversized_reflection_is_rejected_before_connect();
     test_wake_operation_round_trip();
+    test_local_goose_dialogue_operation_round_trip();
+    test_local_goose_dialogue_rejects_invalid_message_before_connect();
     test_local_goose_stimulus_operation_round_trip();
     test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();
