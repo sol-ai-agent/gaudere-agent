@@ -110,6 +110,27 @@ jobs:
           ! grep -Eq 'gaudere-control[^\n]*local-message' \
             agent/scripts/deploy-local-goose-dialogue-production.sh
 
+      - name: Prove first production dialogue is separately authorized
+        run: |
+          set -eu
+          sh -n agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q 'AUTHORIZED_FIRST_PRODUCTION_DIALOGUE' \
+            agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q 'first-production-dialogue-v1' \
+            agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q "C'est Bertrand" \
+            agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q 'provider.call:openai.responses' \
+            agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q 'local_goose_cycle_cursor' \
+            agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q 'local_goose_cycle_stimuli' \
+            agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_TASKS' \
+            agent/scripts/first-production-local-goose-dialogue.sh
+          grep -q 'FIRST_PRODUCTION_LOCAL_GOOSE_DIALOGUE=PASS' \
+            agent/scripts/first-production-local-goose-dialogue.sh
+
       - name: Build and run dialogue tests
         run: |
           set -eu
