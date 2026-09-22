@@ -20,6 +20,8 @@ enum class LiveControlOperation {
     submit_openai,
     submit_reflection,
     submit_local_goose_dialogue,
+    submit_local_goose_dialogue_v2_root,
+    submit_local_goose_dialogue_v2_next,
     inspect_task,
     inspect_budget,
     accept_wake,
@@ -33,6 +35,7 @@ struct LiveControlCommand {
     LiveControlOperation operation = LiveControlOperation::inspect_task;
     std::string id;
     std::string text;
+    std::string predecessor_task_id;
 };
 
 struct LiveControlReply {
