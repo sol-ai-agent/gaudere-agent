@@ -149,8 +149,8 @@ For one V2 inference, the handler deterministically expands at most:
 
 - the current human message;
 - the six most recent canonical predecessor turns;
-- at most 48 KiB total UTF-8 history material before the fixed dialogue prompt;
-- at most 64 KiB total runner prompt.
+- at most 40 KiB total UTF-8 history material before the fixed dialogue prompt;
+- at most 48 KiB total runner prompt, preserving the existing LocalGooseRunner bound.
 
 Each included predecessor contributes only its canonical human message and
 canonical assistant response, in oldest-to-newest order.
@@ -159,8 +159,11 @@ If more than six predecessors exist, older turns remain durable in the lineage b
 are omitted from model context. The prompt states that earlier durable history
 exists but was not included in this bounded context window.
 
-If the six-turn window itself would exceed the 48 KiB history bound, oldest
+If the six-turn window itself would exceed the 40 KiB history bound, oldest
 included predecessors are deterministically omitted until the bound is satisfied.
+
+Lineage validation traverses at most 4096 predecessor links for one Task. A deeper
+V2 thread fails closed rather than allowing unbounded validation work.
 
 No raw database rows, metadata, hidden prompts, tool outputs, filesystem content,
 or autonomous-cycle content is added to dialogue context.
