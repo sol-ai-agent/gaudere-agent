@@ -2,6 +2,7 @@
 #include "ExplicitWake.hpp"
 #include "LiveControlProcessor.hpp"
 #include "LocalGooseDialogue.hpp"
+#include "LocalGooseDialogueV2.hpp"
 #include "OpenAIActivation.hpp"
 
 #include <gaudere/persistence/sqlite/BudgetStore.hpp>
@@ -283,6 +284,138 @@ void test_local_goose_dialogue_submission_is_durable_and_idempotent()
            "conflicting dialogue retry creates no second Task");
 }
 
+gaudere::work::Task succeeded_v2_root(
+    const std::string& request_id,
+    const std::string& message,
+    const std::string& model_sha,
+    const std::string& response)
+{
+    auto task = make_local_goose_dialogue_v2_root_task(
+        request_id, message, model_sha);
+    const auto inspection = inspect_local_goose_dialogue_v2_task(task);
+    task.status = gaudere::work::TaskStatus::succeeded;
+    task.attempts_started = 1;
+    task.result = gaudere::work::TaskResult{
+        local_goose_dialogue_v2_response_content_type,
+        make_local_goose_dialogue_v2_response(inspection, response),
+        {},
+        {}};
+    return task;
+}
+
+void test_local_goose_dialogue_v2_submission_is_durable_and_linked()
+{
+    TemporaryDatabase database;
+    const std::string model_sha(64, 'a');
+    Harness harness(database.path, false, false, model_sha);
+
+    const auto expected_root = make_local_goose_dialogue_v2_root_task(
+        "v2-live-root", "Bonjour V2.", model_sha);
+    auto root_request = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v2_root,
+            "v2-live-root", "Bonjour V2."});
+    const auto root_processed = harness.processor.process(harness.mailbox);
+    const auto root_reply = root_request->wait();
+    const auto stored_root = harness.store.find(expected_root.id);
+
+    expect(root_processed.work_may_be_pending && root_reply.ok,
+           "V2 root submission creates pending provider-free work");
+    expect(stored_root && stored_root->kind == local_goose_dialogue_v2_task_kind,
+           "V2 root command persists canonical V2 Task");
+    expect(root_reply.body.find(expected_root.id) != std::string::npos,
+           "V2 root acknowledgement returns durable Task identity");
+
+    auto root_conflict = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v2_root,
+            "v2-live-root", "Message différent."});
+    const auto root_conflict_processed =
+        harness.processor.process(harness.mailbox);
+    const auto root_conflict_reply = root_conflict->wait();
+    expect(!root_conflict_processed.work_may_be_pending
+               && !root_conflict_reply.ok
+               && root_conflict_reply.code == 4
+               && root_conflict_reply.body.find("conflict") != std::string::npos,
+           "V2 root request id is single-use across different message bytes");
+
+    const auto canonical_root = succeeded_v2_root(
+        "v2-predecessor-root", "Racine.", model_sha, "Réponse racine.");
+    harness.store.save(canonical_root);
+
+    auto missing = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v2_next,
+            "v2-missing", "Suite.",
+            "cognition.local-goose-dialogue.v2:" + std::string(64, 'f')});
+    const auto missing_processed = harness.processor.process(harness.mailbox);
+    const auto missing_reply = missing->wait();
+    expect(!missing_processed.work_may_be_pending
+               && !missing_reply.ok && missing_reply.code == 3
+               && missing_reply.body.find("not found") != std::string::npos,
+           "V2 successor rejects a missing durable predecessor");
+
+    const auto pending_root = make_local_goose_dialogue_v2_root_task(
+        "v2-pending-root", "En attente.", model_sha);
+    harness.store.save(pending_root);
+    auto ineligible = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v2_next,
+            "v2-ineligible", "Suite.", pending_root.id});
+    const auto ineligible_processed =
+        harness.processor.process(harness.mailbox);
+    const auto ineligible_reply = ineligible->wait();
+    expect(!ineligible_processed.work_may_be_pending
+               && !ineligible_reply.ok && ineligible_reply.code == 4
+               && ineligible_reply.body.find("predecessor rejected")
+                    != std::string::npos,
+           "V2 successor requires canonical successful predecessor evidence");
+
+    const auto expected_next = make_local_goose_dialogue_v2_successor_task(
+        "v2-live-next", "Suite liée.", model_sha, canonical_root);
+    auto next = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v2_next,
+            "v2-live-next", "Suite liée.", canonical_root.id});
+    const auto next_processed = harness.processor.process(harness.mailbox);
+    const auto next_reply = next->wait();
+    const auto stored_next = harness.store.find(expected_next.id);
+    expect(next_processed.work_may_be_pending && next_reply.ok,
+           "V2 successor submission creates pending linked work");
+    expect(stored_next
+               && stored_next->kind == local_goose_dialogue_v2_task_kind,
+           "V2 successor is persisted with V2 Task kind");
+    expect(stored_next
+               && inspect_local_goose_dialogue_v2_task(*stored_next).eligible
+               && inspect_local_goose_dialogue_v2_task(*stored_next)
+                      .predecessor_task_id == canonical_root.id,
+           "V2 successor persists canonical predecessor identity");
+
+    auto retry = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v2_next,
+            "v2-live-next", "Suite liée.", canonical_root.id});
+    const auto retry_processed = harness.processor.process(harness.mailbox);
+    const auto retry_reply = retry->wait();
+    expect(retry_processed.work_may_be_pending && retry_reply.ok
+               && retry_reply.body.find(expected_next.id) != std::string::npos,
+           "exact V2 successor retry is idempotently acknowledged");
+
+    auto successor_conflict = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v2_next,
+            "v2-live-next", "Autre suite.", canonical_root.id});
+    const auto successor_conflict_processed =
+        harness.processor.process(harness.mailbox);
+    const auto successor_conflict_reply = successor_conflict->wait();
+    expect(!successor_conflict_processed.work_may_be_pending
+               && !successor_conflict_reply.ok
+               && successor_conflict_reply.code == 4
+               && successor_conflict_reply.body.find("conflict")
+                    != std::string::npos,
+           "V2 successor request id conflicts on changed message bytes");
+}
+
 void test_inspect_reads_durable_task_without_submission()
 {
     TemporaryDatabase database;
@@ -538,6 +671,7 @@ int main()
     test_reflection_submission_is_bounded_and_explicit();
     test_local_goose_dialogue_requires_explicit_capability();
     test_local_goose_dialogue_submission_is_durable_and_idempotent();
+    test_local_goose_dialogue_v2_submission_is_durable_and_linked();
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
