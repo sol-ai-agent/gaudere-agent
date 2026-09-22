@@ -97,7 +97,11 @@ jobs:
             agent/src/LocalGooseDialogueV2.cpp agent/src/LocalGooseDialogueV2.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/LocalGooseDialogueV2.cpp
-          ! grep -q 'LocalGooseDialogueV2Handler' agent/src/main.cpp
+          grep -q '#include "LocalGooseDialogueV2Handler.hpp"' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_v2_handler' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_v2_task_kind' agent/src/main.cpp
+          grep -q 'cannot register Local Goose dialogue v2 handler' agent/src/main.cpp
+          grep -q 'bounded_history=true' agent/src/main.cpp
           grep -q 'local-thread-start' agent/src/control_main.cpp
           grep -q 'local-thread-next' agent/src/control_main.cpp
           grep -q 'submit_local_goose_dialogue_v2_root' agent/src/LiveControl.cpp
@@ -121,7 +125,7 @@ jobs:
             agent/src/LocalGooseDialogueV2Handler.cpp agent/src/LocalGooseDialogueV2Handler.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/LocalGooseDialogueV2Handler.cpp
-          ! grep -q 'LocalGooseDialogueV2Handler' agent/src/main.cpp
+          grep -q 'LocalGooseDialogueV2Handler' agent/src/main.cpp
 
           grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
           grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
