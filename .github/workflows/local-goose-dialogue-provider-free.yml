@@ -87,6 +87,20 @@ jobs:
           grep -q 'make_local_goose_dialogue_task' agent/src/LiveControlProcessor.cpp
           grep -q 'request id conflicts' agent/src/LiveControlProcessor.cpp
 
+          grep -q 'cognition.local-goose-dialogue.v2' agent/src/LocalGooseDialogueV2.hpp
+          grep -q 'application/vnd.gaudere.local-goose-dialogue-v2+json' agent/src/LocalGooseDialogueV2.hpp
+          grep -q 'predecessor_result_sha256' agent/src/LocalGooseDialogueV2.cpp
+          grep -q 'turn_index' agent/src/LocalGooseDialogueV2.cpp
+          grep -q 'root_task_id' agent/src/LocalGooseDialogueV2.cpp
+          grep -q 'canonical_local_goose_dialogue_v2_success' agent/src/LocalGooseDialogueV2.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|LocalGooseRunner|systemctl|podman' \
+            agent/src/LocalGooseDialogueV2.cpp agent/src/LocalGooseDialogueV2.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialogueV2.cpp
+          ! grep -q 'LocalGooseDialogueV2' agent/src/main.cpp
+          ! grep -q 'local-thread-start' agent/src/control_main.cpp
+          ! grep -q 'local-thread-next' agent/src/control_main.cpp
+
           grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
           grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
             agent/src/local_goose_dialogue_proof_main.cpp
@@ -144,6 +158,7 @@ jobs:
           make --jobs=2 -C src gaudere-agent gaudere-local-goose-dialogue-proof
           make --jobs=2 -C tests \
             local_goose_dialogue_test \
+            local_goose_dialogue_v2_test \
             local_goose_dialogue_handler_test \
             live_control_test \
             live_control_processor_test
@@ -151,6 +166,7 @@ jobs:
           test -x src/gaudere-local-goose-dialogue-proof
           src/gaudere-local-goose-dialogue-proof --help 2>&1 | grep -q -- '--model-sha256'
           tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
+          tests/local_goose_dialogue_v2_test | grep -Fx 'local_goose_dialogue_v2_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
           tests/live_control_test
           tests/live_control_processor_test | grep -Fx 'All live control processor tests passed'
