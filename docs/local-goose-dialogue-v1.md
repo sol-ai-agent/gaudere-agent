@@ -1,8 +1,9 @@
 # Local Goose direct dialogue v1
 
-Status: design contract only. This document does **not** authorize a provider call,
-a production dialogue request, a Local Goose cycle stimulus, or additional tool
-authority.
+Status: implemented and proven through the first explicit production dialogue.
+
+The historical authority boundaries below remain normative for v1. Conversation
+lineage is specified separately in `docs/local-goose-dialogue-v2-lineage.md`.
 
 ## Context
 
