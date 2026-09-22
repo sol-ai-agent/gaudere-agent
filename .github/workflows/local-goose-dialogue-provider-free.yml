@@ -97,9 +97,15 @@ jobs:
             agent/src/LocalGooseDialogueV2.cpp agent/src/LocalGooseDialogueV2.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/LocalGooseDialogueV2.cpp
-          ! grep -q 'LocalGooseDialogueV2' agent/src/main.cpp
-          ! grep -q 'local-thread-start' agent/src/control_main.cpp
-          ! grep -q 'local-thread-next' agent/src/control_main.cpp
+          ! grep -q 'LocalGooseDialogueV2Handler' agent/src/main.cpp
+          grep -q 'local-thread-start' agent/src/control_main.cpp
+          grep -q 'local-thread-next' agent/src/control_main.cpp
+          grep -q 'submit_local_goose_dialogue_v2_root' agent/src/LiveControl.cpp
+          grep -q 'submit_local_goose_dialogue_v2_next' agent/src/LiveControl.cpp
+          grep -q 'predecessor_task_id' agent/src/LiveControl.hpp
+          grep -q 'make_local_goose_dialogue_v2_root_task' agent/src/LiveControlProcessor.cpp
+          grep -q 'make_local_goose_dialogue_v2_successor_task' agent/src/LiveControlProcessor.cpp
+          grep -q 'predecessor Task not found' agent/src/LiveControlProcessor.cpp
 
           grep -q 'LocalGooseDialogueV2Handler' agent/src/LocalGooseDialogueV2Handler.hpp
           grep -q 'tools_enabled = false' agent/src/LocalGooseDialogueV2Handler.cpp

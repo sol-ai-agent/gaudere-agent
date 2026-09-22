@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace gaudere_agent {
@@ -20,6 +21,8 @@ enum class LiveControlOperation {
     submit_openai,
     submit_reflection,
     submit_local_goose_dialogue,
+    submit_local_goose_dialogue_v2_root,
+    submit_local_goose_dialogue_v2_next,
     inspect_task,
     inspect_budget,
     accept_wake,
@@ -30,9 +33,23 @@ enum class LiveControlOperation {
 };
 
 struct LiveControlCommand {
+    LiveControlCommand() = default;
+
+    LiveControlCommand(LiveControlOperation operation_value,
+                       std::string id_value,
+                       std::string text_value = {},
+                       std::string predecessor_task_id_value = {})
+        : operation(operation_value),
+          id(std::move(id_value)),
+          text(std::move(text_value)),
+          predecessor_task_id(std::move(predecessor_task_id_value))
+    {
+    }
+
     LiveControlOperation operation = LiveControlOperation::inspect_task;
     std::string id;
     std::string text;
+    std::string predecessor_task_id;
 };
 
 struct LiveControlReply {

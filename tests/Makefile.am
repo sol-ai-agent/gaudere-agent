@@ -100,6 +100,8 @@ explicit_wake_integration_test_SOURCES = \
 	../src/LiveControlProcessor.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
+	../src/LocalGooseDialogueV2.cpp \
+	../src/LocalGooseDialogueV2.hpp \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
@@ -144,6 +146,8 @@ live_control_processor_test_SOURCES = \
 	../src/LiveControlProcessor.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
+	../src/LocalGooseDialogueV2.cpp \
+	../src/LocalGooseDialogueV2.hpp \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
@@ -160,6 +164,8 @@ local_goose_dialogue_test_SOURCES = \
 	local_goose_dialogue_test.cpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
+	../src/LocalGooseDialogueV2.cpp \
+	../src/LocalGooseDialogueV2.hpp \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp
 local_goose_dialogue_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
@@ -191,6 +197,8 @@ local_goose_dialogue_handler_test_SOURCES = \
 	local_goose_dialogue_handler_test.cpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
+	../src/LocalGooseDialogueV2.cpp \
+	../src/LocalGooseDialogueV2.hpp \
 	../src/LocalGooseDialogueHandler.cpp \
 	../src/LocalGooseDialogueHandler.hpp \
 	../src/LocalGooseRunner.cpp \
@@ -376,6 +384,8 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/LiveControlProcessor.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
+	../src/LocalGooseDialogueV2.cpp \
+	../src/LocalGooseDialogueV2.hpp \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
@@ -407,6 +417,8 @@ wake_status_test_SOURCES = \
 	../src/LiveControlProcessor.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
+	../src/LocalGooseDialogueV2.cpp \
+	../src/LocalGooseDialogueV2.hpp \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp \
 	../src/LocalEchoHandler.cpp \
