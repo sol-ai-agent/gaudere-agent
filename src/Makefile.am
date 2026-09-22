@@ -105,6 +105,8 @@ gaudere_agent_SOURCES += \
 	LocalGooseCognitionHandler.hpp \
 	LocalGooseDialogue.cpp \
 	LocalGooseDialogue.hpp \
+	LocalGooseDialogueV2.cpp \
+	LocalGooseDialogueV2.hpp \
 	LocalGooseDialogueHandler.cpp \
 	LocalGooseDialogueHandler.hpp \
 	LocalGooseCognitionService.cpp \
@@ -389,6 +391,8 @@ gaudere_local_goose_cycle_runtime_SOURCES = \
 	LocalGooseCognition.hpp \
 	LocalGooseDialogue.cpp \
 	LocalGooseDialogue.hpp \
+	LocalGooseDialogueV2.cpp \
+	LocalGooseDialogueV2.hpp \
 	LocalGooseCycle.cpp \
 	LocalGooseCycle.hpp \
 	LocalGooseCycleHandler.cpp \
@@ -516,6 +520,8 @@ gaudere_local_goose_dialogue_proof_SOURCES = \
 	LiveControlProcessor.hpp \
 	LocalGooseDialogue.cpp \
 	LocalGooseDialogue.hpp \
+	LocalGooseDialogueV2.cpp \
+	LocalGooseDialogueV2.hpp \
 	LocalGooseDialogueHandler.cpp \
 	LocalGooseDialogueHandler.hpp \
 	LocalGooseRunner.cpp \
