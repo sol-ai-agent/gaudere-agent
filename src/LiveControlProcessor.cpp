@@ -3,6 +3,7 @@
 #include "BoundedReflection.hpp"
 #include "LocalEchoHandler.hpp"
 #include "LocalGooseDialogue.hpp"
+#include "LocalGooseDialogueV2.hpp"
 #include "OpenAIBudget.hpp"
 #include "OpenAITask.hpp"
 #include "TaskExecutor.hpp"
@@ -232,7 +233,9 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
             operation == LiveControlOperation::submit_echo
             || operation == LiveControlOperation::submit_openai
             || operation == LiveControlOperation::submit_reflection
-            || operation == LiveControlOperation::submit_local_goose_dialogue;
+            || operation == LiveControlOperation::submit_local_goose_dialogue
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v2_root
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v2_next;
         const bool wake_transition_may_have_committed =
             operation == LiveControlOperation::accept_wake
             || operation == LiveControlOperation::revoke_wake;
@@ -423,6 +426,41 @@ LiveControlReply LiveControlProcessor::process_one(
             command.id, command.text, local_goose_dialogue_model_sha256_);
         description = "Local Goose dialogue";
         break;
+    case LiveControlOperation::submit_local_goose_dialogue_v2_root:
+        if (local_goose_dialogue_model_sha256_.empty()) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue capability is not enabled in this service\n"};
+        }
+        task = make_local_goose_dialogue_v2_root_task(
+            command.id, command.text, local_goose_dialogue_model_sha256_);
+        description = "Local Goose dialogue v2 root";
+        break;
+    case LiveControlOperation::submit_local_goose_dialogue_v2_next: {
+        if (local_goose_dialogue_model_sha256_.empty()) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue capability is not enabled in this service\n"};
+        }
+        const auto predecessor = store_.find(command.predecessor_task_id);
+        if (!predecessor) {
+            return LiveControlReply{
+                false, 3,
+                "gaudere-agent: Local Goose dialogue v2 predecessor Task not found\n"};
+        }
+        try {
+            task = make_local_goose_dialogue_v2_successor_task(
+                command.id, command.text,
+                local_goose_dialogue_model_sha256_, *predecessor);
+        } catch (const std::invalid_argument& error) {
+            return LiveControlReply{
+                false, 4,
+                std::string("gaudere-agent: Local Goose dialogue v2 predecessor rejected: ")
+                    + error.what() + "\n"};
+        }
+        description = "Local Goose dialogue v2 successor";
+        break;
+    }
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
     case LiveControlOperation::accept_wake:
@@ -435,7 +473,11 @@ LiveControlReply LiveControlProcessor::process_one(
     }
 
     const auto id = task.id;
-    if (command.operation == LiveControlOperation::submit_local_goose_dialogue) {
+    const bool local_dialogue_submission =
+        command.operation == LiveControlOperation::submit_local_goose_dialogue
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v2_root
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v2_next;
+    if (local_dialogue_submission) {
         const auto existing = store_.find_by_idempotency_key(task.idempotency_key);
         if (existing && !same_local_goose_dialogue_definition(*existing, task)) {
             return LiveControlReply{
@@ -454,7 +496,7 @@ LiveControlReply LiveControlProcessor::process_one(
     if (!stored) {
         throw std::runtime_error(description + " task is missing after submission");
     }
-    if (command.operation == LiveControlOperation::submit_local_goose_dialogue
+    if (local_dialogue_submission
         && !same_local_goose_dialogue_definition(*stored, task)) {
         return LiveControlReply{
             false, 4,
