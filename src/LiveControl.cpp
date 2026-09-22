@@ -33,6 +33,10 @@ std::string operation_name(const LiveControlOperation operation)
         return "submit_reflection";
     case LiveControlOperation::submit_local_goose_dialogue:
         return "submit_local_goose_dialogue";
+    case LiveControlOperation::submit_local_goose_dialogue_v2_root:
+        return "submit_local_goose_dialogue_v2_root";
+    case LiveControlOperation::submit_local_goose_dialogue_v2_next:
+        return "submit_local_goose_dialogue_v2_next";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
@@ -64,6 +68,12 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "submit_local_goose_dialogue") {
         return LiveControlOperation::submit_local_goose_dialogue;
+    }
+    if (value == "submit_local_goose_dialogue_v2_root") {
+        return LiveControlOperation::submit_local_goose_dialogue_v2_root;
+    }
+    if (value == "submit_local_goose_dialogue_v2_next") {
+        return LiveControlOperation::submit_local_goose_dialogue_v2_next;
     }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
@@ -143,9 +153,24 @@ void validate_command(const LiveControlCommand& command)
         }
         break;
     case LiveControlOperation::submit_local_goose_dialogue:
+    case LiveControlOperation::submit_local_goose_dialogue_v2_root:
         if (command.text.empty() || command.text.size() > 4096) {
             throw std::invalid_argument(
                 "Local Goose dialogue message must be 1..4096 bytes");
+        }
+        if (!command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "Local Goose root dialogue does not accept a predecessor");
+        }
+        break;
+    case LiveControlOperation::submit_local_goose_dialogue_v2_next:
+        if (command.text.empty() || command.text.size() > 4096) {
+            throw std::invalid_argument(
+                "Local Goose dialogue message must be 1..4096 bytes");
+        }
+        if (!safe_id(command.predecessor_task_id)) {
+            throw std::invalid_argument(
+                "Local Goose dialogue predecessor Task id is invalid");
         }
         break;
     case LiveControlOperation::inspect_task:
@@ -187,6 +212,11 @@ void validate_command(const LiveControlCommand& command)
         }
         break;
     }
+    if (command.operation != LiveControlOperation::submit_local_goose_dialogue_v2_next
+        && !command.predecessor_task_id.empty()) {
+        throw std::invalid_argument(
+            "live control predecessor Task id is only valid for V2 successor dialogue");
+    }
 }
 
 std::string encode_command(const LiveControlCommand& command)
@@ -199,6 +229,9 @@ std::string encode_command(const LiveControlCommand& command)
     };
     if (!command.text.empty()) {
         document["text"] = command.text;
+    }
+    if (!command.predecessor_task_id.empty()) {
+        document["predecessor_task_id"] = command.predecessor_task_id;
     }
     return document.dump();
 }
@@ -221,6 +254,14 @@ LiveControlCommand decode_command(const std::string& payload)
             throw std::invalid_argument("live control text must be a string");
         }
         command.text = document.at("text").get<std::string>();
+    }
+    if (document.contains("predecessor_task_id")) {
+        if (!document.at("predecessor_task_id").is_string()) {
+            throw std::invalid_argument(
+                "live control predecessor_task_id must be a string");
+        }
+        command.predecessor_task_id =
+            document.at("predecessor_task_id").get<std::string>();
     }
     validate_command(command);
     return command;
