@@ -202,7 +202,7 @@ jobs:
           mkdir build-dialogue
           cd build-dialogue
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 -C src gaudere-agent gaudere-local-goose-dialogue-proof gaudere-local-goose-dialogue-v2-proof
+          make --jobs=2 -C src gaudere-agent gaudere-control gaudere-local-goose-dialogue-proof gaudere-local-goose-dialogue-v2-proof
           make --jobs=2 -C tests \
             local_goose_dialogue_test \
             local_goose_dialogue_v2_test \
@@ -211,6 +211,15 @@ jobs:
             live_control_test \
             live_control_processor_test
           test -x src/gaudere-agent
+          test -x src/gaudere-control
+          control_help_status=0
+          control_help=$(src/gaudere-control --help 2>&1) || control_help_status=$?
+          test "$control_help_status" = "2"
+          printf '%s\n' "$control_help" | grep -q 'local-message'
+          printf '%s\n' "$control_help" | grep -q 'local-thread-start'
+          printf '%s\n' "$control_help" | grep -q 'local-thread-next'
+          grep -q 'control_help_status=0' ../scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'control usage probe returned unexpected status' ../scripts/deploy-local-goose-dialogue-v2-production.sh
           test -x src/gaudere-local-goose-dialogue-proof
           test -x src/gaudere-local-goose-dialogue-v2-proof
           src/gaudere-local-goose-dialogue-proof --help 2>&1 | grep -q -- '--model-sha256'
