@@ -132,7 +132,9 @@ esac
 candidate_normalized=$(printf '%s\n' "$candidate_id" | sed 's/^sha256://')
 
 "$podman_command" run --rm --network none --read-only --read-only-tmpfs --security-opt=no-new-privileges --cap-drop=all --entrypoint /usr/bin/test "$candidate_id" -x /usr/local/bin/gaudere-control || fail "candidate lacks control client"
-control_help=$("$podman_command" run --rm --network none --read-only --read-only-tmpfs --security-opt=no-new-privileges --cap-drop=all --entrypoint /usr/local/bin/gaudere-control "$candidate_id" --help 2>&1)
+control_help_status=0
+control_help=$("$podman_command" run --rm --network none --read-only --read-only-tmpfs --security-opt=no-new-privileges --cap-drop=all --entrypoint /usr/local/bin/gaudere-control "$candidate_id" --help 2>&1) || control_help_status=$?
+[ "$control_help_status" = "2" ] || fail "candidate control usage probe returned unexpected status $control_help_status"
 printf '%s\n' "$control_help" | grep -q 'local-message' || fail "candidate control client lost local-message"
 printf '%s\n' "$control_help" | grep -q 'local-thread-start' || fail "candidate control client lacks local-thread-start"
 printf '%s\n' "$control_help" | grep -q 'local-thread-next' || fail "candidate control client lacks local-thread-next"
