@@ -107,6 +107,8 @@ gaudere_agent_SOURCES += \
 	LocalGooseDialogue.hpp \
 	LocalGooseDialogueV2.cpp \
 	LocalGooseDialogueV2.hpp \
+	LocalGooseDialogueV2Handler.cpp \
+	LocalGooseDialogueV2Handler.hpp \
 	LocalGooseDialogueHandler.cpp \
 	LocalGooseDialogueHandler.hpp \
 	LocalGooseCognitionService.cpp \

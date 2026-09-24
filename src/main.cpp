@@ -17,6 +17,7 @@
 #include "LocalGooseCognitionService.hpp"
 #include "LocalGooseDialogue.hpp"
 #include "LocalGooseDialogueHandler.hpp"
+#include "LocalGooseDialogueV2Handler.hpp"
 #include "LocalGooseCycleHandler.hpp"
 #include "LocalGooseCycleSchedulerBridge.hpp"
 #include "LocalGooseCycleService.hpp"
@@ -1051,6 +1052,8 @@ int main(int argc, char* argv[])
                 local_goose_dialogue_runner;
             std::unique_ptr<gaudere_agent::LocalGooseDialogueHandler>
                 local_goose_dialogue_handler;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueV2Handler>
+                local_goose_dialogue_v2_handler;
             if (local_goose_requested(options)) {
                 local_goose_dialogue_runner =
                     std::make_unique<gaudere_agent::PosixLocalGooseRunner>();
@@ -1065,10 +1068,28 @@ int main(int argc, char* argv[])
                     throw std::runtime_error(
                         "cannot register Local Goose dialogue handler");
                 }
+                local_goose_dialogue_v2_handler =
+                    std::make_unique<gaudere_agent::LocalGooseDialogueV2Handler>(
+                        *local_goose_dialogue_runner,
+                        [&task_store](const std::string& id) {
+                            return task_store.find(id);
+                        },
+                        options.local_goose_model,
+                        options.local_goose_model_sha256);
+                if (!task_dispatcher.register_handler(
+                        gaudere_agent::local_goose_dialogue_v2_task_kind,
+                        *local_goose_dialogue_v2_handler)) {
+                    throw std::runtime_error(
+                        "cannot register Local Goose dialogue v2 handler");
+                }
                 std::cout
                     << "gaudere-agent: local Goose dialogue enabled model="
                     << options.local_goose_model
                     << " tools_enabled=false provider=local\n";
+                std::cout
+                    << "gaudere-agent: local Goose dialogue v2 enabled model="
+                    << options.local_goose_model
+                    << " tools_enabled=false provider=local bounded_history=true\n";
             }
 
             std::unique_ptr<gaudere_agent::LiveControlMailbox> control_mailbox;
