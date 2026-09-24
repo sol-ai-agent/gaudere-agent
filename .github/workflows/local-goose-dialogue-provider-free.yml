@@ -150,6 +150,27 @@ jobs:
           ! grep -Eq 'gaudere-control[^\n]*local-message' \
             agent/scripts/deploy-local-goose-dialogue-production.sh
 
+          sh -n agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'AUTHORIZED_LOCAL_GOOSE_DIALOGUE_V2_CODE_DEPLOY' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'c83667ebd552032dcc92c62516bbfe7b22d91ac87432d63a7ffd4c0ba287a897' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_V1_TASKS' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_V2_TASKS' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'local-thread-start' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'local-thread-next' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_V2_CODE_DEPLOY=PASS' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'PROVIDER_TOTAL' agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'CYCLE_CURSOR' agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          grep -q 'STIMULI=' agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+          ! grep -Eq 'gaudere-control[^\n]*local-thread-(start|next)' \
+            agent/scripts/deploy-local-goose-dialogue-v2-production.sh
+
       - name: Prove first production dialogue is separately authorized
         run: |
           set -eu
