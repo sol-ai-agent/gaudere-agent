@@ -192,6 +192,30 @@ jobs:
           grep -q 'FIRST_PRODUCTION_LOCAL_GOOSE_DIALOGUE=PASS' \
             agent/scripts/first-production-local-goose-dialogue.sh
 
+          sh -n agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'AUTHORIZED_FIRST_PRODUCTION_DIALOGUE_V2' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'first-production-dialogue-v2' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q "C'est Bertrand" \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q '95660bd47c52de5bbac298047055f6b390018c6f86bee7457e59a88d18f0e3b6' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'local-thread-start' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'gaudere.cognition.local-goose-dialogue.v2' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'gaudere.cognition.local-goose-dialogue-v2-response.v1' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'provider.call:openai.responses' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_V1_TASKS' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_V2_TASKS' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+          grep -q 'FIRST_PRODUCTION_LOCAL_GOOSE_DIALOGUE_V2=PASS' \
+            agent/scripts/first-production-local-goose-dialogue-v2.sh
+
       - name: Build and run dialogue tests
         run: |
           set -eu
