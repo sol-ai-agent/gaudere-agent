@@ -216,6 +216,28 @@ jobs:
           grep -q 'FIRST_PRODUCTION_LOCAL_GOOSE_DIALOGUE_V2=PASS' \
             agent/scripts/first-production-local-goose-dialogue-v2.sh
 
+          sh -n agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'AUTHORIZED_FIRST_PRODUCTION_DIALOGUE_V2_SUCCESSOR' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'cognition.local-goose-dialogue.v2:82164bd3699f19c5ff77046e6c60299d898ec225c5174b30c3d653aaa5510b19' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'c740110698daef49e4249223ac3a0b53342b97daf453fca994e4e8f8678e6cfd' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'first-production-dialogue-v2-turn-1' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'local-thread-next' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          ! grep -q 'local-thread-start' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'turn_index.*1' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'provider.call:openai.responses' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_V2_TASKS' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+          grep -q 'FIRST_PRODUCTION_LOCAL_GOOSE_DIALOGUE_V2_SUCCESSOR=PASS' \
+            agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
+
       - name: Build and run dialogue tests
         run: |
           set -eu
