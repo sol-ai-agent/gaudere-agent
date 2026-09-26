@@ -194,8 +194,6 @@ local_goose_dialogue_v3_test_SOURCES = \
 	../src/LocalGooseDialogueV2.hpp \
 	../src/LocalGooseDialogueV3.cpp \
 	../src/LocalGooseDialogueV3.hpp \
-	../src/LocalGooseDialogueV3.cpp \
-	../src/LocalGooseDialogueV3.hpp \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp
 local_goose_dialogue_v3_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
@@ -204,8 +202,6 @@ local_goose_dialogue_v3_handler_test_SOURCES = \
 	local_goose_dialogue_v3_handler_test.cpp \
 	../src/LocalGooseDialogueV2.cpp \
 	../src/LocalGooseDialogueV2.hpp \
-	../src/LocalGooseDialogueV3.cpp \
-	../src/LocalGooseDialogueV3.hpp \
 	../src/LocalGooseDialogueV3.cpp \
 	../src/LocalGooseDialogueV3.hpp \
 	../src/LocalGooseDialogueV3Handler.cpp \
