@@ -16,8 +16,11 @@
 #include "LocalGooseCognitionHandler.hpp"
 #include "LocalGooseCognitionService.hpp"
 #include "LocalGooseDialogue.hpp"
+#include "LocalGooseDialogueCompletionFeed.hpp"
 #include "LocalGooseDialogueHandler.hpp"
+#include "LocalGooseDialogueThreadStore.hpp"
 #include "LocalGooseDialogueV2Handler.hpp"
+#include "LocalGooseDialogueV3Handler.hpp"
 #include "LocalGooseCycleHandler.hpp"
 #include "LocalGooseCycleSchedulerBridge.hpp"
 #include "LocalGooseCycleService.hpp"
@@ -1054,6 +1057,15 @@ int main(int argc, char* argv[])
                 local_goose_dialogue_handler;
             std::unique_ptr<gaudere_agent::LocalGooseDialogueV2Handler>
                 local_goose_dialogue_v2_handler;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueV3Handler>
+                local_goose_dialogue_v3_handler;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueThreadStore>
+                local_goose_dialogue_thread_store;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueCompletionFeedStore>
+                local_goose_dialogue_completion_store;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueCompletionFeedService>
+                local_goose_dialogue_completion_service;
+            constexpr const char* preferred_dialogue_thread_alias = "main";
             if (local_goose_requested(options)) {
                 local_goose_dialogue_runner =
                     std::make_unique<gaudere_agent::PosixLocalGooseRunner>();
@@ -1082,6 +1094,57 @@ int main(int argc, char* argv[])
                     throw std::runtime_error(
                         "cannot register Local Goose dialogue v2 handler");
                 }
+
+                local_goose_dialogue_v3_handler =
+                    std::make_unique<gaudere_agent::LocalGooseDialogueV3Handler>(
+                        *local_goose_dialogue_runner,
+                        [&task_store](const std::string& id) {
+                            return task_store.find(id);
+                        },
+                        options.local_goose_model,
+                        options.local_goose_model_sha256);
+                if (!task_dispatcher.register_handler(
+                        gaudere_agent::local_goose_dialogue_v3_task_kind,
+                        *local_goose_dialogue_v3_handler)) {
+                    throw std::runtime_error(
+                        "cannot register Local Goose dialogue v3 handler");
+                }
+
+                if (!options.check_only) {
+                    auto state_directory =
+                        std::filesystem::path(options.state_path).parent_path();
+                    if (state_directory.empty()) {
+                        state_directory = ".";
+                    }
+                    const auto thread_sidecar =
+                        (state_directory / "local-goose-dialogue-thread.db").string();
+                    const auto completion_sidecar =
+                        (state_directory / "local-goose-dialogue-completion.db").string();
+
+                    local_goose_dialogue_thread_store =
+                        std::make_unique<gaudere_agent::LocalGooseDialogueThreadStore>(
+                            thread_sidecar);
+                    local_goose_dialogue_completion_store =
+                        std::make_unique<
+                            gaudere_agent::LocalGooseDialogueCompletionFeedStore>(
+                            completion_sidecar);
+                    local_goose_dialogue_completion_service =
+                        std::make_unique<
+                            gaudere_agent::LocalGooseDialogueCompletionFeedService>(
+                            *local_goose_dialogue_thread_store,
+                            *local_goose_dialogue_completion_store,
+                            [&task_store](const std::string& id) {
+                                return task_store.find(id);
+                            },
+                            cycle_now_ms);
+                    std::cout
+                        << "gaudere-agent: local Goose dialogue v3 coordination enabled"
+                        << " thread_sidecar=" << thread_sidecar
+                        << " completion_sidecar=" << completion_sidecar
+                        << " preferred_alias=" << preferred_dialogue_thread_alias
+                        << " automatic_submission=false automatic_ack=false\n";
+                }
+
                 std::cout
                     << "gaudere-agent: local Goose dialogue enabled model="
                     << options.local_goose_model
@@ -1090,6 +1153,11 @@ int main(int argc, char* argv[])
                     << "gaudere-agent: local Goose dialogue v2 enabled model="
                     << options.local_goose_model
                     << " tools_enabled=false provider=local bounded_history=true\n";
+                std::cout
+                    << "gaudere-agent: local Goose dialogue v3 enabled model="
+                    << options.local_goose_model
+                    << " tools_enabled=false provider=local bounded_history=true"
+                    << " multi_actor=true automatic_submission=false\n";
             }
 
             std::unique_ptr<gaudere_agent::LiveControlMailbox> control_mailbox;
@@ -1119,7 +1187,8 @@ int main(int argc, char* argv[])
                     std::move(stimulus_callback),
                     local_goose_requested(options)
                         ? options.local_goose_model_sha256
-                        : std::string{});
+                        : std::string{},
+                    local_goose_dialogue_thread_store.get());
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.interrupt(); });
@@ -1145,6 +1214,31 @@ int main(int argc, char* argv[])
                 local_goose_cycle_scheduler;
             bool local_goose_monitoring = false;
             bool local_goose_cycle_monitoring = false;
+
+            const auto reconcile_local_goose_dialogue_completion = [&]() {
+                if (!local_goose_dialogue_completion_service
+                    || !local_goose_dialogue_thread_store
+                    || !local_goose_dialogue_thread_store->find(
+                        preferred_dialogue_thread_alias)) {
+                    return true;
+                }
+                const auto reconciliation =
+                    local_goose_dialogue_completion_service->reconcile(
+                        preferred_dialogue_thread_alias, 64);
+                if (reconciliation.blocked) {
+                    std::cerr
+                        << "gaudere-agent: local Goose dialogue completion feed blocked: "
+                        << reconciliation.detail << '\n';
+                    return false;
+                }
+                if (reconciliation.materialized != 0) {
+                    std::cout
+                        << "gaudere-agent: local Goose dialogue completion materialized="
+                        << reconciliation.materialized
+                        << " alias=" << preferred_dialogue_thread_alias << '\n';
+                }
+                return true;
+            };
 
             const auto pump_local_goose_tools = [&]() {
                 if (local_goose_stop_requested.load()) {
@@ -1361,6 +1455,20 @@ int main(int argc, char* argv[])
                     if (control.wake_deadline_may_have_changed) {
                         work_controller.refresh_deadlines();
                     }
+                    if (!reconcile_local_goose_dialogue_completion()) {
+                        work_conflict = true;
+                        local_goose_stop_requested.store(true);
+                        work_controller.stop();
+                        if (signal_waiter.joinable()) {
+                            internal_wake.store(true);
+                            if (pthread_kill(
+                                    signal_waiter.native_handle(),
+                                    SIGUSR1) != 0) {
+                                signal_wait_failed.store(true);
+                            }
+                        }
+                        continue;
+                    }
                     if (control.local_goose_cycle_may_have_changed
                         && local_goose_cycle_service) {
                         local_goose_cycle_monitoring = true;
@@ -1392,6 +1500,21 @@ int main(int argc, char* argv[])
                     if (signal_waiter.joinable()) {
                         internal_wake.store(true);
                         if (pthread_kill(signal_waiter.native_handle(), SIGUSR1) != 0) {
+                            signal_wait_failed.store(true);
+                        }
+                    }
+                    continue;
+                }
+
+                if (!reconcile_local_goose_dialogue_completion()) {
+                    work_conflict = true;
+                    local_goose_stop_requested.store(true);
+                    work_controller.stop();
+                    if (signal_waiter.joinable()) {
+                        internal_wake.store(true);
+                        if (pthread_kill(
+                                signal_waiter.native_handle(),
+                                SIGUSR1) != 0) {
                             signal_wait_failed.store(true);
                         }
                     }
