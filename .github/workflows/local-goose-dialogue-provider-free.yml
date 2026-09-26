@@ -138,7 +138,9 @@ jobs:
             agent/src/LocalGooseDialogueV3.cpp agent/src/LocalGooseDialogueV3.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/LocalGooseDialogueV3.cpp
-          ! grep -q 'LocalGooseDialogueV3' agent/src/main.cpp
+          grep -q 'LocalGooseDialogueV3Handler' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_v3_task_kind' agent/src/main.cpp
+          grep -q 'automatic_submission=false' agent/src/main.cpp
           grep -q 'submit_local_goose_dialogue_v3_root' agent/src/LiveControl.cpp
           grep -q 'submit_local_goose_dialogue_v3_next' agent/src/LiveControl.cpp
           grep -q 'speaker_kind' agent/src/LiveControl.cpp
@@ -161,7 +163,9 @@ jobs:
           grep -q 'local-thread-v3-send' agent/src/control_main.cpp
           grep -q 'preferred dialogue head conflict after durable Task submission' agent/src/LiveControlProcessor.cpp
           grep -q 'same_preferred_v3_request' agent/src/LiveControlProcessor.cpp
-          ! grep -q 'LocalGooseDialogueThreadStore' agent/src/main.cpp
+          grep -q 'LocalGooseDialogueThreadStore' agent/src/main.cpp
+          grep -q 'local-goose-dialogue-thread.db' agent/src/main.cpp
+          grep -q 'preferred_dialogue_thread_alias = "main"' agent/src/main.cpp
 
           grep -q 'local_goose_dialogue_thread_sidecar_schema = 2' \
             agent/src/LocalGooseDialogueThreadStore.hpp
@@ -185,7 +189,13 @@ jobs:
             agent/src/LocalGooseDialogueCompletionFeed.cpp agent/src/LocalGooseDialogueCompletionFeed.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/LocalGooseDialogueCompletionFeed.cpp
-          ! grep -q 'LocalGooseDialogueCompletionFeed' agent/src/main.cpp
+          grep -q 'LocalGooseDialogueCompletionFeedStore' agent/src/main.cpp
+          grep -q 'LocalGooseDialogueCompletionFeedService' agent/src/main.cpp
+          grep -q 'local-goose-dialogue-completion.db' agent/src/main.cpp
+          grep -q 'reconcile_local_goose_dialogue_completion' agent/src/main.cpp
+          ! grep -q 'next_for_consumer' agent/src/main.cpp
+          ! grep -q 'acknowledge' agent/src/main.cpp
+          grep -q 'automatic_ack=false' agent/src/main.cpp
 
           grep -q 'LocalGooseDialogueV3Handler' agent/src/local_goose_dialogue_v3_proof_main.cpp
           grep -q 'LocalGooseDialogueCompletionFeedService' agent/src/local_goose_dialogue_v3_proof_main.cpp
@@ -209,7 +219,8 @@ jobs:
             agent/src/LocalGooseDialogueV3Handler.cpp agent/src/LocalGooseDialogueV3Handler.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/LocalGooseDialogueV3Handler.cpp
-          ! grep -q 'LocalGooseDialogueV3Handler' agent/src/main.cpp
+          grep -q 'LocalGooseDialogueV3Handler' agent/src/main.cpp
+          grep -q 'cannot register Local Goose dialogue v3 handler' agent/src/main.cpp
 
           grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
           grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
