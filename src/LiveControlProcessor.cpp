@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
