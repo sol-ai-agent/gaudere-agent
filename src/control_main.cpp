@@ -12,7 +12,7 @@ void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | task ID | "
+        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | local-thread-v3-start REQUEST_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-next REQUEST_ID PREDECESSOR_TASK_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | task ID | "
         << "budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | "
         << "wake WAKE_ID | wake-status | stimulate-local-goose-cycle REQUEST_ID]\n";
 }
@@ -58,6 +58,23 @@ int main(int argc, char* argv[])
             command.id = argv[4];
             command.predecessor_task_id = argv[5];
             command.text = argv[6];
+        } else if (operation == "local-thread-v3-start" && argc == 9) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::submit_local_goose_dialogue_v3_root;
+            command.id = argv[4];
+            command.speaker_kind = argv[5];
+            command.speaker_id = argv[6];
+            command.message_kind = argv[7];
+            command.text = argv[8];
+        } else if (operation == "local-thread-v3-next" && argc == 10) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::submit_local_goose_dialogue_v3_next;
+            command.id = argv[4];
+            command.predecessor_task_id = argv[5];
+            command.speaker_kind = argv[6];
+            command.speaker_id = argv[7];
+            command.message_kind = argv[8];
+            command.text = argv[9];
         } else if (operation == "task" && argc == 5) {
             command.operation = gaudere_agent::LiveControlOperation::inspect_task;
             command.id = argv[4];

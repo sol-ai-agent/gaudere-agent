@@ -392,6 +392,129 @@ void test_local_goose_dialogue_v2_rejects_invalid_predecessor_before_connect()
            "V2 predecessor rejection is explicit");
 }
 
+void test_local_goose_dialogue_v3_operations_round_trip()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "V3 live control server starts");
+
+    std::ostringstream root_output;
+    std::ostringstream root_error;
+    int root_result = -1;
+    std::thread root_client([&] {
+        root_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::submit_local_goose_dialogue_v3_root,
+                "v3-root-001", "Observation système.", {},
+                "system", "sol", "observation"},
+            root_output, root_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "V3 root dialogue wakes the sole worker callback");
+    }
+    auto pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "V3 root dialogue crosses bounded mailbox exactly once");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::submit_local_goose_dialogue_v3_root
+                   && command.id == "v3-root-001"
+                   && command.text == "Observation système."
+                   && command.predecessor_task_id.empty()
+                   && command.speaker_kind == "system"
+                   && command.speaker_id == "sol"
+                   && command.message_kind == "observation",
+               "V3 root preserves canonical actor provenance");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "status=pending\n"});
+    }
+    root_client.join();
+    expect(root_result == 0
+               && root_output.str() == "status=pending\n"
+               && root_error.str().empty(),
+           "V3 root client receives worker reply");
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = false;
+    }
+    const std::string predecessor =
+        "cognition.local-goose-dialogue.v2:" + std::string(64, 'a');
+    std::ostringstream next_output;
+    std::ostringstream next_error;
+    int next_result = -1;
+    std::thread next_client([&] {
+        next_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::submit_local_goose_dialogue_v3_next,
+                "v3-next-001", "Retour du système.", predecessor,
+                "system", "gaudere-runtime", "feedback"},
+            next_output, next_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "V3 successor dialogue wakes the sole worker callback");
+    }
+    pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "V3 successor dialogue crosses bounded mailbox exactly once");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::submit_local_goose_dialogue_v3_next
+                   && command.id == "v3-next-001"
+                   && command.text == "Retour du système."
+                   && command.predecessor_task_id == predecessor
+                   && command.speaker_kind == "system"
+                   && command.speaker_id == "gaudere-runtime"
+                   && command.message_kind == "feedback",
+               "V3 successor preserves predecessor and actor provenance");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "status=pending\n"});
+    }
+    next_client.join();
+    expect(next_result == 0
+               && next_output.str() == "status=pending\n"
+               && next_error.str().empty(),
+           "V3 successor client receives worker reply");
+
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
+void test_local_goose_dialogue_v3_rejects_invalid_provenance_before_connect()
+{
+    std::ostringstream output;
+    std::ostringstream error;
+    const int result = run_live_control_client(
+        "/tmp/does-not-matter.sock",
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v3_root,
+            "v3-invalid", "message", {},
+            "assistant", "sol", "dialogue"},
+        output, error);
+    expect(result != 0,
+           "V3 dialogue rejects unsupported speaker kind before connect");
+    expect(error.str().find("provenance") != std::string::npos,
+           "V3 provenance rejection is explicit");
+}
+
 void test_local_goose_stimulus_operation_round_trip()
 {
     const auto directory = temporary_directory();
@@ -531,6 +654,8 @@ int main()
     test_local_goose_dialogue_rejects_invalid_message_before_connect();
     test_local_goose_dialogue_v2_operations_round_trip();
     test_local_goose_dialogue_v2_rejects_invalid_predecessor_before_connect();
+    test_local_goose_dialogue_v3_operations_round_trip();
+    test_local_goose_dialogue_v3_rejects_invalid_provenance_before_connect();
     test_local_goose_stimulus_operation_round_trip();
     test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();

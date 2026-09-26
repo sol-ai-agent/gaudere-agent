@@ -107,6 +107,8 @@ gaudere_agent_SOURCES += \
 	LocalGooseDialogue.hpp \
 	LocalGooseDialogueV2.cpp \
 	LocalGooseDialogueV2.hpp \
+	LocalGooseDialogueV3.cpp \
+	LocalGooseDialogueV3.hpp \
 	LocalGooseDialogueV2Handler.cpp \
 	LocalGooseDialogueV2Handler.hpp \
 	LocalGooseDialogueHandler.cpp \
@@ -395,6 +397,8 @@ gaudere_local_goose_cycle_runtime_SOURCES = \
 	LocalGooseDialogue.hpp \
 	LocalGooseDialogueV2.cpp \
 	LocalGooseDialogueV2.hpp \
+	LocalGooseDialogueV3.cpp \
+	LocalGooseDialogueV3.hpp \
 	LocalGooseCycle.cpp \
 	LocalGooseCycle.hpp \
 	LocalGooseCycleHandler.cpp \
@@ -524,6 +528,8 @@ gaudere_local_goose_dialogue_proof_SOURCES = \
 	LocalGooseDialogue.hpp \
 	LocalGooseDialogueV2.cpp \
 	LocalGooseDialogueV2.hpp \
+	LocalGooseDialogueV3.cpp \
+	LocalGooseDialogueV3.hpp \
 	LocalGooseDialogueHandler.cpp \
 	LocalGooseDialogueHandler.hpp \
 	LocalGooseRunner.cpp \
@@ -569,6 +575,8 @@ gaudere_local_goose_dialogue_v2_proof_SOURCES = \
 	LocalGooseDialogue.hpp \
 	LocalGooseDialogueV2.cpp \
 	LocalGooseDialogueV2.hpp \
+	LocalGooseDialogueV3.cpp \
+	LocalGooseDialogueV3.hpp \
 	LocalGooseDialogueV2Handler.cpp \
 	LocalGooseDialogueV2Handler.hpp \
 	LocalGooseRunner.cpp \

@@ -139,8 +139,15 @@ jobs:
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/LocalGooseDialogueV3.cpp
           ! grep -q 'LocalGooseDialogueV3' agent/src/main.cpp
-          ! grep -q 'local_goose_dialogue_v3' agent/src/LiveControl.cpp
-          ! grep -q 'local_goose_dialogue_v3' agent/src/LiveControlProcessor.cpp
+          grep -q 'submit_local_goose_dialogue_v3_root' agent/src/LiveControl.cpp
+          grep -q 'submit_local_goose_dialogue_v3_next' agent/src/LiveControl.cpp
+          grep -q 'speaker_kind' agent/src/LiveControl.cpp
+          grep -q 'message_kind' agent/src/LiveControl.cpp
+          grep -q 'make_local_goose_dialogue_v3_root_task' agent/src/LiveControlProcessor.cpp
+          grep -q 'make_local_goose_dialogue_v3_bridge_from_v2_task' agent/src/LiveControlProcessor.cpp
+          grep -q 'make_local_goose_dialogue_v3_successor_task' agent/src/LiveControlProcessor.cpp
+          grep -q 'local-thread-v3-start' agent/src/control_main.cpp
+          grep -q 'local-thread-v3-next' agent/src/control_main.cpp
 
           grep -q 'LocalGooseDialogueV3Handler' agent/src/LocalGooseDialogueV3Handler.hpp
           grep -q 'legacy-v2-human' agent/src/LocalGooseDialogueV3Handler.cpp
@@ -297,6 +304,8 @@ jobs:
           printf '%s\n' "$control_help" | grep -q 'local-message'
           printf '%s\n' "$control_help" | grep -q 'local-thread-start'
           printf '%s\n' "$control_help" | grep -q 'local-thread-next'
+          printf '%s\n' "$control_help" | grep -q 'local-thread-v3-start'
+          printf '%s\n' "$control_help" | grep -q 'local-thread-v3-next'
           grep -q 'control_help_status=0' ../scripts/deploy-local-goose-dialogue-v2-production.sh
           grep -q 'control usage probe returned unexpected status' ../scripts/deploy-local-goose-dialogue-v2-production.sh
           test -x src/gaudere-local-goose-dialogue-proof

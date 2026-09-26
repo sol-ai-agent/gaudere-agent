@@ -3,6 +3,7 @@
 #include "LiveControlProcessor.hpp"
 #include "LocalGooseDialogue.hpp"
 #include "LocalGooseDialogueV2.hpp"
+#include "LocalGooseDialogueV3.hpp"
 #include "OpenAIActivation.hpp"
 
 #include <gaudere/persistence/sqlite/BudgetStore.hpp>
@@ -416,6 +417,117 @@ void test_local_goose_dialogue_v2_submission_is_durable_and_linked()
            "V2 successor request id conflicts on changed message bytes");
 }
 
+void test_local_goose_dialogue_v3_submission_preserves_actor_and_bridge()
+{
+    TemporaryDatabase database;
+    const std::string model_sha(64, 'a');
+    Harness harness(database.path, false, false, model_sha);
+
+    const auto expected_root = make_local_goose_dialogue_v3_root_task(
+        "v3-live-root", "human", "bertrand", "dialogue",
+        "Bonjour V3.", model_sha);
+    auto root_request = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v3_root,
+            "v3-live-root", "Bonjour V3.", {},
+            "human", "bertrand", "dialogue"});
+    const auto root_processed = harness.processor.process(harness.mailbox);
+    const auto root_reply = root_request->wait();
+    const auto stored_root = harness.store.find(expected_root.id);
+
+    expect(root_processed.work_may_be_pending && root_reply.ok,
+           "V3 root submission creates pending provider-free work");
+    expect(stored_root && stored_root->kind == local_goose_dialogue_v3_task_kind,
+           "V3 root command persists canonical V3 Task");
+    expect(stored_root
+               && inspect_local_goose_dialogue_v3_task(*stored_root).eligible
+               && inspect_local_goose_dialogue_v3_task(*stored_root).speaker_id
+                      == "bertrand",
+           "V3 root preserves canonical human provenance");
+
+    const auto legacy_root = succeeded_v2_root(
+        "v3-bridge-v2-root", "Ancien tour.", model_sha, "Réponse V2.");
+    harness.store.save(legacy_root);
+
+    const auto expected_bridge =
+        make_local_goose_dialogue_v3_bridge_from_v2_task(
+            "v3-live-bridge", "system", "sol", "observation",
+            "Le système rejoint le fil.", model_sha, legacy_root);
+    auto bridge_request = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v3_next,
+            "v3-live-bridge", "Le système rejoint le fil.", legacy_root.id,
+            "system", "sol", "observation"});
+    const auto bridge_processed = harness.processor.process(harness.mailbox);
+    const auto bridge_reply = bridge_request->wait();
+    const auto stored_bridge = harness.store.find(expected_bridge.id);
+
+    expect(bridge_processed.work_may_be_pending && bridge_reply.ok,
+           "V3 next accepts canonical V2 predecessor as explicit bridge");
+    const auto bridge_inspection = stored_bridge
+        ? inspect_local_goose_dialogue_v3_task(*stored_bridge)
+        : LocalGooseDialogueV3Inspection{};
+    expect(bridge_inspection.eligible
+               && bridge_inspection.turn_index == 1
+               && bridge_inspection.root_task_id == legacy_root.id
+               && bridge_inspection.predecessor_task_id == legacy_root.id
+               && bridge_inspection.speaker_kind == "system"
+               && bridge_inspection.speaker_id == "sol"
+               && bridge_inspection.message_kind == "observation",
+           "V3 bridge persists V2 root lineage and system provenance");
+
+    auto completed_bridge = expected_bridge;
+    const auto completed_bridge_inspection =
+        inspect_local_goose_dialogue_v3_task(completed_bridge);
+    completed_bridge.status = gaudere::work::TaskStatus::succeeded;
+    completed_bridge.attempts_started = 1;
+    completed_bridge.result = gaudere::work::TaskResult{
+        local_goose_dialogue_v3_response_content_type,
+        make_local_goose_dialogue_v3_response(
+            completed_bridge_inspection, "Observation reçue."),
+        {},
+        {}};
+    harness.store.save(completed_bridge);
+
+    const auto expected_feedback = make_local_goose_dialogue_v3_successor_task(
+        "v3-live-feedback", "system", "gaudere-runtime", "feedback",
+        "Voici le retour du système.", model_sha, completed_bridge);
+    auto feedback_request = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v3_next,
+            "v3-live-feedback", "Voici le retour du système.",
+            completed_bridge.id, "system", "gaudere-runtime", "feedback"});
+    const auto feedback_processed = harness.processor.process(harness.mailbox);
+    const auto feedback_reply = feedback_request->wait();
+    const auto stored_feedback = harness.store.find(expected_feedback.id);
+
+    expect(feedback_processed.work_may_be_pending && feedback_reply.ok,
+           "V3 next accepts canonical V3 predecessor");
+    const auto feedback_inspection = stored_feedback
+        ? inspect_local_goose_dialogue_v3_task(*stored_feedback)
+        : LocalGooseDialogueV3Inspection{};
+    expect(feedback_inspection.eligible
+               && feedback_inspection.turn_index == 2
+               && feedback_inspection.root_task_id == legacy_root.id
+               && feedback_inspection.predecessor_task_id == completed_bridge.id
+               && feedback_inspection.speaker_id == "gaudere-runtime"
+               && feedback_inspection.message_kind == "feedback",
+           "V3 successor preserves mixed lineage and system feedback provenance");
+
+    auto conflict_request = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v3_next,
+            "v3-live-feedback", "Même request id, autre acteur.",
+            completed_bridge.id, "human", "bertrand", "dialogue"});
+    const auto conflict_processed = harness.processor.process(harness.mailbox);
+    const auto conflict_reply = conflict_request->wait();
+    expect(!conflict_processed.work_may_be_pending
+               && !conflict_reply.ok
+               && conflict_reply.code == 4
+               && conflict_reply.body.find("conflict") != std::string::npos,
+           "V3 request id conflicts when actor/message definition changes");
+}
+
 void test_inspect_reads_durable_task_without_submission()
 {
     TemporaryDatabase database;
@@ -672,6 +784,7 @@ int main()
     test_local_goose_dialogue_requires_explicit_capability();
     test_local_goose_dialogue_submission_is_durable_and_idempotent();
     test_local_goose_dialogue_v2_submission_is_durable_and_linked();
+    test_local_goose_dialogue_v3_submission_preserves_actor_and_bridge();
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
