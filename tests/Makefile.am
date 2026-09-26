@@ -101,6 +101,8 @@ explicit_wake_integration_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
@@ -149,6 +151,8 @@ live_control_processor_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
@@ -430,6 +434,8 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
@@ -465,6 +471,8 @@ wake_status_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
