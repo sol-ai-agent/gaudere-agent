@@ -158,6 +158,61 @@ std::optional<LocalGooseDialogueThreadHead> find_head(
     return head;
 }
 
+std::vector<LocalGooseDialogueThreadHead> read_history_from(
+    sqlite3* database,
+    const std::string& alias,
+    const std::uint64_t first_revision,
+    const std::size_t limit)
+{
+    std::vector<LocalGooseDialogueThreadHead> out;
+    Statement statement(
+        database,
+        "SELECT alias,revision,root_task_id,head_task_id "
+        "FROM local_goose_dialogue_thread_history "
+        "WHERE alias=?1 AND revision>=?2 "
+        "ORDER BY revision ASC LIMIT ?3");
+    bind_text(database, statement.get(), 1, alias);
+    if (sqlite3_bind_int64(
+            statement.get(), 2,
+            static_cast<sqlite3_int64>(first_revision)) != SQLITE_OK
+        || sqlite3_bind_int64(
+            statement.get(), 3,
+            static_cast<sqlite3_int64>(limit)) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(database));
+    }
+    for (;;) {
+        const int step = sqlite3_step(statement.get());
+        if (step == SQLITE_DONE) break;
+        if (step != SQLITE_ROW) {
+            throw std::runtime_error(sqlite3_errmsg(database));
+        }
+        out.push_back(read_head(statement.get()));
+    }
+    return out;
+}
+
+void insert_history(
+    sqlite3* database,
+    const LocalGooseDialogueThreadHead& head)
+{
+    Statement statement(
+        database,
+        "INSERT INTO local_goose_dialogue_thread_history"
+        "(alias,revision,root_task_id,head_task_id)"
+        " VALUES(?1,?2,?3,?4)");
+    bind_text(database, statement.get(), 1, head.alias);
+    if (sqlite3_bind_int64(
+            statement.get(), 2,
+            static_cast<sqlite3_int64>(head.revision)) != SQLITE_OK) {
+        throw std::runtime_error(sqlite3_errmsg(database));
+    }
+    bind_text(database, statement.get(), 3, head.root_task_id);
+    bind_text(database, statement.get(), 4, head.head_task_id);
+    if (sqlite3_step(statement.get()) != SQLITE_DONE) {
+        throw std::runtime_error(sqlite3_errmsg(database));
+    }
+}
+
 std::int64_t user_table_count(sqlite3* database)
 {
     Statement statement(
@@ -275,8 +330,38 @@ LocalGooseDialogueThreadStore::LocalGooseDialogueThreadStore(
                 " root_task_id TEXT NOT NULL,"
                 " head_task_id TEXT NOT NULL"
                 ");");
-            execute(database_, "PRAGMA user_version=1;");
-        } else if (user_table_count(database_) != 1) {
+            execute(
+                database_,
+                "CREATE TABLE local_goose_dialogue_thread_history ("
+                " alias TEXT NOT NULL,"
+                " revision INTEGER NOT NULL CHECK(revision >= 0),"
+                " root_task_id TEXT NOT NULL,"
+                " head_task_id TEXT NOT NULL,"
+                " PRIMARY KEY(alias,revision)"
+                ");");
+            execute(database_, "PRAGMA user_version=2;");
+        } else if (version == 1) {
+            if (user_table_count(database_) != 1) {
+                throw std::runtime_error(
+                    "Local Goose dialogue thread v1 table set differs");
+            }
+            execute(
+                database_,
+                "CREATE TABLE local_goose_dialogue_thread_history ("
+                " alias TEXT NOT NULL,"
+                " revision INTEGER NOT NULL CHECK(revision >= 0),"
+                " root_task_id TEXT NOT NULL,"
+                " head_task_id TEXT NOT NULL,"
+                " PRIMARY KEY(alias,revision)"
+                ");");
+            execute(
+                database_,
+                "INSERT INTO local_goose_dialogue_thread_history"
+                "(alias,revision,root_task_id,head_task_id) "
+                "SELECT alias,revision,root_task_id,head_task_id "
+                "FROM local_goose_dialogue_thread_head;");
+            execute(database_, "PRAGMA user_version=2;");
+        } else if (user_table_count(database_) != 2) {
             throw std::runtime_error(
                 "Local Goose dialogue thread sidecar table set differs");
         }
@@ -303,6 +388,21 @@ LocalGooseDialogueThreadStore::find(const std::string& alias) const
 {
     if (!safe_alias(alias)) return std::nullopt;
     return find_head(database_, alias);
+}
+
+std::vector<LocalGooseDialogueThreadHead>
+LocalGooseDialogueThreadStore::history_from(
+    const std::string& alias,
+    const std::uint64_t first_revision,
+    const std::size_t limit) const
+{
+    if (!safe_alias(alias)
+        || first_revision > static_cast<std::uint64_t>(
+            std::numeric_limits<std::int64_t>::max())
+        || limit == 0 || limit > 1024) {
+        return {};
+    }
+    return read_history_from(database_, alias, first_revision, limit);
 }
 
 LocalGooseDialogueThreadStoreWrite
@@ -348,6 +448,7 @@ LocalGooseDialogueThreadStore::seed(
         if (sqlite3_step(statement.get()) != SQLITE_DONE) {
             throw std::runtime_error(sqlite3_errmsg(database_));
         }
+        insert_history(database_, head);
         execute(database_, "COMMIT;");
         out.result = LocalGooseDialogueThreadStoreResult::accepted;
         out.head = head;
@@ -427,6 +528,7 @@ LocalGooseDialogueThreadStore::replace(
             throw std::runtime_error(
                 "dialogue thread head CAS changed unexpected row count");
         }
+        insert_history(database_, replacement);
 
         execute(database_, "COMMIT;");
         out.result = LocalGooseDialogueThreadStoreResult::accepted;
