@@ -252,11 +252,6 @@ LocalGooseDialogueCompletionEvent read_event(sqlite3_stmt* statement)
     return event;
 }
 
-constexpr const char* event_columns =
-    "sequence,event_id,thread_alias,thread_revision,task_id,root_task_id,"
-    "turn_index,request_id,speaker_kind,speaker_id,message_kind,"
-    "result_sha256,response,observed_completed_at_ms";
-
 std::optional<LocalGooseDialogueCompletionEvent> find_event_for_revision(
     sqlite3* database,
     const std::string& thread_alias,
