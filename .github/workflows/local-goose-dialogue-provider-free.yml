@@ -266,6 +266,39 @@ jobs:
           ! grep -Eq 'gaudere-control[^\n]*local-thread-(start|next)' \
             agent/scripts/deploy-local-goose-dialogue-v2-production.sh
 
+          sh -n agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'AUTHORIZED_LOCAL_GOOSE_DIALOGUE_V3_CODE_DEPLOY' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q '95660bd47c52de5bbac298047055f6b390018c6f86bee7457e59a88d18f0e3b6' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_V3_TASKS' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'local-goose-dialogue-thread.db' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'local-goose-dialogue-completion.db' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'thread_schema.*2' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'completion_schema.*1' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'thread_heads.*0' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'completion_events.*0' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'automatic_submission=false automatic_ack=false' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'dialogue v3 deploy attempted a mutation beyond Image=' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'rm -f' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_V3_CODE_DEPLOY=PASS' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'PROVIDER_TOTAL' agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'CYCLE_CURSOR' agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          grep -q 'STIMULI=' agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+          ! grep -Eq 'gaudere-control[^\n]*local-thread-v3-(start|next|bind|send)' \
+            agent/scripts/deploy-local-goose-dialogue-v3-production.sh
+
       - name: Prove first production dialogue is separately authorized
         run: |
           set -eu
