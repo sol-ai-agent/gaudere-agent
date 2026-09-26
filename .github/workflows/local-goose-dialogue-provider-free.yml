@@ -163,6 +163,30 @@ jobs:
           grep -q 'same_preferred_v3_request' agent/src/LiveControlProcessor.cpp
           ! grep -q 'LocalGooseDialogueThreadStore' agent/src/main.cpp
 
+          grep -q 'local_goose_dialogue_thread_sidecar_schema = 2' \
+            agent/src/LocalGooseDialogueThreadStore.hpp
+          grep -q 'local_goose_dialogue_thread_history' \
+            agent/src/LocalGooseDialogueThreadStore.cpp
+          grep -q 'history_from' agent/src/LocalGooseDialogueThreadStore.cpp
+          grep -q 'LocalGooseDialogueCompletionFeedStore' \
+            agent/src/LocalGooseDialogueCompletionFeed.hpp
+          grep -q 'local_goose_dialogue_completion_event' \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp
+          grep -q 'UNIQUE(thread_alias,thread_revision)' \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp
+          grep -q 'next_for_consumer' \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp
+          grep -q 'acknowledge' \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp
+          grep -q 'O_NOFOLLOW' agent/src/LocalGooseDialogueCompletionFeed.cpp
+          grep -q 'mode 0600' agent/src/LocalGooseDialogueCompletionFeed.cpp
+          grep -q 'history_from' agent/src/LocalGooseDialogueCompletionFeed.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|systemctl|podman|LocalGooseCycleStimulus' \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp agent/src/LocalGooseDialogueCompletionFeed.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp
+          ! grep -q 'LocalGooseDialogueCompletionFeed' agent/src/main.cpp
+
           grep -q 'LocalGooseDialogueV3Handler' agent/src/LocalGooseDialogueV3Handler.hpp
           grep -q 'legacy-v2-human' agent/src/LocalGooseDialogueV3Handler.cpp
           grep -q 'direct local multi-actor conversation' agent/src/LocalGooseDialogueV3Handler.cpp
@@ -307,6 +331,7 @@ jobs:
             local_goose_dialogue_v3_test \
             local_goose_dialogue_v3_handler_test \
             local_goose_dialogue_thread_store_test \
+            local_goose_dialogue_completion_feed_test \
             local_goose_dialogue_v2_handler_test \
             local_goose_dialogue_handler_test \
             live_control_test \
@@ -340,6 +365,7 @@ jobs:
           tests/local_goose_dialogue_v3_test | grep -Fx 'local_goose_dialogue_v3_test: PASS'
           tests/local_goose_dialogue_v3_handler_test | grep -Fx 'local_goose_dialogue_v3_handler_test: PASS'
           tests/local_goose_dialogue_thread_store_test | grep -Fx 'local_goose_dialogue_thread_store_test: PASS'
+          tests/local_goose_dialogue_completion_feed_test | grep -Fx 'local_goose_dialogue_completion_feed_test: PASS'
           tests/local_goose_dialogue_v2_handler_test | grep -Fx 'local_goose_dialogue_v2_handler_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
           tests/live_control_test

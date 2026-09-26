@@ -4,12 +4,13 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 struct sqlite3;
 
 namespace gaudere_agent {
 
-inline constexpr int local_goose_dialogue_thread_sidecar_schema = 1;
+inline constexpr int local_goose_dialogue_thread_sidecar_schema = 2;
 
 struct LocalGooseDialogueThreadHead {
     std::string alias;
@@ -61,6 +62,11 @@ public:
 
     [[nodiscard]] std::optional<LocalGooseDialogueThreadHead> find(
         const std::string& alias) const;
+
+    [[nodiscard]] std::vector<LocalGooseDialogueThreadHead> history_from(
+        const std::string& alias,
+        std::uint64_t first_revision,
+        std::size_t limit = 64) const;
 
     [[nodiscard]] LocalGooseDialogueThreadStoreWrite seed(
         const LocalGooseDialogueThreadHead& head);
