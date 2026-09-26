@@ -1,18 +1,33 @@
 #include "LiveControl.hpp"
 
 #include <cstdlib>
+#include <cstdint>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
 namespace {
 
+std::uint64_t parse_revision(const char* value)
+{
+    const std::string text{value};
+    std::size_t consumed = 0;
+    const auto parsed = std::stoull(text, &consumed, 10);
+    if (consumed != text.size()
+        || parsed > static_cast<unsigned long long>(
+            std::numeric_limits<std::int64_t>::max())) {
+        throw std::invalid_argument("thread revision is invalid");
+    }
+    return static_cast<std::uint64_t>(parsed);
+}
+
 void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | local-thread-v3-start REQUEST_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-next REQUEST_ID PREDECESSOR_TASK_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | task ID | "
+        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | local-thread-v3-start REQUEST_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-next REQUEST_ID PREDECESSOR_TASK_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-bind THREAD_ALIAS HEAD_TASK_ID | local-thread-v3-head THREAD_ALIAS | local-thread-v3-send REQUEST_ID THREAD_ALIAS EXPECTED_REVISION SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | task ID | "
         << "budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | "
         << "wake WAKE_ID | wake-status | stimulate-local-goose-cycle REQUEST_ID]\n";
 }
@@ -75,6 +90,25 @@ int main(int argc, char* argv[])
             command.speaker_id = argv[7];
             command.message_kind = argv[8];
             command.text = argv[9];
+        } else if (operation == "local-thread-v3-bind" && argc == 6) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::bind_local_goose_dialogue_thread_head;
+            command.id = argv[4];
+            command.predecessor_task_id = argv[5];
+        } else if (operation == "local-thread-v3-head" && argc == 5) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::inspect_local_goose_dialogue_thread_head;
+            command.id = argv[4];
+        } else if (operation == "local-thread-v3-send" && argc == 11) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
+            command.id = argv[4];
+            command.thread_alias = argv[5];
+            command.expected_thread_revision = parse_revision(argv[6]);
+            command.speaker_kind = argv[7];
+            command.speaker_id = argv[8];
+            command.message_kind = argv[9];
+            command.text = argv[10];
         } else if (operation == "task" && argc == 5) {
             command.operation = gaudere_agent::LiveControlOperation::inspect_task;
             command.id = argv[4];
