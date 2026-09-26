@@ -515,6 +515,126 @@ void test_local_goose_dialogue_v3_rejects_invalid_provenance_before_connect()
            "V3 provenance rejection is explicit");
 }
 
+void test_preferred_dialogue_thread_operations_round_trip()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "preferred dialogue live control server starts");
+
+    const std::string head_task =
+        "cognition.local-goose-dialogue.v2:" + std::string(64, 'a');
+    std::ostringstream bind_output;
+    std::ostringstream bind_error;
+    int bind_result = -1;
+    std::thread bind_client([&] {
+        bind_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::bind_local_goose_dialogue_thread_head,
+                "main", {}, head_task},
+            bind_output, bind_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "preferred dialogue bind wakes worker");
+    }
+    auto pending = mailbox.take_all();
+    expect(pending.size() == 1, "preferred dialogue bind crosses mailbox");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::bind_local_goose_dialogue_thread_head
+                   && command.id == "main"
+                   && command.predecessor_task_id == head_task
+                   && command.text.empty(),
+               "preferred dialogue bind preserves alias and head Task");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "revision=0\n"});
+    }
+    bind_client.join();
+    expect(bind_result == 0
+               && bind_output.str() == "revision=0\n"
+               && bind_error.str().empty(),
+           "preferred dialogue bind receives worker reply");
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = false;
+    }
+    std::ostringstream send_output;
+    std::ostringstream send_error;
+    int send_result = -1;
+    std::thread send_client([&] {
+        send_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next,
+                "preferred-001", "Retour système.", {},
+                "system", "sol", "feedback", "main", std::uint64_t{7}},
+            send_output, send_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "preferred dialogue send wakes worker");
+    }
+    pending = mailbox.take_all();
+    expect(pending.size() == 1, "preferred dialogue send crosses mailbox");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next
+                   && command.id == "preferred-001"
+                   && command.text == "Retour système."
+                   && command.predecessor_task_id.empty()
+                   && command.speaker_kind == "system"
+                   && command.speaker_id == "sol"
+                   && command.message_kind == "feedback"
+                   && command.thread_alias == "main"
+                   && command.expected_thread_revision
+                   && *command.expected_thread_revision == 7,
+               "preferred dialogue send preserves revision and provenance");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "revision=8\n"});
+    }
+    send_client.join();
+    expect(send_result == 0
+               && send_output.str() == "revision=8\n"
+               && send_error.str().empty(),
+           "preferred dialogue send receives worker reply");
+
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
+void test_preferred_dialogue_send_requires_revision_before_connect()
+{
+    std::ostringstream output;
+    std::ostringstream error;
+    const int result = run_live_control_client(
+        "/tmp/does-not-matter.sock",
+        LiveControlCommand{
+            LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next,
+            "preferred-invalid", "message", {},
+            "system", "sol", "feedback", "main"},
+        output, error);
+    expect(result != 0,
+           "preferred dialogue send rejects missing expected revision");
+    expect(error.str().find("revision") != std::string::npos,
+           "preferred dialogue revision rejection is explicit");
+}
+
 void test_local_goose_stimulus_operation_round_trip()
 {
     const auto directory = temporary_directory();
@@ -656,6 +776,8 @@ int main()
     test_local_goose_dialogue_v2_rejects_invalid_predecessor_before_connect();
     test_local_goose_dialogue_v3_operations_round_trip();
     test_local_goose_dialogue_v3_rejects_invalid_provenance_before_connect();
+    test_preferred_dialogue_thread_operations_round_trip();
+    test_preferred_dialogue_send_requires_revision_before_connect();
     test_local_goose_stimulus_operation_round_trip();
     test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();
