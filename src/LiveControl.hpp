@@ -4,11 +4,13 @@
 #include <fcntl.h>
 
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <iosfwd>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -25,6 +27,9 @@ enum class LiveControlOperation {
     submit_local_goose_dialogue_v2_next,
     submit_local_goose_dialogue_v3_root,
     submit_local_goose_dialogue_v3_next,
+    bind_local_goose_dialogue_thread_head,
+    inspect_local_goose_dialogue_thread_head,
+    submit_local_goose_dialogue_v3_preferred_next,
     inspect_task,
     inspect_budget,
     accept_wake,
@@ -43,14 +48,18 @@ struct LiveControlCommand {
                        std::string predecessor_task_id_value = {},
                        std::string speaker_kind_value = {},
                        std::string speaker_id_value = {},
-                       std::string message_kind_value = {})
+                       std::string message_kind_value = {},
+                       std::string thread_alias_value = {},
+                       std::optional<std::uint64_t> expected_thread_revision_value = std::nullopt)
         : operation(operation_value),
           id(std::move(id_value)),
           text(std::move(text_value)),
           predecessor_task_id(std::move(predecessor_task_id_value)),
           speaker_kind(std::move(speaker_kind_value)),
           speaker_id(std::move(speaker_id_value)),
-          message_kind(std::move(message_kind_value))
+          message_kind(std::move(message_kind_value)),
+          thread_alias(std::move(thread_alias_value)),
+          expected_thread_revision(expected_thread_revision_value)
     {
     }
 
@@ -61,6 +70,8 @@ struct LiveControlCommand {
     std::string speaker_kind;
     std::string speaker_id;
     std::string message_kind;
+    std::string thread_alias;
+    std::optional<std::uint64_t> expected_thread_revision;
 };
 
 struct LiveControlReply {
