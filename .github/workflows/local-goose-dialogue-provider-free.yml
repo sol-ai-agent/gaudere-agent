@@ -187,6 +187,14 @@ jobs:
             agent/src/LocalGooseDialogueCompletionFeed.cpp
           ! grep -q 'LocalGooseDialogueCompletionFeed' agent/src/main.cpp
 
+          grep -q 'LocalGooseDialogueV3Handler' agent/src/local_goose_dialogue_v3_proof_main.cpp
+          grep -q 'LocalGooseDialogueCompletionFeedService' agent/src/local_goose_dialogue_v3_proof_main.cpp
+          grep -q 'LocalGooseDialogueThreadStore' agent/src/local_goose_dialogue_v3_proof_main.cpp
+          grep -q 'provider_execution=false tools_enabled=false' agent/src/local_goose_dialogue_v3_proof_main.cpp
+          grep -q 'preferred_head_cas=true completion_feed=true' agent/src/local_goose_dialogue_v3_proof_main.cpp
+          ! grep -Eq 'CurlHttpTransport|SecretSource|ProviderTaskHandler|OpenAIResponsesProvider|LocalGooseCycleStimulus' \
+            agent/src/local_goose_dialogue_v3_proof_main.cpp
+
           grep -q 'LocalGooseDialogueV3Handler' agent/src/LocalGooseDialogueV3Handler.hpp
           grep -q 'legacy-v2-human' agent/src/LocalGooseDialogueV3Handler.cpp
           grep -q 'direct local multi-actor conversation' agent/src/LocalGooseDialogueV3Handler.cpp
@@ -324,7 +332,7 @@ jobs:
           mkdir build-dialogue
           cd build-dialogue
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 -C src gaudere-agent gaudere-control gaudere-local-goose-dialogue-proof gaudere-local-goose-dialogue-v2-proof
+          make --jobs=2 -C src gaudere-agent gaudere-control gaudere-local-goose-dialogue-proof gaudere-local-goose-dialogue-v2-proof gaudere-local-goose-dialogue-v3-proof
           make --jobs=2 -C tests \
             local_goose_dialogue_test \
             local_goose_dialogue_v2_test \
@@ -353,13 +361,27 @@ jobs:
           grep -q 'control usage probe returned unexpected status' ../scripts/deploy-local-goose-dialogue-v2-production.sh
           test -x src/gaudere-local-goose-dialogue-proof
           test -x src/gaudere-local-goose-dialogue-v2-proof
+          test -x src/gaudere-local-goose-dialogue-v3-proof
           src/gaudere-local-goose-dialogue-proof --help 2>&1 | grep -q -- '--model-sha256'
           src/gaudere-local-goose-dialogue-v2-proof --help 2>&1 | grep -q -- '--model-sha256'
+          src/gaudere-local-goose-dialogue-v3-proof --help 2>&1 | grep -q -- '--thread-sidecar'
+          src/gaudere-local-goose-dialogue-v3-proof --help 2>&1 | grep -q -- '--completion-sidecar'
+          src/gaudere-local-goose-dialogue-v3-proof --help 2>&1 | grep -q -- '--expected-tasks'
           sh -n ../scripts/prove-local-goose-dialogue-v2-fedora.sh
           grep -q -- '--network none' ../scripts/prove-local-goose-dialogue-v2-fedora.sh
           grep -q 'PRODUCTION_V2_DIALOGUE_TASKS' ../scripts/prove-local-goose-dialogue-v2-fedora.sh
           grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_V2_ISOLATED=PASS' ../scripts/prove-local-goose-dialogue-v2-fedora.sh
           grep -q 'gaudere-local-goose-dialogue-v2-proof' ../Containerfile
+          sh -n ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q -- '--network none' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q '95660bd47c52de5bbac298047055f6b390018c6f86bee7457e59a88d18f0e3b6' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q 'LOCAL_GOOSE_DIALOGUE_V3_TASKS' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q 'local-thread-v3-bind' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q 'local-thread-v3-send' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q 'preferred dialogue thread revision conflict' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q 'local_goose_dialogue_completion_event' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_V3_MULTI_ACTOR_ISOLATED=PASS' ../scripts/prove-local-goose-dialogue-v3-fedora.sh
+          grep -q 'gaudere-local-goose-dialogue-v3-proof' ../Containerfile
           tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
           tests/local_goose_dialogue_v2_test | grep -Fx 'local_goose_dialogue_v2_test: PASS'
           tests/local_goose_dialogue_v3_test | grep -Fx 'local_goose_dialogue_v3_test: PASS'

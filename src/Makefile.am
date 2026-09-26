@@ -616,3 +616,53 @@ gaudere_local_goose_dialogue_v2_proof_SOURCES = \
 gaudere_local_goose_dialogue_v2_proof_LDADD = \
 	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 gaudere_local_goose_dialogue_v2_proof_LDFLAGS = -pthread
+
+
+bin_PROGRAMS += gaudere-local-goose-dialogue-v3-proof
+gaudere_local_goose_dialogue_v3_proof_SOURCES = \
+	local_goose_dialogue_v3_proof_main.cpp \
+	LiveControl.cpp \
+	LiveControl.hpp \
+	LiveControlProcessor.cpp \
+	LiveControlProcessor.hpp \
+	LocalGooseDialogueCompletionFeed.cpp \
+	LocalGooseDialogueCompletionFeed.hpp \
+	LocalGooseDialogueThreadStore.cpp \
+	LocalGooseDialogueThreadStore.hpp \
+	LocalGooseDialogue.cpp \
+	LocalGooseDialogue.hpp \
+	LocalGooseDialogueV2.cpp \
+	LocalGooseDialogueV2.hpp \
+	LocalGooseDialogueV3.cpp \
+	LocalGooseDialogueV3.hpp \
+	LocalGooseDialogueV3Handler.cpp \
+	LocalGooseDialogueV3Handler.hpp \
+	LocalGooseRunner.cpp \
+	LocalGooseRunner.hpp \
+	OpenAIBudget.hpp \
+	OpenAITask.cpp \
+	OpenAITask.hpp \
+	Sha256.cpp \
+	Sha256.hpp \
+	StateLock.cpp \
+	StateLock.hpp \
+	TaskDispatcher.cpp \
+	TaskDispatcher.hpp \
+	TaskExecutor.cpp \
+	TaskExecutor.hpp \
+	TaskReport.cpp \
+	TaskReport.hpp \
+	WorkController.cpp \
+	WorkController.hpp \
+	BoundedReflection.cpp \
+	BoundedReflection.hpp \
+	ExplicitWake.cpp \
+	ExplicitWake.hpp \
+	LocalEchoHandler.cpp \
+	LocalEchoHandler.hpp \
+	WakeSourceDecision.cpp \
+	WakeSourceDecision.hpp
+
+gaudere_local_goose_dialogue_v3_proof_LDADD = \
+	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+gaudere_local_goose_dialogue_v3_proof_LDFLAGS = -pthread
