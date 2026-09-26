@@ -13,6 +13,7 @@ check_PROGRAMS = \
 	local_goose_dialogue_v2_test \
 	local_goose_dialogue_v3_test \
 	local_goose_dialogue_v3_handler_test \
+	local_goose_dialogue_thread_store_test \
 	local_goose_dialogue_v2_handler_test \
 	local_goose_dialogue_handler_test \
 	local_goose_cycle_stimulus_service_test \
@@ -100,6 +101,8 @@ explicit_wake_integration_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
@@ -148,6 +151,8 @@ live_control_processor_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
@@ -164,7 +169,7 @@ live_control_processor_test_SOURCES = \
 	../src/TaskExecutor.hpp \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
-live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 local_goose_dialogue_test_SOURCES = \
 	local_goose_dialogue_test.cpp \
@@ -214,6 +219,12 @@ local_goose_dialogue_v3_handler_test_SOURCES = \
 	../src/TaskExecutor.hpp
 local_goose_dialogue_v3_handler_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
 local_goose_dialogue_v3_handler_test_LDFLAGS = -pthread
+
+local_goose_dialogue_thread_store_test_SOURCES = \
+	local_goose_dialogue_thread_store_test.cpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp
+local_goose_dialogue_thread_store_test_LDADD = $(JSON_LIBS) -lsqlite3
 
 local_goose_dialogue_v2_handler_test_SOURCES = \
 	local_goose_dialogue_v2_handler_test.cpp \
@@ -423,6 +434,8 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
@@ -458,6 +471,8 @@ wake_status_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
 	../src/LocalGooseDialogue.cpp \
 	../src/LocalGooseDialogue.hpp \
 	../src/LocalGooseDialogueV2.cpp \
@@ -474,7 +489,7 @@ wake_status_test_SOURCES = \
 	../src/TaskExecutor.hpp \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
-wake_status_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+wake_status_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 work_controller_test_SOURCES = \
 	work_controller_test.cpp \

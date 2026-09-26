@@ -11,6 +11,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -41,6 +42,12 @@ std::string operation_name(const LiveControlOperation operation)
         return "submit_local_goose_dialogue_v3_root";
     case LiveControlOperation::submit_local_goose_dialogue_v3_next:
         return "submit_local_goose_dialogue_v3_next";
+    case LiveControlOperation::bind_local_goose_dialogue_thread_head:
+        return "bind_local_goose_dialogue_thread_head";
+    case LiveControlOperation::inspect_local_goose_dialogue_thread_head:
+        return "inspect_local_goose_dialogue_thread_head";
+    case LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next:
+        return "submit_local_goose_dialogue_v3_preferred_next";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
@@ -84,6 +91,15 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "submit_local_goose_dialogue_v3_next") {
         return LiveControlOperation::submit_local_goose_dialogue_v3_next;
+    }
+    if (value == "bind_local_goose_dialogue_thread_head") {
+        return LiveControlOperation::bind_local_goose_dialogue_thread_head;
+    }
+    if (value == "inspect_local_goose_dialogue_thread_head") {
+        return LiveControlOperation::inspect_local_goose_dialogue_thread_head;
+    }
+    if (value == "submit_local_goose_dialogue_v3_preferred_next") {
+        return LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
     }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
@@ -155,6 +171,12 @@ bool has_v3_provenance(const LiveControlCommand& command) noexcept
     return !command.speaker_kind.empty()
         || !command.speaker_id.empty()
         || !command.message_kind.empty();
+}
+
+bool has_thread_fields(const LiveControlCommand& command) noexcept
+{
+    return !command.thread_alias.empty()
+        || command.expected_thread_revision.has_value();
 }
 
 void validate_command(const LiveControlCommand& command)
@@ -233,6 +255,40 @@ void validate_command(const LiveControlCommand& command)
                 "Local Goose dialogue v3 provenance is invalid");
         }
         break;
+    case LiveControlOperation::bind_local_goose_dialogue_thread_head:
+        if (!command.text.empty()
+            || !safe_id(command.predecessor_task_id)) {
+            throw std::invalid_argument(
+                "dialogue thread bind requires alias id and canonical head Task id");
+        }
+        break;
+    case LiveControlOperation::inspect_local_goose_dialogue_thread_head:
+        if (!command.text.empty() || !command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "dialogue thread inspection accepts only an alias id");
+        }
+        break;
+    case LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next:
+        if (command.text.empty() || command.text.size() > 4096) {
+            throw std::invalid_argument(
+                "Local Goose dialogue v3 preferred message must be 1..4096 bytes");
+        }
+        if (!command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "preferred dialogue submission derives predecessor from thread head");
+        }
+        if (!valid_v3_speaker_kind(command.speaker_kind)
+            || !safe_id(command.speaker_id)
+            || !valid_v3_message_kind(command.message_kind)
+            || !safe_id(command.thread_alias)
+            || !command.expected_thread_revision
+            || *command.expected_thread_revision
+                > static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max())) {
+            throw std::invalid_argument(
+                "Local Goose preferred dialogue provenance/thread revision is invalid");
+        }
+        break;
     case LiveControlOperation::inspect_task:
         if (!command.text.empty()) {
             throw std::invalid_argument("inspect_task does not accept text");
@@ -274,18 +330,27 @@ void validate_command(const LiveControlCommand& command)
     }
     const bool predecessor_operation =
         command.operation == LiveControlOperation::submit_local_goose_dialogue_v2_next
-        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next;
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next
+        || command.operation == LiveControlOperation::bind_local_goose_dialogue_thread_head;
     if (!predecessor_operation && !command.predecessor_task_id.empty()) {
         throw std::invalid_argument(
-            "live control predecessor Task id is only valid for successor dialogue");
+            "live control predecessor Task id is only valid for successor dialogue or thread bind");
     }
 
     const bool v3_operation =
         command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
-        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next;
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
     if (!v3_operation && has_v3_provenance(command)) {
         throw std::invalid_argument(
             "live control v3 provenance is only valid for V3 dialogue");
+    }
+
+    const bool preferred_operation =
+        command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
+    if (!preferred_operation && has_thread_fields(command)) {
+        throw std::invalid_argument(
+            "live control thread alias/revision is only valid for preferred V3 dialogue");
     }
 }
 
@@ -311,6 +376,13 @@ std::string encode_command(const LiveControlCommand& command)
     }
     if (!command.message_kind.empty()) {
         document["message_kind"] = command.message_kind;
+    }
+    if (!command.thread_alias.empty()) {
+        document["thread_alias"] = command.thread_alias;
+    }
+    if (command.expected_thread_revision) {
+        document["expected_thread_revision"] =
+            *command.expected_thread_revision;
     }
     return document.dump();
 }
@@ -362,6 +434,21 @@ LiveControlCommand decode_command(const std::string& payload)
                 "live control message_kind must be a string");
         }
         command.message_kind = document.at("message_kind").get<std::string>();
+    }
+    if (document.contains("thread_alias")) {
+        if (!document.at("thread_alias").is_string()) {
+            throw std::invalid_argument(
+                "live control thread_alias must be a string");
+        }
+        command.thread_alias = document.at("thread_alias").get<std::string>();
+    }
+    if (document.contains("expected_thread_revision")) {
+        if (!document.at("expected_thread_revision").is_number_unsigned()) {
+            throw std::invalid_argument(
+                "live control expected_thread_revision must be unsigned");
+        }
+        command.expected_thread_revision =
+            document.at("expected_thread_revision").get<std::uint64_t>();
     }
     validate_command(command);
     return command;

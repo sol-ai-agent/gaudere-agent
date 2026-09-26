@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -193,6 +194,42 @@ std::string wake_revoke_name(
     throw std::invalid_argument("unknown wake-intent revoke result");
 }
 
+std::optional<std::string> canonical_dialogue_root(
+    const gaudere::work::Task& task) noexcept
+{
+    if (canonical_local_goose_dialogue_v2_success(task) && task.result) {
+        const auto response = inspect_local_goose_dialogue_v2_response(
+            task, task.result->output);
+        if (response.eligible) return response.root_task_id;
+    }
+    if (canonical_local_goose_dialogue_v3_success(task) && task.result) {
+        const auto response = inspect_local_goose_dialogue_v3_response(
+            task, task.result->output);
+        if (response.eligible) return response.root_task_id;
+    }
+    return std::nullopt;
+}
+
+bool same_preferred_v3_request(
+    const gaudere::work::Task& task,
+    const LiveControlCommand& command) noexcept
+{
+    const auto dialogue = inspect_local_goose_dialogue_v3_task(task);
+    return dialogue.eligible
+        && dialogue.request_id == command.id
+        && dialogue.speaker_kind == command.speaker_kind
+        && dialogue.speaker_id == command.speaker_id
+        && dialogue.message_kind == command.message_kind
+        && dialogue.message == command.text;
+}
+
+LiveControlReply thread_store_disabled()
+{
+    return LiveControlReply{
+        false, 4,
+        "gaudere-agent: preferred dialogue thread capability is not enabled in this service\n"};
+}
+
 
 } // namespace
 
@@ -204,7 +241,8 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            ExplicitWake* explicit_wake,
                                            SchedulerNext scheduler_next,
                                            LocalGooseStimulus local_goose_stimulus,
-                                           std::string local_goose_dialogue_model_sha256)
+                                           std::string local_goose_dialogue_model_sha256,
+                                           LocalGooseDialogueThreadStore* dialogue_thread_store)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
@@ -214,7 +252,8 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
       scheduler_next_(std::move(scheduler_next)),
       local_goose_stimulus_(std::move(local_goose_stimulus)),
       local_goose_dialogue_model_sha256_(
-          std::move(local_goose_dialogue_model_sha256))
+          std::move(local_goose_dialogue_model_sha256)),
+      dialogue_thread_store_(dialogue_thread_store)
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -238,7 +277,8 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
             || operation == LiveControlOperation::submit_local_goose_dialogue_v2_root
             || operation == LiveControlOperation::submit_local_goose_dialogue_v2_next
             || operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
-            || operation == LiveControlOperation::submit_local_goose_dialogue_v3_next;
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v3_next
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
         const bool wake_transition_may_have_committed =
             operation == LiveControlOperation::accept_wake
             || operation == LiveControlOperation::revoke_wake;
@@ -287,6 +327,194 @@ LiveControlReply LiveControlProcessor::process_one(
     bool& wake_deadline_may_have_changed,
     bool& local_goose_cycle_may_have_changed)
 {
+    if (command.operation
+        == LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+        if (!dialogue_thread_store_) return thread_store_disabled();
+        const auto head = dialogue_thread_store_->find(command.id);
+        return head
+            ? LiveControlReply{
+                true, 0, local_goose_dialogue_thread_head_report(*head)}
+            : LiveControlReply{
+                false, 3, "gaudere-agent: dialogue thread alias not found\n"};
+    }
+
+    if (command.operation
+        == LiveControlOperation::bind_local_goose_dialogue_thread_head) {
+        if (!dialogue_thread_store_) return thread_store_disabled();
+        const auto task = store_.find(command.predecessor_task_id);
+        if (!task) {
+            return LiveControlReply{
+                false, 3,
+                "gaudere-agent: dialogue thread bind head Task not found\n"};
+        }
+        const auto root = canonical_dialogue_root(*task);
+        if (!root) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: dialogue thread bind requires canonical successful V2/V3 head\n"};
+        }
+        LocalGooseDialogueThreadHead head{
+            command.id, 0, *root, task->id};
+        const auto write = dialogue_thread_store_->seed(head);
+        switch (write.result) {
+        case LocalGooseDialogueThreadStoreResult::accepted:
+        case LocalGooseDialogueThreadStoreResult::duplicate:
+            return LiveControlReply{
+                true, 0,
+                local_goose_dialogue_thread_head_report(*write.head)};
+        case LocalGooseDialogueThreadStoreResult::conflict:
+            return LiveControlReply{
+                false, 4,
+                std::string("gaudere-agent: dialogue thread bind conflict\n")
+                    + (write.head
+                        ? local_goose_dialogue_thread_head_report(*write.head)
+                        : std::string{})};
+        case LocalGooseDialogueThreadStoreResult::invalid:
+        case LocalGooseDialogueThreadStoreResult::unavailable:
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: dialogue thread bind failed: "
+                    + write.detail + "\n"};
+        }
+    }
+
+    if (command.operation
+        == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+        if (local_goose_dialogue_model_sha256_.empty()) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue capability is not enabled in this service\n"};
+        }
+        if (!dialogue_thread_store_) return thread_store_disabled();
+
+        auto head = dialogue_thread_store_->find(command.thread_alias);
+        if (!head) {
+            return LiveControlReply{
+                false, 3,
+                "gaudere-agent: preferred dialogue thread alias not found\n"};
+        }
+        const auto expected_revision = *command.expected_thread_revision;
+        if (head->revision != expected_revision) {
+            if (expected_revision
+                    < static_cast<std::uint64_t>(
+                        std::numeric_limits<std::int64_t>::max())
+                && head->revision == expected_revision + 1) {
+                const auto current_task = store_.find(head->head_task_id);
+                if (current_task
+                    && same_preferred_v3_request(*current_task, command)) {
+                    if (!gaudere::work::is_terminal(current_task->status)) {
+                        work_may_be_pending = true;
+                    }
+                    return LiveControlReply{
+                        true, 0,
+                        task_report(*current_task)
+                            + local_goose_dialogue_thread_head_report(*head)};
+                }
+            }
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: preferred dialogue thread revision conflict\n"
+                    + local_goose_dialogue_thread_head_report(*head)};
+        }
+        if (head->revision
+            == static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max())) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: preferred dialogue thread revision exhausted\n"};
+        }
+
+        const auto predecessor = store_.find(head->head_task_id);
+        if (!predecessor) {
+            return LiveControlReply{
+                false, 3,
+                "gaudere-agent: preferred dialogue predecessor Task not found\n"};
+        }
+        const auto root = canonical_dialogue_root(*predecessor);
+        if (!root || *root != head->root_task_id) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: preferred dialogue head is not canonical success for declared root\n"};
+        }
+
+        gaudere::work::Task task;
+        try {
+            if (predecessor->kind == local_goose_dialogue_v2_task_kind) {
+                task = make_local_goose_dialogue_v3_bridge_from_v2_task(
+                    command.id, command.speaker_kind, command.speaker_id,
+                    command.message_kind, command.text,
+                    local_goose_dialogue_model_sha256_, *predecessor);
+            } else {
+                task = make_local_goose_dialogue_v3_successor_task(
+                    command.id, command.speaker_kind, command.speaker_id,
+                    command.message_kind, command.text,
+                    local_goose_dialogue_model_sha256_, *predecessor);
+            }
+        } catch (const std::invalid_argument& error) {
+            return LiveControlReply{
+                false, 4,
+                std::string("gaudere-agent: preferred dialogue predecessor rejected: ")
+                    + error.what() + "\n"};
+        }
+
+        const auto existing =
+            store_.find_by_idempotency_key(task.idempotency_key);
+        if (existing && !same_local_goose_dialogue_definition(*existing, task)) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue request id conflicts with an existing Task\n"};
+        }
+
+        const auto submit = runtime_.submit(task);
+        if (submit != gaudere::work::SubmitResult::accepted
+            && submit != gaudere::work::SubmitResult::duplicate) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: preferred Local Goose dialogue v3 submission rejected\n"};
+        }
+
+        auto stored = store_.find(task.id);
+        if (!stored
+            || !same_local_goose_dialogue_definition(*stored, task)) {
+            throw std::runtime_error(
+                "preferred Local Goose dialogue v3 Task differs after submission");
+        }
+        if (!gaudere::work::is_terminal(stored->status)) {
+            work_may_be_pending = true;
+        }
+
+        auto replacement = *head;
+        replacement.revision = head->revision + 1;
+        replacement.head_task_id = task.id;
+        const auto write =
+            dialogue_thread_store_->replace(*head, replacement);
+        switch (write.result) {
+        case LocalGooseDialogueThreadStoreResult::accepted:
+        case LocalGooseDialogueThreadStoreResult::duplicate:
+            return LiveControlReply{
+                true, 0,
+                task_report(*stored)
+                    + local_goose_dialogue_thread_head_report(*write.head)};
+        case LocalGooseDialogueThreadStoreResult::conflict:
+            return LiveControlReply{
+                false, 4,
+                std::string(
+                    "gaudere-agent: preferred dialogue head conflict after durable Task submission\n")
+                    + task_report(*stored)
+                    + (write.head
+                        ? local_goose_dialogue_thread_head_report(*write.head)
+                        : std::string{})};
+        case LocalGooseDialogueThreadStoreResult::invalid:
+        case LocalGooseDialogueThreadStoreResult::unavailable:
+            return LiveControlReply{
+                false, 4,
+                std::string(
+                    "gaudere-agent: preferred dialogue head update failed after durable Task submission: ")
+                    + write.detail + "\n"
+                    + task_report(*stored)};
+        }
+    }
+
     if (command.operation == LiveControlOperation::inspect_task) {
         const auto task = store_.find(command.id);
         return task
@@ -516,6 +744,9 @@ LiveControlReply LiveControlProcessor::process_one(
         description = "Local Goose dialogue v3 successor";
         break;
     }
+    case LiveControlOperation::bind_local_goose_dialogue_thread_head:
+    case LiveControlOperation::inspect_local_goose_dialogue_thread_head:
+    case LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next:
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
     case LiveControlOperation::accept_wake:
