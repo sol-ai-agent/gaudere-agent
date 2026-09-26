@@ -366,7 +366,6 @@ jobs:
           tests/local_goose_dialogue_v3_handler_test | grep -Fx 'local_goose_dialogue_v3_handler_test: PASS'
           tests/local_goose_dialogue_thread_store_test | grep -Fx 'local_goose_dialogue_thread_store_test: PASS'
           tests/local_goose_dialogue_completion_feed_test | grep -Fx 'local_goose_dialogue_completion_feed_test: PASS'
-          tests/local_goose_dialogue_thread_store_test | grep -Fx 'local_goose_dialogue_thread_store_test: PASS'
           tests/local_goose_dialogue_v2_handler_test | grep -Fx 'local_goose_dialogue_v2_handler_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
           tests/live_control_test
