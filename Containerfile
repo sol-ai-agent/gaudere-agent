@@ -76,6 +76,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-stimulus-init /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-proof /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-v2-proof /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-v3-proof /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-seed /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-activate /opt/runtime/bin/ \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake \
@@ -92,6 +93,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && test -x /opt/runtime/bin/gaudere-local-goose-cycle-stimulus-init \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-proof \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-v2-proof \
+    && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-v3-proof \
     && test -x /opt/runtime/bin/gaudere-local-goose-cycle-seed \
     && test -x /opt/runtime/bin/gaudere-local-goose-cycle-activate
 
@@ -147,6 +149,7 @@ RUN test -x /usr/local/bin/gaudere-resume-after-wake \
     && test -x /usr/local/bin/gaudere-local-goose-cycle-stimulus-init \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-proof \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-v2-proof \
+    && test -x /usr/local/bin/gaudere-local-goose-dialogue-v3-proof \
     && test -x /usr/local/bin/gaudere-local-goose-cycle-seed \
     && test -x /usr/local/bin/gaudere-local-goose-cycle-activate \
     && test -x /usr/local/bin/goose \
