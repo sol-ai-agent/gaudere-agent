@@ -148,6 +148,20 @@ jobs:
           grep -q 'make_local_goose_dialogue_v3_successor_task' agent/src/LiveControlProcessor.cpp
           grep -q 'local-thread-v3-start' agent/src/control_main.cpp
           grep -q 'local-thread-v3-next' agent/src/control_main.cpp
+          grep -q 'LocalGooseDialogueThreadStore' agent/src/LocalGooseDialogueThreadStore.hpp
+          grep -q 'compare-and-swap' agent/src/LocalGooseDialogueThreadStore.hpp
+          grep -q 'BEGIN IMMEDIATE' agent/src/LocalGooseDialogueThreadStore.cpp
+          grep -q 'mode 0600' agent/src/LocalGooseDialogueThreadStore.cpp
+          grep -q 'bind_local_goose_dialogue_thread_head' agent/src/LiveControl.cpp
+          grep -q 'inspect_local_goose_dialogue_thread_head' agent/src/LiveControl.cpp
+          grep -q 'submit_local_goose_dialogue_v3_preferred_next' agent/src/LiveControl.cpp
+          grep -q 'expected_thread_revision' agent/src/LiveControl.cpp
+          grep -q 'local-thread-v3-bind' agent/src/control_main.cpp
+          grep -q 'local-thread-v3-head' agent/src/control_main.cpp
+          grep -q 'local-thread-v3-send' agent/src/control_main.cpp
+          grep -q 'preferred dialogue head conflict after durable Task submission' agent/src/LiveControlProcessor.cpp
+          grep -q 'same_preferred_v3_request' agent/src/LiveControlProcessor.cpp
+          ! grep -q 'LocalGooseDialogueThreadStore' agent/src/main.cpp
 
           grep -q 'LocalGooseDialogueV3Handler' agent/src/LocalGooseDialogueV3Handler.hpp
           grep -q 'legacy-v2-human' agent/src/LocalGooseDialogueV3Handler.cpp
@@ -292,6 +306,7 @@ jobs:
             local_goose_dialogue_v2_test \
             local_goose_dialogue_v3_test \
             local_goose_dialogue_v3_handler_test \
+            local_goose_dialogue_thread_store_test \
             local_goose_dialogue_v2_handler_test \
             local_goose_dialogue_handler_test \
             live_control_test \
@@ -306,6 +321,9 @@ jobs:
           printf '%s\n' "$control_help" | grep -q 'local-thread-next'
           printf '%s\n' "$control_help" | grep -q 'local-thread-v3-start'
           printf '%s\n' "$control_help" | grep -q 'local-thread-v3-next'
+          printf '%s\n' "$control_help" | grep -q 'local-thread-v3-bind'
+          printf '%s\n' "$control_help" | grep -q 'local-thread-v3-head'
+          printf '%s\n' "$control_help" | grep -q 'local-thread-v3-send'
           grep -q 'control_help_status=0' ../scripts/deploy-local-goose-dialogue-v2-production.sh
           grep -q 'control usage probe returned unexpected status' ../scripts/deploy-local-goose-dialogue-v2-production.sh
           test -x src/gaudere-local-goose-dialogue-proof
@@ -321,6 +339,7 @@ jobs:
           tests/local_goose_dialogue_v2_test | grep -Fx 'local_goose_dialogue_v2_test: PASS'
           tests/local_goose_dialogue_v3_test | grep -Fx 'local_goose_dialogue_v3_test: PASS'
           tests/local_goose_dialogue_v3_handler_test | grep -Fx 'local_goose_dialogue_v3_handler_test: PASS'
+          tests/local_goose_dialogue_thread_store_test | grep -Fx 'local_goose_dialogue_thread_store_test: PASS'
           tests/local_goose_dialogue_v2_handler_test | grep -Fx 'local_goose_dialogue_v2_handler_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
           tests/live_control_test
