@@ -127,6 +127,21 @@ jobs:
             agent/src/LocalGooseDialogueV2Handler.cpp
           grep -q 'LocalGooseDialogueV2Handler' agent/src/main.cpp
 
+          grep -q 'cognition.local-goose-dialogue.v3' agent/src/LocalGooseDialogueV3.hpp
+          grep -q 'speaker_kind' agent/src/LocalGooseDialogueV3.cpp
+          grep -q 'speaker_id' agent/src/LocalGooseDialogueV3.cpp
+          grep -q 'message_kind' agent/src/LocalGooseDialogueV3.cpp
+          grep -q 'make_local_goose_dialogue_v3_bridge_from_v2_task' agent/src/LocalGooseDialogueV3.cpp
+          grep -q 'canonical_local_goose_dialogue_v2_success' agent/src/LocalGooseDialogueV3.cpp
+          grep -q 'canonical_local_goose_dialogue_v3_success' agent/src/LocalGooseDialogueV3.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|LocalGooseRunner|systemctl|podman' \
+            agent/src/LocalGooseDialogueV3.cpp agent/src/LocalGooseDialogueV3.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialogueV3.cpp
+          ! grep -q 'LocalGooseDialogueV3' agent/src/main.cpp
+          ! grep -q 'local_goose_dialogue_v3' agent/src/LiveControl.cpp
+          ! grep -q 'local_goose_dialogue_v3' agent/src/LiveControlProcessor.cpp
+
           grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
           grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
             agent/src/local_goose_dialogue_proof_main.cpp
@@ -252,6 +267,7 @@ jobs:
           make --jobs=2 -C tests \
             local_goose_dialogue_test \
             local_goose_dialogue_v2_test \
+            local_goose_dialogue_v3_test \
             local_goose_dialogue_v2_handler_test \
             local_goose_dialogue_handler_test \
             live_control_test \
@@ -277,6 +293,7 @@ jobs:
           grep -q 'gaudere-local-goose-dialogue-v2-proof' ../Containerfile
           tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
           tests/local_goose_dialogue_v2_test | grep -Fx 'local_goose_dialogue_v2_test: PASS'
+          tests/local_goose_dialogue_v3_test | grep -Fx 'local_goose_dialogue_v3_test: PASS'
           tests/local_goose_dialogue_v2_handler_test | grep -Fx 'local_goose_dialogue_v2_handler_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
           tests/live_control_test
