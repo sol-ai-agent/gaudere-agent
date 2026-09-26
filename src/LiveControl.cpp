@@ -37,6 +37,10 @@ std::string operation_name(const LiveControlOperation operation)
         return "submit_local_goose_dialogue_v2_root";
     case LiveControlOperation::submit_local_goose_dialogue_v2_next:
         return "submit_local_goose_dialogue_v2_next";
+    case LiveControlOperation::submit_local_goose_dialogue_v3_root:
+        return "submit_local_goose_dialogue_v3_root";
+    case LiveControlOperation::submit_local_goose_dialogue_v3_next:
+        return "submit_local_goose_dialogue_v3_next";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
@@ -74,6 +78,12 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "submit_local_goose_dialogue_v2_next") {
         return LiveControlOperation::submit_local_goose_dialogue_v2_next;
+    }
+    if (value == "submit_local_goose_dialogue_v3_root") {
+        return LiveControlOperation::submit_local_goose_dialogue_v3_root;
+    }
+    if (value == "submit_local_goose_dialogue_v3_next") {
+        return LiveControlOperation::submit_local_goose_dialogue_v3_next;
     }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
@@ -129,6 +139,24 @@ bool safe_reason(const std::string& reason) noexcept
     return true;
 }
 
+bool valid_v3_speaker_kind(const std::string& value) noexcept
+{
+    return value == "human" || value == "system";
+}
+
+bool valid_v3_message_kind(const std::string& value) noexcept
+{
+    return value == "dialogue" || value == "feedback"
+        || value == "intervention" || value == "observation";
+}
+
+bool has_v3_provenance(const LiveControlCommand& command) noexcept
+{
+    return !command.speaker_kind.empty()
+        || !command.speaker_id.empty()
+        || !command.message_kind.empty();
+}
+
 void validate_command(const LiveControlCommand& command)
 {
     if (!safe_id(command.id)) {
@@ -173,6 +201,38 @@ void validate_command(const LiveControlCommand& command)
                 "Local Goose dialogue predecessor Task id is invalid");
         }
         break;
+    case LiveControlOperation::submit_local_goose_dialogue_v3_root:
+        if (command.text.empty() || command.text.size() > 4096) {
+            throw std::invalid_argument(
+                "Local Goose dialogue v3 message must be 1..4096 bytes");
+        }
+        if (!command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "Local Goose dialogue v3 root does not accept a predecessor");
+        }
+        if (!valid_v3_speaker_kind(command.speaker_kind)
+            || !safe_id(command.speaker_id)
+            || !valid_v3_message_kind(command.message_kind)) {
+            throw std::invalid_argument(
+                "Local Goose dialogue v3 provenance is invalid");
+        }
+        break;
+    case LiveControlOperation::submit_local_goose_dialogue_v3_next:
+        if (command.text.empty() || command.text.size() > 4096) {
+            throw std::invalid_argument(
+                "Local Goose dialogue v3 message must be 1..4096 bytes");
+        }
+        if (!safe_id(command.predecessor_task_id)) {
+            throw std::invalid_argument(
+                "Local Goose dialogue v3 predecessor Task id is invalid");
+        }
+        if (!valid_v3_speaker_kind(command.speaker_kind)
+            || !safe_id(command.speaker_id)
+            || !valid_v3_message_kind(command.message_kind)) {
+            throw std::invalid_argument(
+                "Local Goose dialogue v3 provenance is invalid");
+        }
+        break;
     case LiveControlOperation::inspect_task:
         if (!command.text.empty()) {
             throw std::invalid_argument("inspect_task does not accept text");
@@ -212,10 +272,20 @@ void validate_command(const LiveControlCommand& command)
         }
         break;
     }
-    if (command.operation != LiveControlOperation::submit_local_goose_dialogue_v2_next
-        && !command.predecessor_task_id.empty()) {
+    const bool predecessor_operation =
+        command.operation == LiveControlOperation::submit_local_goose_dialogue_v2_next
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next;
+    if (!predecessor_operation && !command.predecessor_task_id.empty()) {
         throw std::invalid_argument(
-            "live control predecessor Task id is only valid for V2 successor dialogue");
+            "live control predecessor Task id is only valid for successor dialogue");
+    }
+
+    const bool v3_operation =
+        command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next;
+    if (!v3_operation && has_v3_provenance(command)) {
+        throw std::invalid_argument(
+            "live control v3 provenance is only valid for V3 dialogue");
     }
 }
 
@@ -232,6 +302,15 @@ std::string encode_command(const LiveControlCommand& command)
     }
     if (!command.predecessor_task_id.empty()) {
         document["predecessor_task_id"] = command.predecessor_task_id;
+    }
+    if (!command.speaker_kind.empty()) {
+        document["speaker_kind"] = command.speaker_kind;
+    }
+    if (!command.speaker_id.empty()) {
+        document["speaker_id"] = command.speaker_id;
+    }
+    if (!command.message_kind.empty()) {
+        document["message_kind"] = command.message_kind;
     }
     return document.dump();
 }
@@ -262,6 +341,27 @@ LiveControlCommand decode_command(const std::string& payload)
         }
         command.predecessor_task_id =
             document.at("predecessor_task_id").get<std::string>();
+    }
+    if (document.contains("speaker_kind")) {
+        if (!document.at("speaker_kind").is_string()) {
+            throw std::invalid_argument(
+                "live control speaker_kind must be a string");
+        }
+        command.speaker_kind = document.at("speaker_kind").get<std::string>();
+    }
+    if (document.contains("speaker_id")) {
+        if (!document.at("speaker_id").is_string()) {
+            throw std::invalid_argument(
+                "live control speaker_id must be a string");
+        }
+        command.speaker_id = document.at("speaker_id").get<std::string>();
+    }
+    if (document.contains("message_kind")) {
+        if (!document.at("message_kind").is_string()) {
+            throw std::invalid_argument(
+                "live control message_kind must be a string");
+        }
+        command.message_kind = document.at("message_kind").get<std::string>();
     }
     validate_command(command);
     return command;
