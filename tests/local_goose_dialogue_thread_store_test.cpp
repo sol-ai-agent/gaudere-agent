@@ -131,6 +131,19 @@ int main()
     bad_id.root_task_id = "not-a-dialogue-task";
     assert(!valid_local_goose_dialogue_thread_head(bad_id));
 
+    const auto history = store.history_from("main", 0, 16);
+    assert(history.size() == 3);
+    assert(history[0].revision == 0
+        && history[0].head_task_id == initial.head_task_id);
+    assert(history[1].revision == 1
+        && history[1].head_task_id == advanced.head_task_id);
+    assert(history[2].revision == 2
+        && history[2].head_task_id == next.head_task_id);
+    const auto tail = store.history_from("main", 2, 1);
+    assert(tail.size() == 1 && tail.front().revision == 2);
+    assert(store.history_from("main", 0, 0).empty());
+    assert(store.history_from("bad alias", 0, 16).empty());
+
     const auto report = local_goose_dialogue_thread_head_report(next);
     assert(report.find("alias=\"main\"") != std::string::npos);
     assert(report.find("revision=2") != std::string::npos);
