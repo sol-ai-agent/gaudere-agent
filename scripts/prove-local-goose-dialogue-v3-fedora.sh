@@ -418,7 +418,7 @@ python3 - \
     "$expected_root_task_id" "$expected_v2_head_task_id" "$expected_v2_head_result_sha256" \
     "$human_task" "$observation_task" "$feedback_task" \
     "$human_request" "$observation_request" "$feedback_request" "$stale_request" \
-    "$model_sha256" "$copy_cursor_before" "$copy_provider_before" "$copy_stimuli_before" <<'PY'
+    "$thread_alias" "$model_sha256" "$copy_cursor_before" "$copy_provider_before" "$copy_stimuli_before" <<'PY'
 import hashlib
 import json
 from pathlib import Path
@@ -441,6 +441,7 @@ import sys
     observation_request,
     feedback_request,
     stale_request,
+    thread_alias,
     model_sha,
     expected_cursor,
     expected_provider,
@@ -643,11 +644,13 @@ thread = sqlite3.connect(Path(thread_path))
 version = thread.execute("PRAGMA user_version").fetchone()[0]
 head = thread.execute(
     "SELECT revision,root_task_id,head_task_id "
-    "FROM local_goose_dialogue_thread_head WHERE alias='main'"
+    "FROM local_goose_dialogue_thread_head WHERE alias=?",
+    (thread_alias,),
 ).fetchone()
 history = thread.execute(
     "SELECT revision,root_task_id,head_task_id "
-    "FROM local_goose_dialogue_thread_history WHERE alias='main' ORDER BY revision"
+    "FROM local_goose_dialogue_thread_history WHERE alias=? ORDER BY revision",
+    (thread_alias,),
 ).fetchall()
 thread.close()
 if version != 2:
@@ -669,11 +672,13 @@ events = feed.execute(
     "SELECT sequence,thread_revision,task_id,root_task_id,turn_index,request_id,"
     "speaker_kind,speaker_id,message_kind,result_sha256,response "
     "FROM local_goose_dialogue_completion_event "
-    "WHERE thread_alias='main' ORDER BY sequence"
+    "WHERE thread_alias=? ORDER BY sequence",
+    (thread_alias,),
 ).fetchall()
 materialization = feed.execute(
     "SELECT next_revision FROM local_goose_dialogue_materialization "
-    "WHERE thread_alias='main'"
+    "WHERE thread_alias=?",
+    (thread_alias,),
 ).fetchone()
 consumer_count = feed.execute(
     "SELECT COUNT(*) FROM local_goose_dialogue_consumer_cursor"
@@ -694,11 +699,11 @@ expected_events = [
     (2, observation_id, 3, observation_request, "system", "gaudere-runtime", "observation", result_hashes[observation_id]),
     (3, feedback_id, 4, feedback_request, "system", "sol", "feedback", result_hashes[feedback_id]),
 ]
-for event, expected_event in zip(events, expected_events):
+for expected_sequence, (event, expected_event) in enumerate(zip(events, expected_events), start=1):
     sequence, revision, task_id, event_root, turn_index, request_id, speaker_kind, speaker_id, message_kind, result_sha, response = event
     exp_revision, exp_task, exp_turn, exp_request, exp_speaker_kind, exp_speaker_id, exp_message_kind, exp_sha = expected_event
-    if sequence <= 0:
-        raise SystemExit("completion feed sequence is not positive")
+    if sequence != expected_sequence:
+        raise SystemExit(f"completion feed sequence differs: {sequence} != {expected_sequence}")
     if (
         revision != exp_revision
         or task_id != exp_task
