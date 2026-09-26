@@ -43,6 +43,8 @@ gaudere_agent_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialogueCompletionFeed.cpp \
+	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
 	LocalGooseDialogueThreadStore.hpp \
 	LocalActivityPulse.cpp \
@@ -111,6 +113,8 @@ gaudere_agent_SOURCES += \
 	LocalGooseDialogueV2.hpp \
 	LocalGooseDialogueV3.cpp \
 	LocalGooseDialogueV3.hpp \
+	LocalGooseDialogueV3Handler.cpp \
+	LocalGooseDialogueV3Handler.hpp \
 	LocalGooseDialogueV2Handler.cpp \
 	LocalGooseDialogueV2Handler.hpp \
 	LocalGooseDialogueHandler.cpp \
