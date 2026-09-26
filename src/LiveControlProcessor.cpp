@@ -4,6 +4,7 @@
 #include "LocalEchoHandler.hpp"
 #include "LocalGooseDialogue.hpp"
 #include "LocalGooseDialogueV2.hpp"
+#include "LocalGooseDialogueV3.hpp"
 #include "OpenAIBudget.hpp"
 #include "OpenAITask.hpp"
 #include "TaskExecutor.hpp"
@@ -235,7 +236,9 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
             || operation == LiveControlOperation::submit_reflection
             || operation == LiveControlOperation::submit_local_goose_dialogue
             || operation == LiveControlOperation::submit_local_goose_dialogue_v2_root
-            || operation == LiveControlOperation::submit_local_goose_dialogue_v2_next;
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v2_next
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v3_next;
         const bool wake_transition_may_have_committed =
             operation == LiveControlOperation::accept_wake
             || operation == LiveControlOperation::revoke_wake;
@@ -461,6 +464,58 @@ LiveControlReply LiveControlProcessor::process_one(
         description = "Local Goose dialogue v2 successor";
         break;
     }
+    case LiveControlOperation::submit_local_goose_dialogue_v3_root:
+        if (local_goose_dialogue_model_sha256_.empty()) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue capability is not enabled in this service\n"};
+        }
+        try {
+            task = make_local_goose_dialogue_v3_root_task(
+                command.id, command.speaker_kind, command.speaker_id,
+                command.message_kind, command.text,
+                local_goose_dialogue_model_sha256_);
+        } catch (const std::invalid_argument& error) {
+            return LiveControlReply{
+                false, 4,
+                std::string("gaudere-agent: Local Goose dialogue v3 request rejected: ")
+                    + error.what() + "\n"};
+        }
+        description = "Local Goose dialogue v3 root";
+        break;
+    case LiveControlOperation::submit_local_goose_dialogue_v3_next: {
+        if (local_goose_dialogue_model_sha256_.empty()) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: Local Goose dialogue capability is not enabled in this service\n"};
+        }
+        const auto predecessor = store_.find(command.predecessor_task_id);
+        if (!predecessor) {
+            return LiveControlReply{
+                false, 3,
+                "gaudere-agent: Local Goose dialogue v3 predecessor Task not found\n"};
+        }
+        try {
+            if (predecessor->kind == local_goose_dialogue_v2_task_kind) {
+                task = make_local_goose_dialogue_v3_bridge_from_v2_task(
+                    command.id, command.speaker_kind, command.speaker_id,
+                    command.message_kind, command.text,
+                    local_goose_dialogue_model_sha256_, *predecessor);
+            } else {
+                task = make_local_goose_dialogue_v3_successor_task(
+                    command.id, command.speaker_kind, command.speaker_id,
+                    command.message_kind, command.text,
+                    local_goose_dialogue_model_sha256_, *predecessor);
+            }
+        } catch (const std::invalid_argument& error) {
+            return LiveControlReply{
+                false, 4,
+                std::string("gaudere-agent: Local Goose dialogue v3 predecessor rejected: ")
+                    + error.what() + "\n"};
+        }
+        description = "Local Goose dialogue v3 successor";
+        break;
+    }
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
     case LiveControlOperation::accept_wake:
@@ -476,7 +531,9 @@ LiveControlReply LiveControlProcessor::process_one(
     const bool local_dialogue_submission =
         command.operation == LiveControlOperation::submit_local_goose_dialogue
         || command.operation == LiveControlOperation::submit_local_goose_dialogue_v2_root
-        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v2_next;
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v2_next
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
+        || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next;
     if (local_dialogue_submission) {
         const auto existing = store_.find_by_idempotency_key(task.idempotency_key);
         if (existing && !same_local_goose_dialogue_definition(*existing, task)) {
