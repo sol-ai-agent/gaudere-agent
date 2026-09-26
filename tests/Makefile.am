@@ -489,7 +489,7 @@ wake_status_test_SOURCES = \
 	../src/TaskExecutor.hpp \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
-wake_status_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+wake_status_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 work_controller_test_SOURCES = \
 	work_controller_test.cpp \
