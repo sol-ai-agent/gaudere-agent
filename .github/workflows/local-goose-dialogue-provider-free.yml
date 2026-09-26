@@ -142,6 +142,22 @@ jobs:
           ! grep -q 'local_goose_dialogue_v3' agent/src/LiveControl.cpp
           ! grep -q 'local_goose_dialogue_v3' agent/src/LiveControlProcessor.cpp
 
+          grep -q 'LocalGooseDialogueV3Handler' agent/src/LocalGooseDialogueV3Handler.hpp
+          grep -q 'legacy-v2-human' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'direct local multi-actor conversation' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'max_history_turns = 6' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'max_history_bytes = 40 \* 1024' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'max_prompt_bytes = 48 \* 1024' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'max_lineage_depth = 4096' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'tools_enabled = false' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'control_socket.clear' agent/src/LocalGooseDialogueV3Handler.cpp
+          grep -q 'governance_path.clear' agent/src/LocalGooseDialogueV3Handler.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LiveControl|systemctl|podman' \
+            agent/src/LocalGooseDialogueV3Handler.cpp agent/src/LocalGooseDialogueV3Handler.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialogueV3Handler.cpp
+          ! grep -q 'LocalGooseDialogueV3Handler' agent/src/main.cpp
+
           grep -q 'LocalGooseDialogueHandler' agent/src/local_goose_dialogue_proof_main.cpp
           grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
             agent/src/local_goose_dialogue_proof_main.cpp
@@ -268,6 +284,7 @@ jobs:
             local_goose_dialogue_test \
             local_goose_dialogue_v2_test \
             local_goose_dialogue_v3_test \
+            local_goose_dialogue_v3_handler_test \
             local_goose_dialogue_v2_handler_test \
             local_goose_dialogue_handler_test \
             live_control_test \
@@ -294,6 +311,7 @@ jobs:
           tests/local_goose_dialogue_test | grep -Fx 'local_goose_dialogue_test: PASS'
           tests/local_goose_dialogue_v2_test | grep -Fx 'local_goose_dialogue_v2_test: PASS'
           tests/local_goose_dialogue_v3_test | grep -Fx 'local_goose_dialogue_v3_test: PASS'
+          tests/local_goose_dialogue_v3_handler_test | grep -Fx 'local_goose_dialogue_v3_handler_test: PASS'
           tests/local_goose_dialogue_v2_handler_test | grep -Fx 'local_goose_dialogue_v2_handler_test: PASS'
           tests/local_goose_dialogue_handler_test | grep -Fx 'local_goose_dialogue_handler_test: PASS'
           tests/live_control_test
