@@ -5,6 +5,7 @@
 #include "LocalGooseDialogueV2.hpp"
 #include "LocalGooseDialogueV3.hpp"
 #include "OpenAIActivation.hpp"
+#include "../src/Sha256.hpp"
 
 #include <gaudere/persistence/sqlite/BudgetStore.hpp>
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 
 namespace {
@@ -74,6 +76,7 @@ struct Harness {
     gaudere::work::Runtime runtime;
     gaudere::scheduling::wake::WakeIntentRuntime wake_runtime;
     ExplicitWake explicit_wake;
+    std::unique_ptr<LocalGooseDialogueThreadStore> dialogue_thread_store;
     LiveControlProcessor processor;
     LiveControlMailbox mailbox;
 };
@@ -528,6 +531,159 @@ void test_local_goose_dialogue_v3_submission_preserves_actor_and_bridge()
            "V3 request id conflicts when actor/message definition changes");
 }
 
+void test_preferred_dialogue_thread_serializes_v2_to_v3()
+{
+    TemporaryDatabase database;
+    TemporaryDatabase thread_database;
+    const std::string model_sha(64, 'a');
+    Harness harness(
+        database.path, false, false, model_sha, &thread_database.path);
+
+    const auto legacy_root = succeeded_v2_root(
+        "preferred-v2-root", "Racine.", model_sha, "Réponse racine.");
+    harness.store.save(legacy_root);
+
+    auto bind = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::bind_local_goose_dialogue_thread_head,
+            "main", {}, legacy_root.id});
+    const auto bind_processed = harness.processor.process(harness.mailbox);
+    const auto bind_reply = bind->wait();
+    expect(!bind_processed.work_may_be_pending
+               && bind_reply.ok
+               && bind_reply.body.find("alias=\"main\"") != std::string::npos
+               && bind_reply.body.find("revision=0") != std::string::npos
+               && bind_reply.body.find(legacy_root.id) != std::string::npos,
+           "preferred thread bind seeds canonical successful V2 head");
+
+    auto inspect = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::inspect_local_goose_dialogue_thread_head,
+            "main"});
+    const auto inspect_processed = harness.processor.process(harness.mailbox);
+    const auto inspect_reply = inspect->wait();
+    expect(!inspect_processed.work_may_be_pending
+               && inspect_reply.ok
+               && inspect_reply.body.find("revision=0") != std::string::npos,
+           "preferred thread head inspection is observational");
+
+    LiveControlCommand first_command{
+        LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next,
+        "preferred-system-001",
+        "Observation système.",
+        {},
+        "system",
+        "sol",
+        "observation",
+        "main",
+        std::uint64_t{0}};
+    const auto expected_bridge =
+        make_local_goose_dialogue_v3_bridge_from_v2_task(
+            first_command.id,
+            first_command.speaker_kind,
+            first_command.speaker_id,
+            first_command.message_kind,
+            first_command.text,
+            model_sha,
+            legacy_root);
+
+    auto first = harness.mailbox.submit(first_command);
+    const auto first_processed = harness.processor.process(harness.mailbox);
+    const auto first_reply = first->wait();
+    const auto first_task = harness.store.find(expected_bridge.id);
+    const auto head1 = harness.dialogue_thread_store->find("main");
+
+    expect(first_processed.work_may_be_pending
+               && first_reply.ok
+               && first_task
+               && head1
+               && head1->revision == 1
+               && head1->root_task_id == legacy_root.id
+               && head1->head_task_id == expected_bridge.id,
+           "preferred system send persists V3 bridge then advances head by CAS");
+
+    auto retry = harness.mailbox.submit(first_command);
+    const auto retry_processed = harness.processor.process(harness.mailbox);
+    const auto retry_reply = retry->wait();
+    const auto retry_head = harness.dialogue_thread_store->find("main");
+    expect(retry_processed.work_may_be_pending
+               && retry_reply.ok
+               && retry_head
+               && retry_head->revision == 1
+               && retry_head->head_task_id == expected_bridge.id,
+           "preferred send retry with prior expected revision is idempotent");
+
+    auto completed_bridge = expected_bridge;
+    const auto bridge_inspection =
+        inspect_local_goose_dialogue_v3_task(completed_bridge);
+    completed_bridge.status = gaudere::work::TaskStatus::succeeded;
+    completed_bridge.attempts_started = 1;
+    completed_bridge.result = gaudere::work::TaskResult{
+        local_goose_dialogue_v3_response_content_type,
+        make_local_goose_dialogue_v3_response(
+            bridge_inspection, "Observation reçue."),
+        {},
+        {}};
+    harness.store.save(completed_bridge);
+
+    LiveControlCommand second_command{
+        LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next,
+        "preferred-human-002",
+        "Merci, poursuivons.",
+        {},
+        "human",
+        "bertrand",
+        "dialogue",
+        "main",
+        std::uint64_t{1}};
+    const auto expected_second =
+        make_local_goose_dialogue_v3_successor_task(
+            second_command.id,
+            second_command.speaker_kind,
+            second_command.speaker_id,
+            second_command.message_kind,
+            second_command.text,
+            model_sha,
+            completed_bridge);
+
+    auto second = harness.mailbox.submit(second_command);
+    const auto second_processed = harness.processor.process(harness.mailbox);
+    const auto second_reply = second->wait();
+    const auto second_task = harness.store.find(expected_second.id);
+    const auto head2 = harness.dialogue_thread_store->find("main");
+
+    expect(second_processed.work_may_be_pending
+               && second_reply.ok
+               && second_task
+               && head2
+               && head2->revision == 2
+               && head2->head_task_id == expected_second.id,
+           "preferred human send advances exactly from successful V3 head");
+
+    LiveControlCommand stale_command{
+        LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next,
+        "preferred-stale-003",
+        "Je pars d'une vieille révision.",
+        {},
+        "system",
+        "sol",
+        "feedback",
+        "main",
+        std::uint64_t{0}};
+    auto stale = harness.mailbox.submit(stale_command);
+    const auto stale_processed = harness.processor.process(harness.mailbox);
+    const auto stale_reply = stale->wait();
+    expect(!stale_processed.work_may_be_pending
+               && !stale_reply.ok
+               && stale_reply.code == 4
+               && stale_reply.body.find("revision conflict")
+                    != std::string::npos
+               && !harness.store.find_by_idempotency_key(
+                    std::string{local_goose_dialogue_v3_task_prefix}
+                    + "request-id:" + sha256_hex(stale_command.id)),
+           "stale preferred send fails before creating a dialogue Task");
+}
+
 void test_inspect_reads_durable_task_without_submission()
 {
     TemporaryDatabase database;
@@ -785,6 +941,7 @@ int main()
     test_local_goose_dialogue_submission_is_durable_and_idempotent();
     test_local_goose_dialogue_v2_submission_is_durable_and_linked();
     test_local_goose_dialogue_v3_submission_preserves_actor_and_bridge();
+    test_preferred_dialogue_thread_serializes_v2_to_v3();
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
