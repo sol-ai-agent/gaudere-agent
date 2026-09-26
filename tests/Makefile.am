@@ -169,7 +169,7 @@ live_control_processor_test_SOURCES = \
 	../src/TaskExecutor.hpp \
 	../src/TaskReport.cpp \
 	../src/TaskReport.hpp
-live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) $(SQLITE_LIBS)
+live_control_processor_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 local_goose_dialogue_test_SOURCES = \
 	local_goose_dialogue_test.cpp \
