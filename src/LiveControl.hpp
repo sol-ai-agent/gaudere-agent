@@ -23,6 +23,8 @@ enum class LiveControlOperation {
     submit_local_goose_dialogue,
     submit_local_goose_dialogue_v2_root,
     submit_local_goose_dialogue_v2_next,
+    submit_local_goose_dialogue_v3_root,
+    submit_local_goose_dialogue_v3_next,
     inspect_task,
     inspect_budget,
     accept_wake,
@@ -38,11 +40,17 @@ struct LiveControlCommand {
     LiveControlCommand(LiveControlOperation operation_value,
                        std::string id_value,
                        std::string text_value = {},
-                       std::string predecessor_task_id_value = {})
+                       std::string predecessor_task_id_value = {},
+                       std::string speaker_kind_value = {},
+                       std::string speaker_id_value = {},
+                       std::string message_kind_value = {})
         : operation(operation_value),
           id(std::move(id_value)),
           text(std::move(text_value)),
-          predecessor_task_id(std::move(predecessor_task_id_value))
+          predecessor_task_id(std::move(predecessor_task_id_value)),
+          speaker_kind(std::move(speaker_kind_value)),
+          speaker_id(std::move(speaker_id_value)),
+          message_kind(std::move(message_kind_value))
     {
     }
 
@@ -50,6 +58,9 @@ struct LiveControlCommand {
     std::string id;
     std::string text;
     std::string predecessor_task_id;
+    std::string speaker_kind;
+    std::string speaker_id;
+    std::string message_kind;
 };
 
 struct LiveControlReply {
