@@ -339,6 +339,30 @@ jobs:
           ! grep -Eq 'podman.*exec[[:space:]]+gaudere-agent' \
             agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
 
+          sh -n agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'AUTHORIZED_FIRST_PRODUCTION_DIALOGUE_FEED_ACK' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'c5a4d33177d1aaf915d82b98dc292fed91847bf88206cc87ffb00c00a39ff418' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'dialogue-feed-next "$consumer_id"' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'dialogue-feed-ack "$consumer_id" 1' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'ACKED_SEQUENCE=1' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'NEXT_PENDING_SEQUENCE=2' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'DIALOGUE_COMPLETION_CONSUMERS=1' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -q 'FIRST_PRODUCTION_DIALOGUE_FEED_ACK=PASS' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          grep -Fq 'tar -xzf "$backup_archive" -C "$state_directory"' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          ! grep -Eq 'local-thread-v3-(start|next|bind|send)' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+          ! grep -Eq 'stimulate-local-goose-cycle| openai ' \
+            agent/scripts/first-production-dialogue-feed-ack.sh
+
       - name: Prove first production dialogue is separately authorized
         run: |
           set -eu
