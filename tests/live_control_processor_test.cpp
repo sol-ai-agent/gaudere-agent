@@ -55,7 +55,8 @@ struct Harness {
             const bool openai_enabled,
             const bool wake_enabled = false,
             std::string local_goose_dialogue_model_sha256 = {},
-            const std::filesystem::path* dialogue_thread_path = nullptr)
+            const std::filesystem::path* dialogue_thread_path = nullptr,
+            const std::filesystem::path* dialogue_completion_path = nullptr)
         : store(path.string()),
           budget_store(path.string()),
           wake_store(path.string()),
@@ -68,11 +69,17 @@ struct Harness {
                   ? std::make_unique<LocalGooseDialogueThreadStore>(
                         dialogue_thread_path->string())
                   : nullptr),
+          dialogue_completion_store(
+              dialogue_completion_path
+                  ? std::make_unique<LocalGooseDialogueCompletionFeedStore>(
+                        dialogue_completion_path->string())
+                  : nullptr),
           processor(runtime, store, budget_store,
                     OpenAIActivation::bootstrap_budget_policy(), openai_enabled,
                     wake_enabled ? &explicit_wake : nullptr, {}, {},
                     std::move(local_goose_dialogue_model_sha256),
-                    dialogue_thread_store.get())
+                    dialogue_thread_store.get(),
+                    dialogue_completion_store.get())
     {
         runtime.recover();
     }
