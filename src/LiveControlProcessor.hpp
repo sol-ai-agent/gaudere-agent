@@ -3,6 +3,7 @@
 
 #include "ExplicitWake.hpp"
 #include "LiveControl.hpp"
+#include "LocalGooseDialogueCompletionFeed.hpp"
 #include "LocalGooseDialogueThreadStore.hpp"
 
 #include <gaudere/budget/Store.hpp>
@@ -47,7 +48,8 @@ public:
                          SchedulerNext scheduler_next = {},
                          LocalGooseStimulus local_goose_stimulus = {},
                          std::string local_goose_dialogue_model_sha256 = {},
-                         LocalGooseDialogueThreadStore* dialogue_thread_store = nullptr);
+                         LocalGooseDialogueThreadStore* dialogue_thread_store = nullptr,
+                         LocalGooseDialogueCompletionFeedStore* dialogue_completion_store = nullptr);
 
     [[nodiscard]] LiveControlProcessResult process(LiveControlMailbox& mailbox);
 
@@ -68,6 +70,7 @@ private:
     LocalGooseStimulus local_goose_stimulus_;
     std::string local_goose_dialogue_model_sha256_;
     LocalGooseDialogueThreadStore* dialogue_thread_store_ = nullptr;
+    LocalGooseDialogueCompletionFeedStore* dialogue_completion_store_ = nullptr;
 };
 
 } // namespace gaudere_agent
