@@ -30,6 +30,8 @@ enum class LiveControlOperation {
     bind_local_goose_dialogue_thread_head,
     inspect_local_goose_dialogue_thread_head,
     submit_local_goose_dialogue_v3_preferred_next,
+    inspect_local_goose_dialogue_completion,
+    acknowledge_local_goose_dialogue_completion,
     inspect_task,
     inspect_budget,
     accept_wake,
