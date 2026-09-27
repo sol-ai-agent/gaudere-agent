@@ -366,6 +366,40 @@ jobs:
           grep -q 'FIRST_PRODUCTION_LOCAL_GOOSE_DIALOGUE_V2_SUCCESSOR=PASS' \
             agent/scripts/first-production-local-goose-dialogue-v2-successor.sh
 
+          sh -n agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'AUTHORIZED_FIRST_PRODUCTION_DIALOGUE_V3_SYSTEM' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q '58de3d5fc9fa5e20abe6a50018ba0a11804a3299f3deb6033487ed0c5c9eae9c' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'cognition.local-goose-dialogue.v2:82164bd3699f19c5ff77046e6c60299d898ec225c5174b30c3d653aaa5510b19' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'cognition.local-goose-dialogue.v2:3723223592d31a36116fd30da83a49c23519347313e1fb1d90127dbd4d0da11d' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q '0bbd1857634f2c6502d8700c3e7819f48bce071d7c1c4267146d1308469e88a0' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'first-production-dialogue-v3-system-observation' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'speaker_kind="system"' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'speaker_id="sol"' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'message_kind="observation"' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'local-thread-v3-bind' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'local-thread-v3-send' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          ! grep -q 'local-thread-v3-start' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          ! grep -q 'local-thread-v3-next' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'DIALOGUE_COMPLETION_CONSUMERS=0' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'provider.call:openai.responses' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+          grep -q 'FIRST_PRODUCTION_LOCAL_GOOSE_DIALOGUE_V3_SYSTEM=PASS' \
+            agent/scripts/first-production-local-goose-dialogue-v3-system.sh
+
       - name: Build and run dialogue tests
         run: |
           set -eu
