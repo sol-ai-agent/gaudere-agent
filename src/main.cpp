@@ -1188,7 +1188,8 @@ int main(int argc, char* argv[])
                     local_goose_requested(options)
                         ? options.local_goose_model_sha256
                         : std::string{},
-                    local_goose_dialogue_thread_store.get());
+                    local_goose_dialogue_thread_store.get(),
+                    local_goose_dialogue_completion_store.get());
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.interrupt(); });
