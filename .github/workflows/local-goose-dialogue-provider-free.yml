@@ -196,6 +196,15 @@ jobs:
           ! grep -q 'next_for_consumer' agent/src/main.cpp
           ! grep -q 'acknowledge' agent/src/main.cpp
           grep -q 'automatic_ack=false' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_completion_store.get()' agent/src/main.cpp
+          grep -q 'dialogue-feed-next' agent/src/control_main.cpp
+          grep -q 'dialogue-feed-ack' agent/src/control_main.cpp
+          grep -q 'inspect_local_goose_dialogue_completion' agent/src/LiveControl.cpp
+          grep -q 'acknowledge_local_goose_dialogue_completion' agent/src/LiveControl.cpp
+          grep -q 'next_for_consumer' agent/src/LiveControlProcessor.cpp
+          grep -q 'dialogue_completion_store_->acknowledge' agent/src/LiveControlProcessor.cpp
+          grep -q 'completion acknowledgement cannot skip first event' agent/tests/live_control_processor_test.cpp
+          grep -q 'pending=false' agent/tests/live_control_processor_test.cpp
 
           grep -q 'LocalGooseDialogueV3Handler' agent/src/local_goose_dialogue_v3_proof_main.cpp
           grep -q 'LocalGooseDialogueCompletionFeedService' agent/src/local_goose_dialogue_v3_proof_main.cpp

@@ -635,6 +635,116 @@ void test_preferred_dialogue_send_requires_revision_before_connect()
            "preferred dialogue revision rejection is explicit");
 }
 
+void test_dialogue_completion_feed_operations_round_trip()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "completion feed live control server starts");
+
+    std::ostringstream next_output;
+    std::ostringstream next_error;
+    int next_result = -1;
+    std::thread next_client([&] {
+        next_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::inspect_local_goose_dialogue_completion,
+                "sol"},
+            next_output, next_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "completion feed next wakes worker");
+    }
+    auto pending = mailbox.take_all();
+    expect(pending.size() == 1, "completion feed next crosses mailbox");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::inspect_local_goose_dialogue_completion
+                   && command.id == "sol"
+                   && command.text.empty(),
+               "completion feed next preserves consumer id");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "pending=true\nsequence=1\n"});
+    }
+    next_client.join();
+    expect(next_result == 0
+               && next_output.str() == "pending=true\nsequence=1\n"
+               && next_error.str().empty(),
+           "completion feed next receives worker reply");
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = false;
+    }
+    std::ostringstream ack_output;
+    std::ostringstream ack_error;
+    int ack_result = -1;
+    std::thread ack_client([&] {
+        ack_result = run_live_control_client(
+            socket_path,
+            LiveControlCommand{
+                LiveControlOperation::acknowledge_local_goose_dialogue_completion,
+                "sol", "1"},
+            ack_output, ack_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "completion feed ack wakes worker");
+    }
+    pending = mailbox.take_all();
+    expect(pending.size() == 1, "completion feed ack crosses mailbox");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::acknowledge_local_goose_dialogue_completion
+                   && command.id == "sol"
+                   && command.text == "1",
+               "completion feed ack preserves consumer and sequence");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "result=accepted\nlast_sequence=1\n"});
+    }
+    ack_client.join();
+    expect(ack_result == 0
+               && ack_output.str() == "result=accepted\nlast_sequence=1\n"
+               && ack_error.str().empty(),
+           "completion feed ack receives worker reply");
+
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
+void test_dialogue_completion_ack_rejects_invalid_sequence_before_connect()
+{
+    for (const std::string sequence : {"0", "01", "-1", "abc"}) {
+        std::ostringstream output;
+        std::ostringstream error;
+        const int result = run_live_control_client(
+            "/tmp/does-not-matter.sock",
+            LiveControlCommand{
+                LiveControlOperation::acknowledge_local_goose_dialogue_completion,
+                "sol", sequence},
+            output, error);
+        expect(result != 0,
+               "completion feed ack rejects invalid sequence before connect");
+        expect(error.str().find("positive sequence") != std::string::npos,
+               "completion feed invalid sequence rejection is explicit");
+    }
+}
+
 void test_local_goose_stimulus_operation_round_trip()
 {
     const auto directory = temporary_directory();
@@ -778,6 +888,8 @@ int main()
     test_local_goose_dialogue_v3_rejects_invalid_provenance_before_connect();
     test_preferred_dialogue_thread_operations_round_trip();
     test_preferred_dialogue_send_requires_revision_before_connect();
+    test_dialogue_completion_feed_operations_round_trip();
+    test_dialogue_completion_ack_rejects_invalid_sequence_before_connect();
     test_local_goose_stimulus_operation_round_trip();
     test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();

@@ -27,7 +27,7 @@ void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | local-thread-v3-start REQUEST_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-next REQUEST_ID PREDECESSOR_TASK_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-bind THREAD_ALIAS HEAD_TASK_ID | local-thread-v3-head THREAD_ALIAS | local-thread-v3-send REQUEST_ID THREAD_ALIAS EXPECTED_REVISION SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | task ID | "
+        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | local-thread-v3-start REQUEST_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-next REQUEST_ID PREDECESSOR_TASK_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-bind THREAD_ALIAS HEAD_TASK_ID | local-thread-v3-head THREAD_ALIAS | local-thread-v3-send REQUEST_ID THREAD_ALIAS EXPECTED_REVISION SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | dialogue-feed-next CONSUMER_ID | dialogue-feed-ack CONSUMER_ID SEQUENCE | task ID | "
         << "budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | "
         << "wake WAKE_ID | wake-status | stimulate-local-goose-cycle REQUEST_ID]\n";
 }
@@ -109,6 +109,15 @@ int main(int argc, char* argv[])
             command.speaker_id = argv[8];
             command.message_kind = argv[9];
             command.text = argv[10];
+        } else if (operation == "dialogue-feed-next" && argc == 5) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::inspect_local_goose_dialogue_completion;
+            command.id = argv[4];
+        } else if (operation == "dialogue-feed-ack" && argc == 6) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::acknowledge_local_goose_dialogue_completion;
+            command.id = argv[4];
+            command.text = argv[5];
         } else if (operation == "task" && argc == 5) {
             command.operation = gaudere_agent::LiveControlOperation::inspect_task;
             command.id = argv[4];

@@ -55,7 +55,8 @@ struct Harness {
             const bool openai_enabled,
             const bool wake_enabled = false,
             std::string local_goose_dialogue_model_sha256 = {},
-            const std::filesystem::path* dialogue_thread_path = nullptr)
+            const std::filesystem::path* dialogue_thread_path = nullptr,
+            const std::filesystem::path* dialogue_completion_path = nullptr)
         : store(path.string()),
           budget_store(path.string()),
           wake_store(path.string()),
@@ -68,11 +69,17 @@ struct Harness {
                   ? std::make_unique<LocalGooseDialogueThreadStore>(
                         dialogue_thread_path->string())
                   : nullptr),
+          dialogue_completion_store(
+              dialogue_completion_path
+                  ? std::make_unique<LocalGooseDialogueCompletionFeedStore>(
+                        dialogue_completion_path->string())
+                  : nullptr),
           processor(runtime, store, budget_store,
                     OpenAIActivation::bootstrap_budget_policy(), openai_enabled,
                     wake_enabled ? &explicit_wake : nullptr, {}, {},
                     std::move(local_goose_dialogue_model_sha256),
-                    dialogue_thread_store.get())
+                    dialogue_thread_store.get(),
+                    dialogue_completion_store.get())
     {
         runtime.recover();
     }
@@ -84,6 +91,8 @@ struct Harness {
     gaudere::scheduling::wake::WakeIntentRuntime wake_runtime;
     ExplicitWake explicit_wake;
     std::unique_ptr<LocalGooseDialogueThreadStore> dialogue_thread_store;
+    std::unique_ptr<LocalGooseDialogueCompletionFeedStore>
+        dialogue_completion_store;
     LiveControlProcessor processor;
     LiveControlMailbox mailbox;
 };
@@ -691,6 +700,111 @@ void test_preferred_dialogue_thread_serializes_v2_to_v3()
            "stale preferred send fails before creating a dialogue Task");
 }
 
+void test_dialogue_completion_feed_is_bounded_and_sequential()
+{
+    TemporaryDatabase database;
+    TemporaryDatabase completion_database;
+    Harness harness(
+        database.path, false, false, {}, nullptr, &completion_database.path);
+
+    const std::string model_sha(64, 'a');
+    const auto first_task = succeeded_v2_root(
+        "feed-root-001", "Premier.", model_sha, "Réponse un.");
+    const auto second_task = succeeded_v2_root(
+        "feed-root-002", "Second.", model_sha, "Réponse deux.");
+    const auto first_event = make_local_goose_dialogue_completion_event(
+        "main", 0, first_task, 1000);
+    const auto second_event = make_local_goose_dialogue_completion_event(
+        "main", 1, second_task, 2000);
+    expect(
+        harness.dialogue_completion_store->append_for_revision(first_event).result
+            == LocalGooseDialogueCompletionFeedResult::accepted
+        && harness.dialogue_completion_store->append_for_revision(second_event).result
+            == LocalGooseDialogueCompletionFeedResult::accepted,
+        "completion feed fixtures append in revision order");
+
+    auto next1 = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::inspect_local_goose_dialogue_completion,
+            "sol"});
+    const auto next1_processed = harness.processor.process(harness.mailbox);
+    const auto next1_reply = next1->wait();
+    expect(next1_processed.processed == 1
+               && !next1_processed.work_may_be_pending
+               && next1_reply.ok
+               && next1_reply.body.find("pending=true") != std::string::npos
+               && next1_reply.body.find("sequence=1") != std::string::npos
+               && next1_reply.body.find(first_event.task_id) != std::string::npos
+               && next1_reply.body.find("Réponse un.") != std::string::npos,
+           "completion next returns first unacknowledged event without dispatch");
+
+    auto skip = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::acknowledge_local_goose_dialogue_completion,
+            "sol", "2"});
+    const auto skip_processed = harness.processor.process(harness.mailbox);
+    const auto skip_reply = skip->wait();
+    expect(!skip_processed.work_may_be_pending
+               && !skip_reply.ok && skip_reply.code == 4
+               && skip_reply.body.find("would skip") != std::string::npos,
+           "completion acknowledgement cannot skip first event");
+
+    auto ack1 = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::acknowledge_local_goose_dialogue_completion,
+            "sol", "1"});
+    const auto ack1_processed = harness.processor.process(harness.mailbox);
+    const auto ack1_reply = ack1->wait();
+    expect(!ack1_processed.work_may_be_pending
+               && ack1_reply.ok
+               && ack1_reply.body.find("result=accepted") != std::string::npos
+               && ack1_reply.body.find("last_sequence=1") != std::string::npos,
+           "completion acknowledgement advances exactly one event");
+
+    auto duplicate = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::acknowledge_local_goose_dialogue_completion,
+            "sol", "1"});
+    static_cast<void>(harness.processor.process(harness.mailbox));
+    const auto duplicate_reply = duplicate->wait();
+    expect(duplicate_reply.ok
+               && duplicate_reply.body.find("result=duplicate")
+                    != std::string::npos,
+           "completion acknowledgement retry is idempotent");
+
+    auto next2 = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::inspect_local_goose_dialogue_completion,
+            "sol"});
+    static_cast<void>(harness.processor.process(harness.mailbox));
+    const auto next2_reply = next2->wait();
+    expect(next2_reply.ok
+               && next2_reply.body.find("sequence=2") != std::string::npos
+               && next2_reply.body.find(second_event.task_id)
+                    != std::string::npos
+               && next2_reply.body.find("Réponse deux.") != std::string::npos,
+           "completion next advances only after acknowledgement");
+
+    auto ack2 = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::acknowledge_local_goose_dialogue_completion,
+            "sol", "2"});
+    static_cast<void>(harness.processor.process(harness.mailbox));
+    expect(ack2->wait().ok,
+           "completion second event acknowledgement succeeds");
+
+    auto empty = harness.mailbox.submit(
+        LiveControlCommand{
+            LiveControlOperation::inspect_local_goose_dialogue_completion,
+            "sol"});
+    const auto empty_processed = harness.processor.process(harness.mailbox);
+    const auto empty_reply = empty->wait();
+    expect(!empty_processed.work_may_be_pending
+               && empty_reply.ok
+               && empty_reply.body.find("pending=false") != std::string::npos,
+           "completion next reports caught-up consumer without side effects");
+}
+
 void test_inspect_reads_durable_task_without_submission()
 {
     TemporaryDatabase database;
@@ -949,6 +1063,7 @@ int main()
     test_local_goose_dialogue_v2_submission_is_durable_and_linked();
     test_local_goose_dialogue_v3_submission_preserves_actor_and_bridge();
     test_preferred_dialogue_thread_serializes_v2_to_v3();
+    test_dialogue_completion_feed_is_bounded_and_sequential();
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
