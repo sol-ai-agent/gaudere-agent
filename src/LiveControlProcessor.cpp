@@ -10,6 +10,8 @@
 #include "TaskExecutor.hpp"
 #include "TaskReport.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -230,6 +232,88 @@ LiveControlReply thread_store_disabled()
         "gaudere-agent: preferred dialogue thread capability is not enabled in this service\n"};
 }
 
+LiveControlReply completion_feed_disabled()
+{
+    return LiveControlReply{
+        false, 4,
+        "gaudere-agent: dialogue completion feed capability is not enabled in this service\n"};
+}
+
+std::optional<std::uint64_t> parse_completion_sequence(
+    const std::string& value) noexcept
+{
+    if (value.empty() || value.size() > 19 || value.front() == '0') {
+        return std::nullopt;
+    }
+    std::uint64_t out = 0;
+    for (const unsigned char c : value) {
+        if (c < '0' || c > '9') return std::nullopt;
+        const auto digit = static_cast<std::uint64_t>(c - '0');
+        if (out > (static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max()) - digit) / 10) {
+            return std::nullopt;
+        }
+        out = out * 10 + digit;
+    }
+    if (out == 0) return std::nullopt;
+    return out;
+}
+
+std::string completion_event_report(
+    const std::string& consumer_id,
+    const LocalGooseDialogueCompletionEvent& event)
+{
+    std::ostringstream output;
+    output
+        << "consumer_id=\"" << consumer_id << "\"\n"
+        << "pending=true\n"
+        << "sequence=" << event.sequence << '\n'
+        << "event_id=\"" << event.event_id << "\"\n"
+        << "thread_alias=\"" << event.thread_alias << "\"\n"
+        << "thread_revision=" << event.thread_revision << '\n'
+        << "task_id=\"" << event.task_id << "\"\n"
+        << "root_task_id=\"" << event.root_task_id << "\"\n"
+        << "turn_index=" << event.turn_index << '\n'
+        << "request_id=\"" << event.request_id << "\"\n"
+        << "speaker_kind=\"" << event.speaker_kind << "\"\n"
+        << "speaker_id=\"" << event.speaker_id << "\"\n"
+        << "message_kind=\"" << event.message_kind << "\"\n"
+        << "result_sha256=" << event.result_sha256 << '\n'
+        << "response_json=" << nlohmann::json(event.response).dump() << '\n'
+        << "observed_completed_at_ms=" << event.observed_completed_at_ms << '\n';
+    return output.str();
+}
+
+std::string completion_ack_report(
+    const std::string& consumer_id,
+    const LocalGooseDialogueCompletionCursorWrite& write)
+{
+    const char* result = "unknown";
+    switch (write.result) {
+    case LocalGooseDialogueCompletionFeedResult::accepted:
+        result = "accepted";
+        break;
+    case LocalGooseDialogueCompletionFeedResult::duplicate:
+        result = "duplicate";
+        break;
+    case LocalGooseDialogueCompletionFeedResult::conflict:
+        result = "conflict";
+        break;
+    case LocalGooseDialogueCompletionFeedResult::invalid:
+        result = "invalid";
+        break;
+    case LocalGooseDialogueCompletionFeedResult::unavailable:
+        result = "unavailable";
+        break;
+    }
+    std::ostringstream output;
+    output
+        << "consumer_id=\"" << consumer_id << "\"\n"
+        << "result=" << result << '\n'
+        << "last_sequence=" << write.last_sequence << '\n'
+        << "detail_json=" << nlohmann::json(write.detail).dump() << '\n';
+    return output.str();
+}
 
 } // namespace
 
@@ -242,7 +326,8 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            SchedulerNext scheduler_next,
                                            LocalGooseStimulus local_goose_stimulus,
                                            std::string local_goose_dialogue_model_sha256,
-                                           LocalGooseDialogueThreadStore* dialogue_thread_store)
+                                           LocalGooseDialogueThreadStore* dialogue_thread_store,
+                                           LocalGooseDialogueCompletionFeedStore* dialogue_completion_store)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
@@ -253,7 +338,8 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
       local_goose_stimulus_(std::move(local_goose_stimulus)),
       local_goose_dialogue_model_sha256_(
           std::move(local_goose_dialogue_model_sha256)),
-      dialogue_thread_store_(dialogue_thread_store)
+      dialogue_thread_store_(dialogue_thread_store),
+      dialogue_completion_store_(dialogue_completion_store)
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -327,6 +413,44 @@ LiveControlReply LiveControlProcessor::process_one(
     bool& wake_deadline_may_have_changed,
     bool& local_goose_cycle_may_have_changed)
 {
+    if (command.operation
+        == LiveControlOperation::inspect_local_goose_dialogue_completion) {
+        if (!dialogue_completion_store_) return completion_feed_disabled();
+        const auto event =
+            dialogue_completion_store_->next_for_consumer(command.id);
+        if (!event) {
+            return LiveControlReply{
+                true, 0,
+                "consumer_id=\"" + command.id + "\"\npending=false\n"};
+        }
+        return LiveControlReply{
+            true, 0, completion_event_report(command.id, *event)};
+    }
+
+    if (command.operation
+        == LiveControlOperation::acknowledge_local_goose_dialogue_completion) {
+        if (!dialogue_completion_store_) return completion_feed_disabled();
+        const auto sequence = parse_completion_sequence(command.text);
+        if (!sequence) {
+            return LiveControlReply{
+                false, 4,
+                "gaudere-agent: dialogue completion acknowledgement sequence is invalid\n"};
+        }
+        const auto write =
+            dialogue_completion_store_->acknowledge(command.id, *sequence);
+        switch (write.result) {
+        case LocalGooseDialogueCompletionFeedResult::accepted:
+        case LocalGooseDialogueCompletionFeedResult::duplicate:
+            return LiveControlReply{
+                true, 0, completion_ack_report(command.id, write)};
+        case LocalGooseDialogueCompletionFeedResult::conflict:
+        case LocalGooseDialogueCompletionFeedResult::invalid:
+        case LocalGooseDialogueCompletionFeedResult::unavailable:
+            return LiveControlReply{
+                false, 4, completion_ack_report(command.id, write)};
+        }
+    }
+
     if (command.operation
         == LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
         if (!dialogue_thread_store_) return thread_store_disabled();
@@ -747,6 +871,8 @@ LiveControlReply LiveControlProcessor::process_one(
     case LiveControlOperation::bind_local_goose_dialogue_thread_head:
     case LiveControlOperation::inspect_local_goose_dialogue_thread_head:
     case LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next:
+    case LiveControlOperation::inspect_local_goose_dialogue_completion:
+    case LiveControlOperation::acknowledge_local_goose_dialogue_completion:
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
     case LiveControlOperation::accept_wake:
