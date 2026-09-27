@@ -393,6 +393,8 @@ gaudere_local_goose_cycle_runtime_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialogueCompletionFeed.cpp \
+	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
 	LocalGooseDialogueThreadStore.hpp \
 	LocalContinuityObservation.cpp \
@@ -532,6 +534,8 @@ gaudere_local_goose_dialogue_proof_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialogueCompletionFeed.cpp \
+	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
 	LocalGooseDialogueThreadStore.hpp \
 	LocalGooseDialogue.cpp \
@@ -581,6 +585,8 @@ gaudere_local_goose_dialogue_v2_proof_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialogueCompletionFeed.cpp \
+	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
 	LocalGooseDialogueThreadStore.hpp \
 	LocalGooseDialogue.cpp \
