@@ -203,7 +203,7 @@ jobs:
           grep -q 'acknowledge_local_goose_dialogue_completion' agent/src/LiveControl.cpp
           grep -q 'next_for_consumer' agent/src/LiveControlProcessor.cpp
           grep -q 'dialogue_completion_store_->acknowledge' agent/src/LiveControlProcessor.cpp
-          grep -q 'would skip first event' agent/tests/live_control_processor_test.cpp
+          grep -q 'completion acknowledgement cannot skip first event' agent/tests/live_control_processor_test.cpp
           grep -q 'pending=false' agent/tests/live_control_processor_test.cpp
 
           grep -q 'LocalGooseDialogueV3Handler' agent/src/local_goose_dialogue_v3_proof_main.cpp
