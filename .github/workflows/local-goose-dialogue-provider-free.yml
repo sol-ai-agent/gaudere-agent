@@ -308,6 +308,37 @@ jobs:
           ! grep -Eq 'gaudere-control[^\n]*local-thread-v3-(start|next|bind|send)' \
             agent/scripts/deploy-local-goose-dialogue-v3-production.sh
 
+          sh -n agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'AUTHORIZED_LOCAL_GOOSE_DIALOGUE_FEED_CONSUMER_CODE_DEPLOY' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q '58de3d5fc9fa5e20abe6a50018ba0a11804a3299f3deb6033487ed0c5c9eae9c' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'DIALOGUE_COMPLETION_CONSUMERS' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'dialogue-feed-next' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'dialogue-feed-ack' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -Fq 'tar -xzf "$backup_archive" -C "$state_directory"' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'state_mutated=1' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'dialogue feed consumer deploy attempted a mutation beyond Image=' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'automatic_submission=false automatic_ack=false' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_FEED_CONSUMER_CODE_DEPLOY=PASS' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'PROVIDER_TOTAL' agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'CYCLE_CURSOR' agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          grep -q 'STIMULI=' agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          ! grep -Eq 'gaudere-control.*dialogue-feed-(next|ack)' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          ! grep -Eq 'control[[:space:]]+dialogue-feed-(next|ack)' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+          ! grep -Eq 'podman.*exec[[:space:]]+gaudere-agent' \
+            agent/scripts/deploy-local-goose-dialogue-feed-consumer-production.sh
+
       - name: Prove first production dialogue is separately authorized
         run: |
           set -eu
