@@ -158,3 +158,83 @@ printf '=== BUILD DIALOGUE FEED CONSUMER CODE-DEPLOY CANDIDATE ===\n'
 GAUDERE_IMAGE_TAG="$candidate_tag" sh "$build_script"
 
 provenance_output=$(PODMAN="$podman_command" sh "$provenance_script" "$candidate_tag" "$agent_ref" "$core_ref") || fail "candidate image provenance verification failed"
+printf '%s\n' "$provenance_output"
+candidate_id=$(printf '%s\n' "$provenance_output" | sed -n 's/^image_id=//p' | tail -n 1)
+case "$candidate_id" in
+    sha256:*) ;;
+    *) fail "provenance verifier did not return immutable sha256 image ID" ;;
+esac
+candidate_normalized=$(printf '%s\n' "$candidate_id" | sed 's/^sha256://')
+
+control_help_status=0
+control_help=$("$podman_command" run --rm --network none --read-only --read-only-tmpfs --security-opt=no-new-privileges --cap-drop=all --entrypoint /usr/local/bin/gaudere-control "$candidate_id" --help 2>&1) || control_help_status=$?
+[ "$control_help_status" = "2" ] || fail "candidate control usage probe returned unexpected status $control_help_status"
+printf '%s\n' "$control_help" | grep -q 'dialogue-feed-next' || fail "candidate control client lacks dialogue-feed-next"
+printf '%s\n' "$control_help" | grep -q 'dialogue-feed-ack' || fail "candidate control client lacks dialogue-feed-ack"
+printf '%s\n' "$control_help" | grep -q 'local-thread-v3-send' || fail "candidate control client lost local-thread-v3-send"
+
+python3 - "$target_quadlet" "$candidate_quadlet" "$candidate_id" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+candidate = sys.argv[3]
+lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
+indices = [i for i, line in enumerate(lines) if line.startswith("Image=")]
+if len(indices) != 1:
+    raise SystemExit("installed Quadlet must contain exactly one Image=")
+i = indices[0]
+ending = "\n" if lines[i].endswith("\n") else ""
+lines[i] = f"Image={candidate}{ending}"
+destination.write_text("".join(lines), encoding="utf-8")
+
+old = source.read_text(encoding="utf-8").splitlines()
+new = destination.read_text(encoding="utf-8").splitlines()
+def normalize(items):
+    return ["Image=<allowed>" if line.startswith("Image=") else line for line in items]
+if normalize(old) != normalize(new):
+    raise SystemExit("dialogue feed consumer deploy attempted a mutation beyond Image=")
+PY
+
+backup_archive=""
+service_stopped=0
+state_mutated=0
+profile_mutated=0
+committed=0
+
+recover()
+{
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$committed" = "1" ]; then
+        exit "$status"
+    fi
+    if [ "$service_stopped" = "0" ] && [ "$state_mutated" = "0" ] && [ "$profile_mutated" = "0" ]; then
+        exit "$status"
+    fi
+
+    printf 'gaudere dialogue feed consumer deploy: recovery starting\n' >&2
+    "$systemctl_command" --user stop "$service_name" >/dev/null 2>&1 || true
+    if [ "$profile_mutated" = "1" ]; then
+        install -m 0600 "$previous_quadlet" "$target_quadlet" || true
+        "$systemctl_command" --user daemon-reload >/dev/null 2>&1 || true
+    fi
+    if [ "$state_mutated" = "1" ] && [ -n "$backup_archive" ] && [ -f "$backup_archive" ]; then
+        failed_state="$workspace/failed-state"
+        if [ ! -e "$failed_state" ]; then
+            mv "$state_directory" "$failed_state" || true
+            mkdir -p -m 0700 "$state_directory" || true
+            tar -xzf "$backup_archive" -C "$state_directory" || true
+        fi
+    fi
+    "$systemctl_command" --user start "$service_name" >/dev/null 2>&1 || true
+    printf 'recovery_service=%s\n' "$(service_state)" >&2
+    printf 'recovery_image=%s\n' "$(running_image)" >&2
+    printf 'recovery_provider_total=%s\n' "$(provider_total 2>/dev/null || true)" >&2
+    printf 'recovery_workspace=%s\n' "$workspace" >&2
+    exit "$status"
+}
+trap recover EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
