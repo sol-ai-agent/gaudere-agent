@@ -78,3 +78,83 @@ verify_dialogue_state()
     thread_history=$(sqlite3 -readonly "$thread_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_thread_history;")
     thread_revision=$(sqlite3 -readonly "$thread_sidecar" "SELECT revision FROM local_goose_dialogue_thread_head WHERE alias='$thread_alias' AND root_task_id='$root_task_id' AND head_task_id='$v3_head_task_id';")
     history_zero=$(sqlite3 -readonly "$thread_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_thread_history WHERE alias='$thread_alias' AND revision=0 AND root_task_id='$root_task_id' AND head_task_id='$v2_head_task_id';")
+    history_one=$(sqlite3 -readonly "$thread_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_thread_history WHERE alias='$thread_alias' AND revision=1 AND root_task_id='$root_task_id' AND head_task_id='$v3_head_task_id';")
+    [ "$thread_heads" = "1" ] || fail "dialogue preferred head count is not exactly 1"
+    [ "$thread_history" = "2" ] || fail "dialogue thread history count is not exactly 2"
+    [ "$thread_revision" = "1" ] || fail "dialogue preferred head differs from Stage 9H revision 1"
+    [ "$history_zero" = "1" ] || fail "dialogue thread history revision 0 differs"
+    [ "$history_one" = "1" ] || fail "dialogue thread history revision 1 differs"
+
+    completion_events=$(sqlite3 -readonly "$completion_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_completion_event;")
+    completion_materialization=$(sqlite3 -readonly "$completion_sidecar" "SELECT next_revision FROM local_goose_dialogue_materialization WHERE thread_alias='$thread_alias';")
+    completion_consumers=$(sqlite3 -readonly "$completion_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_consumer_cursor;")
+    event_zero=$(sqlite3 -readonly "$completion_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_completion_event WHERE thread_alias='$thread_alias' AND thread_revision=0 AND task_id='$v2_head_task_id';")
+    event_one=$(sqlite3 -readonly "$completion_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_completion_event WHERE thread_alias='$thread_alias' AND thread_revision=1 AND task_id='$v3_head_task_id';")
+    [ "$completion_events" = "2" ] || fail "dialogue completion event count is not exactly 2"
+    [ "$completion_materialization" = "2" ] || fail "dialogue completion materialization cursor is not 2"
+    [ "$completion_consumers" = "0" ] || fail "dialogue completion consumer cursor already exists"
+    [ "$event_zero" = "1" ] || fail "dialogue completion event revision 0 differs"
+    [ "$event_one" = "1" ] || fail "dialogue completion event revision 1 differs"
+}
+
+[ "$authorization" = "AUTHORIZED_LOCAL_GOOSE_DIALOGUE_FEED_CONSUMER_CODE_DEPLOY" ] || fail "explicit feed-consumer code-deploy authorization token is required"
+
+for command in "$podman_command" "$systemctl_command" git python3 sqlite3 install mkdir mktemp mv tar sed grep sleep stat; do
+    command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
+done
+
+for file in "$backup_script" "$build_script" "$provenance_script" "$state_database" "$cycle_sidecar" "$stimulus_sidecar" "$thread_sidecar" "$completion_sidecar" "$target_quadlet"; do
+    [ -f "$file" ] && [ ! -L "$file" ] || fail "required file is missing or unsafe: $file"
+done
+
+[ "$(git -C "$repository_root" rev-parse --show-toplevel)" = "$repository_root" ] || fail "script must belong to gaudere-agent checkout"
+[ "$(git -C "$repository_root" branch --show-current)" = "main" ] || fail "gaudere-agent checkout must be on main"
+[ -z "$(git -C "$repository_root" status --porcelain --untracked-files=normal)" ] || fail "gaudere-agent checkout must be clean"
+
+agent_ref=$(git -C "$repository_root" rev-parse HEAD)
+core_ref=$(tr -d '\r\n' < "$repository_root/gaudere.ref")
+
+[ "$(service_state)" = "active" ] || fail "production service must be active before deploy"
+previous_image=$(running_image)
+[ "$previous_image" = "$expected_previous_image" ] || fail "production image differs from expected Stage 9H image"
+network_before=$("$podman_command" inspect gaudere-agent --format '{{.HostConfig.NetworkMode}}' 2>/dev/null)
+[ "$network_before" = "none" ] || fail "production network is not none"
+provider_before=$(provider_total)
+[ "$provider_before" = "$expected_provider_total" ] || fail "provider total is $provider_before, expected $expected_provider_total"
+cursor_before=$(cycle_cursor)
+[ "$cursor_before" = "$expected_cycle_cursor" ] || fail "production Local Goose cycle cursor differs from expected dormant cursor"
+cycle_tasks_before=$(task_count cognition.local-goose-cycle.v1)
+v1_before=$(task_count cognition.local-goose-dialogue.v1)
+v2_before=$(task_count cognition.local-goose-dialogue.v2)
+v3_before=$(task_count cognition.local-goose-dialogue.v3)
+stimuli_before=$(stimulus_count)
+[ "$cycle_tasks_before" = "1" ] || fail "production Local Goose cycle Task count is not exactly 1"
+[ "$v1_before" = "1" ] || fail "production V1 dialogue Task count is not exactly 1"
+[ "$v2_before" = "2" ] || fail "production V2 dialogue Task count is not exactly 2"
+[ "$v3_before" = "1" ] || fail "production V3 dialogue Task count is not exactly 1"
+[ "$stimuli_before" = "0" ] || fail "production stimulus ledger is not empty"
+verify_dialogue_state
+
+thread_revision_before=$thread_revision
+completion_events_before=$completion_events
+completion_materialization_before=$completion_materialization
+completion_consumers_before=$completion_consumers
+
+grep -q '^Network=none$' "$target_quadlet" || fail "installed Quadlet lacks Network=none"
+grep -q -- '--local-goose-model ' "$target_quadlet" || fail "installed Quadlet lacks Local Goose model"
+grep -q -- '--local-goose-model-sha256 ' "$target_quadlet" || fail "installed Quadlet lacks Local Goose model SHA256"
+grep -q -- '--control-socket /tmp/gaudere-control.sock' "$target_quadlet" || fail "installed Quadlet lacks control socket"
+! grep -Eq -- '--openai-model|--autonomous-pulse-provider|--wake-intents' "$target_quadlet" || fail "production profile unexpectedly contains provider authority"
+
+transition_root="$data_home/gaudere/.dialogue-feed-consumer-deploy"
+mkdir -p -m 0700 "$transition_root"
+workspace=$(mktemp -d "$transition_root/transition.XXXXXX")
+previous_quadlet="$workspace/gaudere-agent.container.before"
+candidate_quadlet="$workspace/gaudere-agent.container.candidate"
+install -m 0600 "$target_quadlet" "$previous_quadlet"
+
+candidate_tag="localhost/gaudere-agent:dialogue-feed-consumer-$agent_ref"
+printf '=== BUILD DIALOGUE FEED CONSUMER CODE-DEPLOY CANDIDATE ===\n'
+GAUDERE_IMAGE_TAG="$candidate_tag" sh "$build_script"
+
+provenance_output=$(PODMAN="$podman_command" sh "$provenance_script" "$candidate_tag" "$agent_ref" "$core_ref") || fail "candidate image provenance verification failed"
