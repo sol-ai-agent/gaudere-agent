@@ -48,6 +48,10 @@ std::string operation_name(const LiveControlOperation operation)
         return "inspect_local_goose_dialogue_thread_head";
     case LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next:
         return "submit_local_goose_dialogue_v3_preferred_next";
+    case LiveControlOperation::inspect_local_goose_dialogue_completion:
+        return "inspect_local_goose_dialogue_completion";
+    case LiveControlOperation::acknowledge_local_goose_dialogue_completion:
+        return "acknowledge_local_goose_dialogue_completion";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
@@ -101,6 +105,12 @@ LiveControlOperation parse_operation(const std::string& value)
     if (value == "submit_local_goose_dialogue_v3_preferred_next") {
         return LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
     }
+    if (value == "inspect_local_goose_dialogue_completion") {
+        return LiveControlOperation::inspect_local_goose_dialogue_completion;
+    }
+    if (value == "acknowledge_local_goose_dialogue_completion") {
+        return LiveControlOperation::acknowledge_local_goose_dialogue_completion;
+    }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
     }
@@ -140,6 +150,24 @@ bool safe_id(const std::string& id) noexcept
         }
     }
     return true;
+}
+
+bool positive_sequence_text(const std::string& value) noexcept
+{
+    if (value.empty() || value.size() > 19 || value.front() == '0') {
+        return false;
+    }
+    std::uint64_t sequence = 0;
+    for (const unsigned char c : value) {
+        if (c < '0' || c > '9') return false;
+        const auto digit = static_cast<std::uint64_t>(c - '0');
+        if (sequence > (static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max()) - digit) / 10) {
+            return false;
+        }
+        sequence = sequence * 10 + digit;
+    }
+    return sequence != 0;
 }
 
 bool safe_reason(const std::string& reason) noexcept
@@ -287,6 +315,18 @@ void validate_command(const LiveControlCommand& command)
                     std::numeric_limits<std::int64_t>::max())) {
             throw std::invalid_argument(
                 "Local Goose preferred dialogue provenance/thread revision is invalid");
+        }
+        break;
+    case LiveControlOperation::inspect_local_goose_dialogue_completion:
+        if (!command.text.empty()) {
+            throw std::invalid_argument(
+                "dialogue completion inspection accepts only a consumer id");
+        }
+        break;
+    case LiveControlOperation::acknowledge_local_goose_dialogue_completion:
+        if (!positive_sequence_text(command.text)) {
+            throw std::invalid_argument(
+                "dialogue completion acknowledgement requires a positive sequence");
         }
         break;
     case LiveControlOperation::inspect_task:
