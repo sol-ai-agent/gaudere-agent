@@ -202,8 +202,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 printf '=== ACK EXACTLY SEQUENCE 1 ===\n'
-ack1=$(control dialogue-feed-ack "$consumer_id" 1) || fail "first production dialogue-feed ACK failed"
+# Mark the effect boundary before the command: a signal after the durable ACK
+# but before shell assignment must still restore the stopped-state backup.
 mutated=1
+ack1=$(control dialogue-feed-ack "$consumer_id" 1) || fail "first production dialogue-feed ACK failed"
 printf '%s\n' "$ack1"
 printf '%s\n' "$ack1" | grep -q "^consumer_id=\"$consumer_id\"$" || fail "ACK consumer id differs"
 printf '%s\n' "$ack1" | grep -q '^result=accepted$' || fail "first production ACK was not accepted"
