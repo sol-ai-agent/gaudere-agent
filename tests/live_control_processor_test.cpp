@@ -84,6 +84,8 @@ struct Harness {
     gaudere::scheduling::wake::WakeIntentRuntime wake_runtime;
     ExplicitWake explicit_wake;
     std::unique_ptr<LocalGooseDialogueThreadStore> dialogue_thread_store;
+    std::unique_ptr<LocalGooseDialogueCompletionFeedStore>
+        dialogue_completion_store;
     LiveControlProcessor processor;
     LiveControlMailbox mailbox;
 };
