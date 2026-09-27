@@ -238,3 +238,78 @@ recover()
 trap recover EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
+trap 'exit 143' TERM
+
+printf '=== STOP / BACKUP / SWITCH IMAGE ONLY ===\n'
+"$systemctl_command" --user stop "$service_name"
+service_stopped=1
+[ "$(service_state)" = "inactive" ] || fail "production service did not stop cleanly"
+
+backup_archive=$(GAUDERE_STATE_DIR="$state_directory" sh "$backup_script")
+[ -n "$backup_archive" ] && [ -f "$backup_archive" ] || fail "stopped-state backup was not created"
+printf 'BACKUP=%s\n' "$backup_archive"
+
+# Any failure after the candidate can touch durable state restores this stopped-state backup.
+state_mutated=1
+install -m 0600 "$candidate_quadlet" "$target_quadlet"
+profile_mutated=1
+"$systemctl_command" --user daemon-reload
+
+printf '=== START PRODUCTION WITH FEED CONSUMER CONTROL WIRED BUT UNUSED ===\n'
+"$systemctl_command" --user start "$service_name"
+[ "$(service_state)" = "active" ] || fail "candidate production service did not become active"
+[ "$(running_image)" = "$candidate_normalized" ] || fail "running image is not approved candidate"
+sleep 2
+[ "$(service_state)" = "active" ] || fail "candidate production service did not remain active"
+
+network_after=$("$podman_command" inspect gaudere-agent --format '{{.HostConfig.NetworkMode}}' 2>/dev/null)
+[ "$network_after" = "none" ] || fail "production network changed from none"
+provider_after=$(provider_total)
+[ "$provider_after" = "$provider_before" ] || fail "provider total changed during feed-consumer code deploy"
+cursor_after=$(cycle_cursor)
+[ "$cursor_after" = "$cursor_before" ] || fail "autonomous cycle cursor changed during feed-consumer code deploy"
+cycle_tasks_after=$(task_count cognition.local-goose-cycle.v1)
+v1_after=$(task_count cognition.local-goose-dialogue.v1)
+v2_after=$(task_count cognition.local-goose-dialogue.v2)
+v3_after=$(task_count cognition.local-goose-dialogue.v3)
+stimuli_after=$(stimulus_count)
+[ "$cycle_tasks_after" = "$cycle_tasks_before" ] || fail "code-only deploy changed Local Goose cycle Task count"
+[ "$v1_after" = "$v1_before" ] || fail "code-only deploy changed V1 dialogue Task count"
+[ "$v2_after" = "$v2_before" ] || fail "code-only deploy changed V2 dialogue Task count"
+[ "$v3_after" = "$v3_before" ] || fail "code-only deploy changed V3 dialogue Task count"
+[ "$stimuli_after" = "$stimuli_before" ] || fail "code-only deploy changed stimulus ledger"
+
+verify_dialogue_state
+[ "$thread_revision" = "$thread_revision_before" ] || fail "code-only deploy changed preferred thread revision"
+[ "$completion_events" = "$completion_events_before" ] || fail "code-only deploy changed completion event count"
+[ "$completion_materialization" = "$completion_materialization_before" ] || fail "code-only deploy changed completion materialization cursor"
+[ "$completion_consumers" = "$completion_consumers_before" ] || fail "code-only deploy created a completion consumer cursor"
+[ "$completion_consumers" = "0" ] || fail "DIALOGUE_COMPLETION_CONSUMERS is not zero"
+
+container_logs=$("$podman_command" logs gaudere-agent 2>&1 || true)
+printf '%s\n' "$container_logs" | grep -q 'automatic_submission=false automatic_ack=false' || fail "candidate startup lacks idle V3 authority marker"
+! grep -Eq -- '--openai-model|--autonomous-pulse-provider|--wake-intents' "$target_quadlet" || fail "provider authority appeared after deploy"
+
+committed=1
+trap - EXIT HUP INT TERM
+
+printf 'AGENT_REF=%s\n' "$agent_ref"
+printf 'CORE_REF=%s\n' "$core_ref"
+printf 'CANDIDATE_IMAGE=%s\n' "$candidate_normalized"
+printf 'ROLLBACK_IMAGE=%s\n' "$previous_image"
+printf 'NETWORK=%s\n' "$network_after"
+printf 'PROVIDER_TOTAL=%s\n' "$provider_after"
+printf 'CYCLE_CURSOR=%s\n' "$cursor_after"
+printf 'LOCAL_GOOSE_CYCLE_TASKS=%s\n' "$cycle_tasks_after"
+printf 'LOCAL_GOOSE_DIALOGUE_V1_TASKS=%s\n' "$v1_after"
+printf 'LOCAL_GOOSE_DIALOGUE_V2_TASKS=%s\n' "$v2_after"
+printf 'LOCAL_GOOSE_DIALOGUE_V3_TASKS=%s\n' "$v3_after"
+printf 'STIMULI=%s\n' "$stimuli_after"
+printf 'DIALOGUE_THREAD_REVISION=%s\n' "$thread_revision"
+printf 'DIALOGUE_THREAD_HEAD=%s\n' "$v3_head_task_id"
+printf 'DIALOGUE_COMPLETION_EVENTS=%s\n' "$completion_events"
+printf 'DIALOGUE_COMPLETION_MATERIALIZATION=%s\n' "$completion_materialization"
+printf 'DIALOGUE_COMPLETION_CONSUMERS=%s\n' "$completion_consumers"
+printf 'BACKUP=%s\n' "$backup_archive"
+printf 'TRANSITION_WORKSPACE=%s\n' "$workspace"
+printf 'FEDORA_LOCAL_GOOSE_DIALOGUE_FEED_CONSUMER_CODE_DEPLOY=PASS\n'
