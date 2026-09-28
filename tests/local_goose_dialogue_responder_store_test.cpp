@@ -317,6 +317,42 @@ int main()
         assert(reopened.find_intent(completed.front().intent_id));
     }
 
+    {
+        TemporarySidecar future;
+        sqlite3* database = nullptr;
+        assert(sqlite3_open(future.path.c_str(), &database) == SQLITE_OK);
+        assert(sqlite3_exec(
+            database, "PRAGMA user_version=2;", nullptr, nullptr, nullptr)
+            == SQLITE_OK);
+        sqlite3_close(database);
+        assert(::chmod(future.path.c_str(), 0600) == 0);
+        bool rejected = false;
+        try {
+            LocalGooseDialogueResponderStore unsupported(future.path.string());
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        assert(rejected);
+    }
+
+    {
+        TemporarySidecar unversioned;
+        sqlite3* database = nullptr;
+        assert(sqlite3_open(unversioned.path.c_str(), &database) == SQLITE_OK);
+        assert(sqlite3_exec(
+            database, "CREATE TABLE unexpected(value INTEGER);",
+            nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(database);
+        assert(::chmod(unversioned.path.c_str(), 0600) == 0);
+        bool rejected = false;
+        try {
+            LocalGooseDialogueResponderStore dirty(unversioned.path.string());
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        assert(rejected);
+    }
+
     std::cout << "local_goose_dialogue_responder_store_test: PASS\n";
     return 0;
 }
