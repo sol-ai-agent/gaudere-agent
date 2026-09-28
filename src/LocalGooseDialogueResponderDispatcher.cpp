@@ -130,6 +130,96 @@ LocalGooseDialogueResponderDispatcher::consumer_id() const noexcept
     return consumer_id_;
 }
 
+LocalGooseDialogueResponderLeaseResult
+LocalGooseDialogueResponderDispatcher::create_lease(
+    const std::string& lease_id,
+    const std::string& thread_alias,
+    const std::string& speaker_id,
+    const std::string& message_kind,
+    const std::string& purpose,
+    const std::uint64_t max_system_turns,
+    const std::int64_t lease_ttl_ms,
+    const std::int64_t min_interval_ms)
+{
+    LocalGooseDialogueResponderLeaseResult out;
+    if (!safe_identifier(lease_id)
+        || !safe_identifier(thread_alias)
+        || !safe_identifier(speaker_id)
+        || local_goose_dialogue_responder_message_kind_bit(message_kind) == 0
+        || purpose.empty() || purpose.size() > 1024
+        || max_system_turns == 0 || max_system_turns > 8
+        || lease_ttl_ms <= 0 || lease_ttl_ms > max_intent_ttl_ms
+        || min_interval_ms < 0 || min_interval_ms > max_intent_ttl_ms) {
+        out.detail = "invalid dialogue responder lease request";
+        return out;
+    }
+    const auto now = clock_();
+    if (now < 0
+        || now > std::numeric_limits<std::int64_t>::max() - lease_ttl_ms) {
+        out.detail = "dialogue responder lease clock/ttl is invalid";
+        return out;
+    }
+
+    LocalGooseDialogueResponderLease lease;
+    lease.lease_id = lease_id;
+    lease.thread_alias = thread_alias;
+    lease.speaker_id = speaker_id;
+    lease.allowed_message_kinds =
+        local_goose_dialogue_responder_message_kind_bit(message_kind);
+    lease.purpose = purpose;
+    lease.max_system_turns = max_system_turns;
+    lease.issued_at_ms = now;
+    lease.expires_at_ms = now + lease_ttl_ms;
+    lease.min_interval_ms = min_interval_ms;
+    lease.next_eligible_at_ms = now;
+
+    const auto write = responder_store_.create_lease(lease);
+    out.result = map_store_result(write.result);
+    out.lease = write.lease;
+    out.detail = write.detail;
+    return out;
+}
+
+LocalGooseDialogueResponderLeaseResult
+LocalGooseDialogueResponderDispatcher::revoke_lease(
+    const std::string& lease_id,
+    const std::string& reason)
+{
+    LocalGooseDialogueResponderLeaseResult out;
+    if (!safe_identifier(lease_id)
+        || reason.empty() || reason.size() > 1024) {
+        out.detail = "invalid dialogue responder lease revocation";
+        return out;
+    }
+    const auto now = clock_();
+    if (now < 0) {
+        out.result = LocalGooseDialogueResponderDispatchCode::unavailable;
+        out.detail = "dialogue responder clock is invalid";
+        return out;
+    }
+    const auto write = responder_store_.close_lease(
+        lease_id, LocalGooseDialogueResponderLeaseState::revoked,
+        reason, now);
+    out.result = map_store_result(write.result);
+    out.lease = write.lease;
+    out.detail = write.detail;
+    return out;
+}
+
+std::optional<LocalGooseDialogueResponderLease>
+LocalGooseDialogueResponderDispatcher::find_lease(
+    const std::string& lease_id) const
+{
+    return responder_store_.find_lease(lease_id);
+}
+
+std::optional<LocalGooseDialogueResponderIntent>
+LocalGooseDialogueResponderDispatcher::find_intent(
+    const std::string& intent_id) const
+{
+    return responder_store_.find_intent(intent_id);
+}
+
 LocalGooseDialogueResponderDispatchResult
 LocalGooseDialogueResponderDispatcher::prepare(
     const std::string& lease_id,
