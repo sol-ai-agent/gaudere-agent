@@ -310,6 +310,73 @@ int main()
             == LocalGooseDialogueResponderLeaseState::expired);
     assert(expired_original->terminal_reason == "lease_expired");
 
+    const auto external_ack3 =
+        completion_store.acknowledge("responder-test", 3);
+    assert(external_ack3.result
+        == LocalGooseDialogueCompletionFeedResult::accepted);
+    assert(external_ack3.last_sequence == 3);
+
+    complete_v3(
+        runtime, task_store, competing.task->id,
+        "Réponse au tour humain concurrent.");
+    const auto completed_competing = task_store.find(competing.task->id);
+    assert(completed_competing);
+    const auto fourth_event = make_local_goose_dialogue_completion_event(
+        "main", 3, *completed_competing, 100001);
+    const auto fourth_append =
+        completion_store.append_for_revision(fourth_event);
+    assert(fourth_append.result
+        == LocalGooseDialogueCompletionFeedResult::accepted);
+    assert(fourth_append.event && fourth_append.event->sequence == 4);
+
+    now = 100002;
+    const auto prepared_after_replacement = dispatcher.prepare(
+        replacement_lease.lease->lease_id, 4, "feedback",
+        "Effet durable avant expiration.", 5000);
+    assert(prepared_after_replacement.result
+        == LocalGooseDialogueResponderDispatchCode::accepted);
+    assert(prepared_after_replacement.intent);
+
+    const auto durable_before_expiry =
+        submit_local_goose_dialogue_v3_preferred(
+            runtime, task_store, thread_store, model,
+            prepared_after_replacement.intent->request_id,
+            prepared_after_replacement.intent->thread_alias,
+            prepared_after_replacement.intent->expected_thread_revision,
+            prepared_after_replacement.intent->speaker_kind,
+            prepared_after_replacement.intent->speaker_id,
+            prepared_after_replacement.intent->message_kind,
+            prepared_after_replacement.intent->message);
+    assert(durable_before_expiry.result
+        == LocalGooseDialoguePreferredSubmitResultCode::accepted);
+    assert(durable_before_expiry.head
+        && durable_before_expiry.head->revision == 4);
+    assert(responder_store.find_lease(
+        replacement_lease.lease->lease_id)->turns_committed == 0);
+    assert(completion_store.consumer_last_sequence("responder-test")
+        == std::optional<std::uint64_t>{3});
+
+    now = 105002;
+    const auto after_authority_expiry = dispatcher.dispatch(
+        prepared_after_replacement.intent->intent_id);
+    assert(after_authority_expiry.result
+        == LocalGooseDialogueResponderDispatchCode::conflict);
+    const auto review_after_expiry = responder_store.find_intent(
+        prepared_after_replacement.intent->intent_id);
+    assert(review_after_expiry
+        && review_after_expiry->state
+            == LocalGooseDialogueResponderIntentState::manual_review);
+    assert(review_after_expiry->terminal_reason
+        == "durable_submission_with_ineligible_lease");
+    const auto expired_replacement = responder_store.find_lease(
+        replacement_lease.lease->lease_id);
+    assert(expired_replacement
+        && expired_replacement->state
+            == LocalGooseDialogueResponderLeaseState::expired);
+    assert(expired_replacement->turns_committed == 0);
+    assert(completion_store.consumer_last_sequence("responder-test")
+        == std::optional<std::uint64_t>{3});
+
     const auto identity_a = make_local_goose_dialogue_responder_intent(
         "identity-lease", "main", 7,
         std::string{local_goose_dialogue_completion_event_prefix}
