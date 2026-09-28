@@ -285,10 +285,18 @@ LocalGooseDialogueResponderDispatcher::dispatch(
         const auto event = completion_store_.next_for_consumer(consumer_id_);
         const auto head = thread_store_.find(intent.thread_alias);
         out.head = head;
+        const bool original_head =
+            head
+            && head->revision == intent.expected_thread_revision
+            && head->head_task_id == intent.expected_head_task_id;
+        const bool possible_idempotent_retry =
+            head
+            && intent.expected_thread_revision
+                < static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max())
+            && head->revision == intent.expected_thread_revision + 1;
         if (!event || !same_trigger(*event, intent)
-            || !head
-            || head->revision != intent.expected_thread_revision
-            || head->head_task_id != intent.expected_head_task_id) {
+            || (!original_head && !possible_idempotent_retry)) {
             const auto terminal = responder_store_.terminalize_intent(
                 intent.intent_id, IntentState::conflict,
                 "trigger_or_preferred_head_changed");
