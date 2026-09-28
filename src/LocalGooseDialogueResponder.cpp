@@ -120,8 +120,6 @@ std::string intent_digest(const LocalGooseDialogueResponderIntent& intent)
     append(canonical, intent.speaker_id);
     append(canonical, intent.message_kind);
     append(canonical, intent.message);
-    append(canonical, intent.created_at_ms);
-    append(canonical, intent.expires_at_ms);
     return sha256_hex(canonical);
 }
 
