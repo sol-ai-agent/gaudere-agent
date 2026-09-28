@@ -413,27 +413,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
             }
             lease = expired.lease;
         }
-        if (!lease
-            || lease->state != LocalGooseDialogueResponderLeaseState::active
-            || lease->thread_alias != intent.thread_alias
-            || lease->speaker_kind != intent.speaker_kind
-            || lease->speaker_id != intent.speaker_id
-            || now >= lease->expires_at_ms
-            || now >= intent.expires_at_ms
-            || now < lease->next_eligible_at_ms
-            || lease->turns_committed >= lease->max_system_turns) {
-            const auto terminal = responder_store_.terminalize_intent(
-                intent.intent_id, IntentState::expired,
-                "lease_or_intent_not_eligible");
-            out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-            out.intent = terminal.intent ? terminal.intent : out.intent;
-            out.detail = "responder intent expired or lease is no longer eligible";
-            return out;
-        }
 
         const auto event = completion_store_.next_for_consumer(consumer_id_);
         const auto head = thread_store_.find(intent.thread_alias);
         out.head = head;
+        const bool trigger_still_next =
+            event && same_trigger(*event, intent);
         const bool original_head =
             head
             && head->revision == intent.expected_thread_revision
@@ -444,7 +429,65 @@ LocalGooseDialogueResponderDispatcher::dispatch(
                 < static_cast<std::uint64_t>(
                     std::numeric_limits<std::int64_t>::max())
             && head->revision == intent.expected_thread_revision + 1;
-        if (!event || !same_trigger(*event, intent)
+
+        const bool lease_eligible =
+            lease
+            && lease->state == LocalGooseDialogueResponderLeaseState::active
+            && lease->thread_alias == intent.thread_alias
+            && lease->speaker_kind == intent.speaker_kind
+            && lease->speaker_id == intent.speaker_id
+            && now < lease->expires_at_ms
+            && now < intent.expires_at_ms
+            && now >= lease->next_eligible_at_ms
+            && lease->turns_committed < lease->max_system_turns;
+
+        if (!lease_eligible) {
+            if (trigger_still_next && possible_idempotent_retry) {
+                const auto observed = submit_local_goose_dialogue_v3_preferred(
+                    runtime_, task_store_, thread_store_, model_sha256_,
+                    intent.request_id, intent.thread_alias,
+                    intent.expected_thread_revision, intent.speaker_kind,
+                    intent.speaker_id, intent.message_kind, intent.message);
+                out.task = observed.task;
+                out.head = observed.head;
+                out.work_may_be_pending = observed.work_may_be_pending;
+                if (observed.result
+                        == LocalGooseDialoguePreferredSubmitResultCode::duplicate
+                    || observed.task) {
+                    const auto terminal = responder_store_.terminalize_intent(
+                        intent.intent_id, IntentState::manual_review,
+                        "durable_submission_with_ineligible_lease");
+                    out.result =
+                        LocalGooseDialogueResponderDispatchCode::conflict;
+                    out.intent =
+                        terminal.intent ? terminal.intent : out.intent;
+                    out.detail =
+                        "durable responder submission exists but lease authority "
+                        "cannot be proven current; manual review required";
+                    return out;
+                }
+            }
+
+            const bool expired =
+                now >= intent.expires_at_ms
+                || (lease
+                    && lease->state
+                        == LocalGooseDialogueResponderLeaseState::expired);
+            const auto terminal = responder_store_.terminalize_intent(
+                intent.intent_id,
+                expired ? IntentState::expired : IntentState::conflict,
+                expired
+                    ? "lease_or_intent_expired"
+                    : "lease_not_eligible");
+            out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+            out.intent = terminal.intent ? terminal.intent : out.intent;
+            out.detail = expired
+                ? "responder intent or lease expired"
+                : "responder lease is no longer eligible";
+            return out;
+        }
+
+        if (!trigger_still_next
             || (!original_head && !possible_idempotent_retry)) {
             const auto terminal = responder_store_.terminalize_intent(
                 intent.intent_id, IntentState::conflict,
