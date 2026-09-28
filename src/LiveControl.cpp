@@ -544,6 +544,21 @@ std::string encode_command(const LiveControlCommand& command)
         document["expected_thread_revision"] =
             *command.expected_thread_revision;
     }
+    if (command.responder_completion_sequence) {
+        document["responder_completion_sequence"] =
+            *command.responder_completion_sequence;
+    }
+    if (command.responder_max_system_turns) {
+        document["responder_max_system_turns"] =
+            *command.responder_max_system_turns;
+    }
+    if (command.responder_ttl_ms) {
+        document["responder_ttl_ms"] = *command.responder_ttl_ms;
+    }
+    if (command.responder_min_interval_ms) {
+        document["responder_min_interval_ms"] =
+            *command.responder_min_interval_ms;
+    }
     return document.dump();
 }
 
@@ -609,6 +624,38 @@ LiveControlCommand decode_command(const std::string& payload)
         }
         command.expected_thread_revision =
             document.at("expected_thread_revision").get<std::uint64_t>();
+    }
+    if (document.contains("responder_completion_sequence")) {
+        if (!document.at("responder_completion_sequence").is_number_unsigned()) {
+            throw std::invalid_argument(
+                "live control responder_completion_sequence must be unsigned");
+        }
+        command.responder_completion_sequence =
+            document.at("responder_completion_sequence").get<std::uint64_t>();
+    }
+    if (document.contains("responder_max_system_turns")) {
+        if (!document.at("responder_max_system_turns").is_number_unsigned()) {
+            throw std::invalid_argument(
+                "live control responder_max_system_turns must be unsigned");
+        }
+        command.responder_max_system_turns =
+            document.at("responder_max_system_turns").get<std::uint64_t>();
+    }
+    if (document.contains("responder_ttl_ms")) {
+        if (!document.at("responder_ttl_ms").is_number_integer()) {
+            throw std::invalid_argument(
+                "live control responder_ttl_ms must be an integer");
+        }
+        command.responder_ttl_ms =
+            document.at("responder_ttl_ms").get<std::int64_t>();
+    }
+    if (document.contains("responder_min_interval_ms")) {
+        if (!document.at("responder_min_interval_ms").is_number_integer()) {
+            throw std::invalid_argument(
+                "live control responder_min_interval_ms must be an integer");
+        }
+        command.responder_min_interval_ms =
+            document.at("responder_min_interval_ms").get<std::int64_t>();
     }
     validate_command(command);
     return command;
