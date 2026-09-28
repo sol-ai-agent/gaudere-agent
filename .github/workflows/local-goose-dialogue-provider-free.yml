@@ -235,6 +235,29 @@ jobs:
           grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
             agent/src/local_goose_dialogue_proof_main.cpp
 
+      - name: Prove responder store remains non-production
+        run: |
+          set -eu
+          grep -q '^[[:space:]]*local_goose_dialogue_responder_store_test \\' agent/tests/Makefile.am
+          grep -q 'LocalGooseDialogueResponderStore.cpp' agent/tests/Makefile.am
+          grep -q 'local_goose_dialogue_responder_sidecar_schema = 1' \
+            agent/src/LocalGooseDialogueResponder.hpp
+          grep -q 'max_system_turns = 8' \
+            agent/src/LocalGooseDialogueResponder.cpp
+          grep -q 'O_NOFOLLOW' agent/src/LocalGooseDialogueResponderStore.cpp
+          grep -q 'PRAGMA synchronous=FULL' agent/src/LocalGooseDialogueResponderStore.cpp
+          grep -q 'one_active' agent/src/LocalGooseDialogueResponderStore.cpp
+          ! grep -q 'LocalGooseDialogueResponder' agent/src/main.cpp
+          ! grep -q 'LocalGooseDialogueResponder' agent/src/Makefile.am
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|systemctl|podman' \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueResponder.hpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueResponderStore.hpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp
+
       - name: Prove deploy remains code-only
         run: |
           set -eu
