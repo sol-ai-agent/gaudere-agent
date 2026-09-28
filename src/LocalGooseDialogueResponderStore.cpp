@@ -414,12 +414,6 @@ bool same_lease(const LocalGooseDialogueResponderLease& a,
     return lease_json(a) == lease_json(b);
 }
 
-bool same_intent(const LocalGooseDialogueResponderIntent& a,
-                 const LocalGooseDialogueResponderIntent& b)
-{
-    return intent_json(a) == intent_json(b);
-}
-
 bool checked_next_eligible(const std::int64_t base,
                            const std::int64_t interval,
                            std::int64_t& out) noexcept
@@ -743,12 +737,8 @@ LocalGooseDialogueResponderStore::prepare_intent(
         if (existing) {
             execute(database_, "COMMIT;");
             out.intent = existing;
-            out.result = same_intent(*existing, intent)
-                ? LocalGooseDialogueResponderStoreResult::duplicate
-                : LocalGooseDialogueResponderStoreResult::conflict;
-            out.detail = out.result == LocalGooseDialogueResponderStoreResult::duplicate
-                ? "dialogue responder intent already prepared"
-                : "dialogue responder intent id conflicts";
+            out.result = LocalGooseDialogueResponderStoreResult::duplicate;
+            out.detail = "dialogue responder intent already prepared";
             return out;
         }
         const auto trigger = find_trigger_intent(
