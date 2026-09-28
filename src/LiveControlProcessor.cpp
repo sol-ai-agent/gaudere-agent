@@ -426,7 +426,8 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
                                            LocalGooseStimulus local_goose_stimulus,
                                            std::string local_goose_dialogue_model_sha256,
                                            LocalGooseDialogueThreadStore* dialogue_thread_store,
-                                           LocalGooseDialogueCompletionFeedStore* dialogue_completion_store)
+                                           LocalGooseDialogueCompletionFeedStore* dialogue_completion_store,
+                                           LocalGooseDialogueResponderDispatcher* dialogue_responder_dispatcher)
     : runtime_(runtime),
       store_(store),
       budget_store_(budget_store),
@@ -438,7 +439,8 @@ LiveControlProcessor::LiveControlProcessor(gaudere::work::Runtime& runtime,
       local_goose_dialogue_model_sha256_(
           std::move(local_goose_dialogue_model_sha256)),
       dialogue_thread_store_(dialogue_thread_store),
-      dialogue_completion_store_(dialogue_completion_store)
+      dialogue_completion_store_(dialogue_completion_store),
+      dialogue_responder_dispatcher_(dialogue_responder_dispatcher)
 {
     if (!gaudere::budget::valid_policy(budget_policy_)) {
         throw std::invalid_argument("live control provider budget policy is invalid");
@@ -463,7 +465,8 @@ LiveControlProcessResult LiveControlProcessor::process(LiveControlMailbox& mailb
             || operation == LiveControlOperation::submit_local_goose_dialogue_v2_next
             || operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
             || operation == LiveControlOperation::submit_local_goose_dialogue_v3_next
-            || operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
+            || operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next
+            || operation == LiveControlOperation::dispatch_local_goose_dialogue_responder_intent;
         const bool wake_transition_may_have_committed =
             operation == LiveControlOperation::accept_wake
             || operation == LiveControlOperation::revoke_wake;
