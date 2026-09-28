@@ -15,6 +15,7 @@ check_PROGRAMS = \
 	local_goose_dialogue_v3_handler_test \
 	local_goose_dialogue_thread_store_test \
 	local_goose_dialogue_completion_feed_test \
+	local_goose_dialogue_responder_store_test \
 	local_goose_dialogue_v2_handler_test \
 	local_goose_dialogue_handler_test \
 	local_goose_cycle_stimulus_service_test \
