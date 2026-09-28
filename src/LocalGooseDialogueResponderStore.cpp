@@ -179,8 +179,11 @@ Json lease_json(const LocalGooseDialogueResponderLease& lease)
         {"state", static_cast<unsigned>(lease.state)},
         {"terminal_reason", lease.terminal_reason}
     };
-    out["terminal_at_ms"] =
-        lease.terminal_at_ms ? Json{*lease.terminal_at_ms} : Json{nullptr};
+    if (lease.terminal_at_ms) {
+        out["terminal_at_ms"] = *lease.terminal_at_ms;
+    } else {
+        out["terminal_at_ms"] = nullptr;
+    }
     return out;
 }
 
@@ -207,12 +210,21 @@ Json intent_json(const LocalGooseDialogueResponderIntent& intent)
         {"submitted_task_id", intent.submitted_task_id},
         {"terminal_reason", intent.terminal_reason}
     };
-    out["submitted_thread_revision"] = intent.submitted_thread_revision
-        ? Json{*intent.submitted_thread_revision} : Json{nullptr};
-    out["committed_at_ms"] =
-        intent.committed_at_ms ? Json{*intent.committed_at_ms} : Json{nullptr};
-    out["completed_at_ms"] =
-        intent.completed_at_ms ? Json{*intent.completed_at_ms} : Json{nullptr};
+    if (intent.submitted_thread_revision) {
+        out["submitted_thread_revision"] = *intent.submitted_thread_revision;
+    } else {
+        out["submitted_thread_revision"] = nullptr;
+    }
+    if (intent.committed_at_ms) {
+        out["committed_at_ms"] = *intent.committed_at_ms;
+    } else {
+        out["committed_at_ms"] = nullptr;
+    }
+    if (intent.completed_at_ms) {
+        out["completed_at_ms"] = *intent.completed_at_ms;
+    } else {
+        out["completed_at_ms"] = nullptr;
+    }
     return out;
 }
 
