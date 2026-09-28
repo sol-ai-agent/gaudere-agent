@@ -104,6 +104,14 @@ explicit_wake_integration_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \
@@ -156,6 +164,14 @@ live_control_processor_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \
@@ -490,6 +506,14 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \
@@ -529,6 +553,14 @@ wake_status_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \
