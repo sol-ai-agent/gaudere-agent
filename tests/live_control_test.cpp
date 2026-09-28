@@ -745,6 +745,185 @@ void test_dialogue_completion_ack_rejects_invalid_sequence_before_connect()
     }
 }
 
+void test_dialogue_responder_operations_round_trip()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "dialogue responder live control server starts");
+
+    LiveControlCommand create;
+    create.operation =
+        LiveControlOperation::create_local_goose_dialogue_responder_lease;
+    create.id = "lease-001";
+    create.thread_alias = "main";
+    create.speaker_id = "sol";
+    create.message_kind = "feedback";
+    create.text = "Bounded intervention";
+    create.responder_max_system_turns = 2;
+    create.responder_ttl_ms = 60000;
+    create.responder_min_interval_ms = 1000;
+
+    std::ostringstream create_output;
+    std::ostringstream create_error;
+    int create_result = -1;
+    std::thread create_client([&] {
+        create_result = run_live_control_client(
+            socket_path, create, create_output, create_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "responder lease create wakes worker");
+    }
+    auto pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "responder lease create crosses bounded mailbox once");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::create_local_goose_dialogue_responder_lease
+                   && command.id == "lease-001"
+                   && command.thread_alias == "main"
+                   && command.speaker_id == "sol"
+                   && command.message_kind == "feedback"
+                   && command.text == "Bounded intervention"
+                   && command.responder_max_system_turns
+                   && *command.responder_max_system_turns == 2
+                   && command.responder_ttl_ms
+                   && *command.responder_ttl_ms == 60000
+                   && command.responder_min_interval_ms
+                   && *command.responder_min_interval_ms == 1000,
+               "responder lease bounds survive socket round-trip");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "state=active\n"});
+    }
+    create_client.join();
+    expect(create_result == 0
+               && create_output.str() == "state=active\n"
+               && create_error.str().empty(),
+           "responder lease create receives worker reply");
+
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = false;
+    }
+
+    LiveControlCommand prepare;
+    prepare.operation =
+        LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    prepare.id = "lease-001";
+    prepare.text = "Réponse système bornée.";
+    prepare.message_kind = "feedback";
+    prepare.responder_completion_sequence = 7;
+    prepare.responder_ttl_ms = 5000;
+
+    std::ostringstream prepare_output;
+    std::ostringstream prepare_error;
+    int prepare_result = -1;
+    std::thread prepare_client([&] {
+        prepare_result = run_live_control_client(
+            socket_path, prepare, prepare_output, prepare_error);
+    });
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        expect(condition.wait_for(lock, 2s, [&] { return woke; }),
+               "responder intent prepare wakes worker");
+    }
+    pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "responder intent prepare crosses bounded mailbox once");
+    if (pending.size() == 1) {
+        const auto& command = pending.front()->command();
+        expect(command.operation
+                   == LiveControlOperation::prepare_local_goose_dialogue_responder_intent
+                   && command.id == "lease-001"
+                   && command.message_kind == "feedback"
+                   && command.text == "Réponse système bornée."
+                   && command.responder_completion_sequence
+                   && *command.responder_completion_sequence == 7
+                   && command.responder_ttl_ms
+                   && *command.responder_ttl_ms == 5000,
+               "responder intent evidence survives socket round-trip");
+        pending.front()->complete(
+            LiveControlReply{true, 0, "state=prepared\n"});
+    }
+    prepare_client.join();
+    expect(prepare_result == 0
+               && prepare_output.str() == "state=prepared\n"
+               && prepare_error.str().empty(),
+           "responder intent prepare receives worker reply");
+
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
+void test_dialogue_responder_rejects_invalid_bounds_before_connect()
+{
+    LiveControlCommand bad_lease;
+    bad_lease.operation =
+        LiveControlOperation::create_local_goose_dialogue_responder_lease;
+    bad_lease.id = "lease-bad";
+    bad_lease.thread_alias = "main";
+    bad_lease.speaker_id = "sol";
+    bad_lease.message_kind = "feedback";
+    bad_lease.text = "Purpose";
+    bad_lease.responder_max_system_turns = 9;
+    bad_lease.responder_ttl_ms = 60000;
+    bad_lease.responder_min_interval_ms = 0;
+
+    std::ostringstream output;
+    std::ostringstream error;
+    const int lease_result = run_live_control_client(
+        "/tmp/does-not-matter.sock", bad_lease, output, error);
+    expect(lease_result != 0,
+           "responder lease rejects more than eight system turns");
+    expect(error.str().find("1..8") != std::string::npos,
+           "responder lease bound rejection is explicit");
+
+    LiveControlCommand leaked_field{
+        LiveControlOperation::inspect_task, "task-1", {}};
+    leaked_field.responder_ttl_ms = 10;
+    output.str({});
+    output.clear();
+    error.str({});
+    error.clear();
+    const int leaked_result = run_live_control_client(
+        "/tmp/does-not-matter.sock", leaked_field, output, error);
+    expect(leaked_result != 0,
+           "unrelated operation rejects responder numeric fields");
+    expect(error.str().find("responder") != std::string::npos,
+           "responder field scope rejection is explicit");
+
+    LiveControlCommand bad_prepare;
+    bad_prepare.operation =
+        LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    bad_prepare.id = "lease-001";
+    bad_prepare.message_kind = "feedback";
+    bad_prepare.text = "message";
+    bad_prepare.responder_completion_sequence = 0;
+    bad_prepare.responder_ttl_ms = 1000;
+    output.str({});
+    output.clear();
+    error.str({});
+    error.clear();
+    const int prepare_result = run_live_control_client(
+        "/tmp/does-not-matter.sock", bad_prepare, output, error);
+    expect(prepare_result != 0,
+           "responder prepare rejects zero completion sequence");
+    expect(error.str().find("responder intent prepare") != std::string::npos,
+           "responder prepare rejection is explicit");
+}
+
 void test_local_goose_stimulus_operation_round_trip()
 {
     const auto directory = temporary_directory();
@@ -890,6 +1069,8 @@ int main()
     test_preferred_dialogue_send_requires_revision_before_connect();
     test_dialogue_completion_feed_operations_round_trip();
     test_dialogue_completion_ack_rejects_invalid_sequence_before_connect();
+    test_dialogue_responder_operations_round_trip();
+    test_dialogue_responder_rejects_invalid_bounds_before_connect();
     test_local_goose_stimulus_operation_round_trip();
     test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();
