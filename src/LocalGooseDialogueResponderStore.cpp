@@ -297,18 +297,58 @@ LocalGooseDialogueResponderIntent parse_intent(const std::string& raw)
     return out;
 }
 
+LocalGooseDialogueResponderLease read_lease_row(sqlite3_stmt* statement)
+{
+    const auto row_thread = text(statement, 0);
+    const auto row_state = sqlite3_column_int64(statement, 1);
+    const auto row_turns = sqlite3_column_int64(statement, 2);
+    if (row_state < 0 || row_turns < 0) {
+        throw std::runtime_error("invalid dialogue responder lease index columns");
+    }
+    auto out = parse_lease(text(statement, 3));
+    if (out.thread_alias != row_thread
+        || static_cast<std::int64_t>(out.state) != row_state
+        || out.turns_committed != static_cast<std::uint64_t>(row_turns)) {
+        throw std::runtime_error(
+            "dialogue responder lease index/document mismatch");
+    }
+    return out;
+}
+
+LocalGooseDialogueResponderIntent read_intent_row(sqlite3_stmt* statement)
+{
+    const auto row_lease = text(statement, 0);
+    const auto row_event = text(statement, 1);
+    const auto row_request = text(statement, 2);
+    const auto row_state = sqlite3_column_int64(statement, 3);
+    const auto row_created = sqlite3_column_int64(statement, 4);
+    if (row_state < 0 || row_created < 0) {
+        throw std::runtime_error("invalid dialogue responder intent index columns");
+    }
+    auto out = parse_intent(text(statement, 5));
+    if (out.lease_id != row_lease
+        || out.event_id != row_event
+        || out.request_id != row_request
+        || static_cast<std::int64_t>(out.state) != row_state
+        || out.created_at_ms != row_created) {
+        throw std::runtime_error(
+            "dialogue responder intent index/document mismatch");
+    }
+    return out;
+}
+
 std::optional<LocalGooseDialogueResponderLease> find_lease(
     sqlite3* database, const std::string& lease_id)
 {
     Statement statement(
         database,
-        "SELECT document FROM local_goose_dialogue_responder_lease "
-        "WHERE lease_id=?1");
+        "SELECT thread_alias,state,turns_committed,document "
+        "FROM local_goose_dialogue_responder_lease WHERE lease_id=?1");
     bind_text(database, statement.get(), 1, lease_id);
     const int step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) return std::nullopt;
     if (step != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(database));
-    auto out = parse_lease(text(statement.get(), 0));
+    auto out = read_lease_row(statement.get());
     if (sqlite3_step(statement.get()) != SQLITE_DONE) {
         throw std::runtime_error("duplicate dialogue responder lease row");
     }
@@ -320,7 +360,8 @@ std::optional<LocalGooseDialogueResponderLease> find_active_lease(
 {
     Statement statement(
         database,
-        "SELECT document FROM local_goose_dialogue_responder_lease "
+        "SELECT thread_alias,state,turns_committed,document "
+        "FROM local_goose_dialogue_responder_lease "
         "WHERE thread_alias=?1 AND state=0");
     bind_text(database, statement.get(), 1, thread_alias);
     const int step = sqlite3_step(statement.get());
@@ -338,13 +379,13 @@ std::optional<LocalGooseDialogueResponderIntent> find_intent(
 {
     Statement statement(
         database,
-        "SELECT document FROM local_goose_dialogue_responder_intent "
-        "WHERE intent_id=?1");
+        "SELECT lease_id,event_id,request_id,state,created_at_ms,document "
+        "FROM local_goose_dialogue_responder_intent WHERE intent_id=?1");
     bind_text(database, statement.get(), 1, intent_id);
     const int step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) return std::nullopt;
     if (step != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(database));
-    auto out = parse_intent(text(statement.get(), 0));
+    auto out = read_intent_row(statement.get());
     if (sqlite3_step(statement.get()) != SQLITE_DONE) {
         throw std::runtime_error("duplicate dialogue responder intent row");
     }
@@ -356,14 +397,15 @@ std::optional<LocalGooseDialogueResponderIntent> find_trigger_intent(
 {
     Statement statement(
         database,
-        "SELECT document FROM local_goose_dialogue_responder_intent "
+        "SELECT lease_id,event_id,request_id,state,created_at_ms,document "
+        "FROM local_goose_dialogue_responder_intent "
         "WHERE lease_id=?1 AND event_id=?2");
     bind_text(database, statement.get(), 1, lease_id);
     bind_text(database, statement.get(), 2, event_id);
     const int step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) return std::nullopt;
     if (step != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(database));
-    return parse_intent(text(statement.get(), 0));
+    return read_intent_row(statement.get());
 }
 
 bool same_lease(const LocalGooseDialogueResponderLease& a,
@@ -669,7 +711,8 @@ LocalGooseDialogueResponderStore::intents_in_state(
     if (limit == 0 || limit > 1024) return out;
     Statement statement(
         database_,
-        "SELECT document FROM local_goose_dialogue_responder_intent "
+        "SELECT lease_id,event_id,request_id,state,created_at_ms,document "
+        "FROM local_goose_dialogue_responder_intent "
         "WHERE state=?1 ORDER BY created_at_ms,intent_id LIMIT ?2");
     bind_int64(database_, statement.get(), 1, static_cast<std::int64_t>(state));
     bind_int64(database_, statement.get(), 2, static_cast<std::int64_t>(limit));
@@ -677,7 +720,7 @@ LocalGooseDialogueResponderStore::intents_in_state(
         const int step = sqlite3_step(statement.get());
         if (step == SQLITE_DONE) break;
         if (step != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(database_));
-        out.push_back(parse_intent(text(statement.get(), 0)));
+        out.push_back(read_intent_row(statement.get()));
     }
     return out;
 }
