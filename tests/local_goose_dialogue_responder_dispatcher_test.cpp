@@ -294,6 +294,22 @@ int main()
     assert(responder_store.find_lease(lease.lease_id)->turns_committed == 2);
     assert(thread_store.find("main")->head_task_id == competing.task->id);
 
+    now = 100001;
+    const auto replacement_lease = dispatcher.create_lease(
+        "lease-responder-replacement", "main", "sol", "feedback",
+        "Replacement after finite expiry", 1, 5000, 0);
+    assert(replacement_lease.result
+        == LocalGooseDialogueResponderDispatchCode::accepted);
+    assert(replacement_lease.lease
+        && replacement_lease.lease->state
+            == LocalGooseDialogueResponderLeaseState::active);
+    const auto expired_original =
+        responder_store.find_lease(lease.lease_id);
+    assert(expired_original
+        && expired_original->state
+            == LocalGooseDialogueResponderLeaseState::expired);
+    assert(expired_original->terminal_reason == "lease_expired");
+
     const auto identity_a = make_local_goose_dialogue_responder_intent(
         "identity-lease", "main", 7,
         std::string{local_goose_dialogue_completion_event_prefix}
