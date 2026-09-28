@@ -160,6 +160,28 @@ LocalGooseDialogueResponderDispatcher::create_lease(
         return out;
     }
 
+    const auto current_active =
+        responder_store_.find_active_lease(thread_alias);
+    if (current_active
+        && current_active->state == LocalGooseDialogueResponderLeaseState::active
+        && now >= current_active->expires_at_ms) {
+        const auto expired = responder_store_.close_lease(
+            current_active->lease_id,
+            LocalGooseDialogueResponderLeaseState::expired,
+            "lease_expired", now);
+        if (expired.result
+                != LocalGooseDialogueResponderStoreResult::accepted
+            && expired.result
+                != LocalGooseDialogueResponderStoreResult::duplicate) {
+            out.result = map_store_result(expired.result);
+            out.lease = expired.lease;
+            out.detail =
+                "expired responder lease normalization failed: "
+                + expired.detail;
+            return out;
+        }
+    }
+
     LocalGooseDialogueResponderLease lease;
     lease.lease_id = lease_id;
     lease.thread_alias = thread_alias;
@@ -246,13 +268,31 @@ LocalGooseDialogueResponderDispatcher::prepare(
         return out;
     }
 
-    const auto lease = responder_store_.find_lease(lease_id);
+    auto lease = responder_store_.find_lease(lease_id);
     if (!lease) {
         out.result = LocalGooseDialogueResponderDispatchCode::conflict;
         out.detail = "dialogue responder lease not found";
         return out;
     }
-    if (lease->state != LocalGooseDialogueResponderLeaseState::active
+    if (lease->state == LocalGooseDialogueResponderLeaseState::active
+        && now >= lease->expires_at_ms) {
+        const auto expired = responder_store_.close_lease(
+            lease->lease_id,
+            LocalGooseDialogueResponderLeaseState::expired,
+            "lease_expired", now);
+        if (expired.result
+                != LocalGooseDialogueResponderStoreResult::accepted
+            && expired.result
+                != LocalGooseDialogueResponderStoreResult::duplicate) {
+            out.result = map_store_result(expired.result);
+            out.detail = "responder lease expiry normalization failed: "
+                + expired.detail;
+            return out;
+        }
+        lease = expired.lease;
+    }
+    if (!lease
+        || lease->state != LocalGooseDialogueResponderLeaseState::active
         || now < lease->issued_at_ms
         || now >= lease->expires_at_ms
         || now < lease->next_eligible_at_ms
@@ -353,7 +393,26 @@ LocalGooseDialogueResponderDispatcher::dispatch(
     }
 
     if (intent.state == IntentState::prepared) {
-        const auto lease = responder_store_.find_lease(intent.lease_id);
+        auto lease = responder_store_.find_lease(intent.lease_id);
+        if (lease
+            && lease->state == LocalGooseDialogueResponderLeaseState::active
+            && now >= lease->expires_at_ms) {
+            const auto expired = responder_store_.close_lease(
+                lease->lease_id,
+                LocalGooseDialogueResponderLeaseState::expired,
+                "lease_expired", now);
+            if (expired.result
+                    != LocalGooseDialogueResponderStoreResult::accepted
+                && expired.result
+                    != LocalGooseDialogueResponderStoreResult::duplicate) {
+                out.result = map_store_result(expired.result);
+                out.detail =
+                    "responder lease expiry normalization failed: "
+                    + expired.detail;
+                return out;
+            }
+            lease = expired.lease;
+        }
         if (!lease
             || lease->state != LocalGooseDialogueResponderLeaseState::active
             || lease->thread_alias != intent.thread_alias
