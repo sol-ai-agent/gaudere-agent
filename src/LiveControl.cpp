@@ -481,16 +481,36 @@ void validate_command(const LiveControlCommand& command)
         command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
         || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next
         || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
-    if (!v3_operation && has_v3_provenance(command)) {
+    const bool responder_provenance_operation =
+        command.operation
+            == LiveControlOperation::create_local_goose_dialogue_responder_lease
+        || command.operation
+            == LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    if (!v3_operation && !responder_provenance_operation
+        && has_v3_provenance(command)) {
         throw std::invalid_argument(
-            "live control v3 provenance is only valid for V3 dialogue");
+            "live control provenance is only valid for V3 dialogue or responder control");
     }
 
     const bool preferred_operation =
         command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
-    if (!preferred_operation && has_thread_fields(command)) {
+    const bool responder_thread_operation =
+        command.operation
+            == LiveControlOperation::create_local_goose_dialogue_responder_lease;
+    if (!preferred_operation && !responder_thread_operation
+        && has_thread_fields(command)) {
         throw std::invalid_argument(
-            "live control thread alias/revision is only valid for preferred V3 dialogue");
+            "live control thread alias/revision is only valid for preferred V3 dialogue or responder lease creation");
+    }
+
+    const bool responder_field_operation =
+        command.operation
+            == LiveControlOperation::create_local_goose_dialogue_responder_lease
+        || command.operation
+            == LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    if (!responder_field_operation && has_responder_fields(command)) {
+        throw std::invalid_argument(
+            "live control responder numeric fields are only valid for responder lease/intent creation");
     }
 }
 
