@@ -25,6 +25,13 @@ enum class LocalGooseDialogueResponderDispatchCode {
     unavailable
 };
 
+struct LocalGooseDialogueResponderLeaseResult {
+    LocalGooseDialogueResponderDispatchCode result =
+        LocalGooseDialogueResponderDispatchCode::invalid;
+    std::optional<LocalGooseDialogueResponderLease> lease;
+    std::string detail;
+};
+
 struct LocalGooseDialogueResponderDispatchResult {
     LocalGooseDialogueResponderDispatchCode result =
         LocalGooseDialogueResponderDispatchCode::invalid;
@@ -58,6 +65,26 @@ public:
         LocalGooseDialogueResponderClock clock);
 
     [[nodiscard]] const std::string& consumer_id() const noexcept;
+
+    [[nodiscard]] LocalGooseDialogueResponderLeaseResult create_lease(
+        const std::string& lease_id,
+        const std::string& thread_alias,
+        const std::string& speaker_id,
+        const std::string& message_kind,
+        const std::string& purpose,
+        std::uint64_t max_system_turns,
+        std::int64_t lease_ttl_ms,
+        std::int64_t min_interval_ms);
+
+    [[nodiscard]] LocalGooseDialogueResponderLeaseResult revoke_lease(
+        const std::string& lease_id,
+        const std::string& reason);
+
+    [[nodiscard]] std::optional<LocalGooseDialogueResponderLease> find_lease(
+        const std::string& lease_id) const;
+
+    [[nodiscard]] std::optional<LocalGooseDialogueResponderIntent> find_intent(
+        const std::string& intent_id) const;
 
     [[nodiscard]] LocalGooseDialogueResponderDispatchResult prepare(
         const std::string& lease_id,
