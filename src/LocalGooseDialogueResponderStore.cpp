@@ -367,7 +367,7 @@ std::optional<LocalGooseDialogueResponderLease> find_active_lease(
     const int step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) return std::nullopt;
     if (step != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(database));
-    auto out = parse_lease(text(statement.get(), 0));
+    auto out = read_lease_row(statement.get());
     if (sqlite3_step(statement.get()) != SQLITE_DONE) {
         throw std::runtime_error("duplicate active dialogue responder lease");
     }
