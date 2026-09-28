@@ -980,6 +980,12 @@ LiveControlReply LiveControlProcessor::process_one(
     case LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next:
     case LiveControlOperation::inspect_local_goose_dialogue_completion:
     case LiveControlOperation::acknowledge_local_goose_dialogue_completion:
+    case LiveControlOperation::create_local_goose_dialogue_responder_lease:
+    case LiveControlOperation::revoke_local_goose_dialogue_responder_lease:
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_lease:
+    case LiveControlOperation::prepare_local_goose_dialogue_responder_intent:
+    case LiveControlOperation::dispatch_local_goose_dialogue_responder_intent:
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_intent:
     case LiveControlOperation::inspect_task:
     case LiveControlOperation::inspect_budget:
     case LiveControlOperation::accept_wake:
