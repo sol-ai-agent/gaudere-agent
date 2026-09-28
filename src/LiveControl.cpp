@@ -369,6 +369,66 @@ void validate_command(const LiveControlCommand& command)
                 "dialogue completion acknowledgement requires a positive sequence");
         }
         break;
+    case LiveControlOperation::create_local_goose_dialogue_responder_lease:
+        if (!safe_id(command.thread_alias)
+            || !safe_id(command.speaker_id)
+            || !valid_v3_message_kind(command.message_kind)
+            || !command.speaker_kind.empty()
+            || !command.predecessor_task_id.empty()
+            || command.expected_thread_revision
+            || !safe_reason(command.text)
+            || !command.responder_max_system_turns
+            || *command.responder_max_system_turns == 0
+            || *command.responder_max_system_turns > 8
+            || !command.responder_ttl_ms
+            || *command.responder_ttl_ms <= 0
+            || *command.responder_ttl_ms > max_responder_duration_ms
+            || !command.responder_min_interval_ms
+            || *command.responder_min_interval_ms < 0
+            || *command.responder_min_interval_ms > max_responder_duration_ms
+            || command.responder_completion_sequence) {
+            throw std::invalid_argument(
+                "responder lease requires alias, system speaker id, message kind, purpose, 1..8 turns, ttl and minimum interval");
+        }
+        break;
+    case LiveControlOperation::revoke_local_goose_dialogue_responder_lease:
+        if (!safe_reason(command.text) || has_responder_fields(command)
+            || has_v3_provenance(command) || has_thread_fields(command)
+            || !command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "responder lease revocation accepts only lease id and reason");
+        }
+        break;
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_lease:
+    case LiveControlOperation::dispatch_local_goose_dialogue_responder_intent:
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_intent:
+        if (!command.text.empty() || has_responder_fields(command)
+            || has_v3_provenance(command) || has_thread_fields(command)
+            || !command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "responder inspection/dispatch accepts only an id");
+        }
+        break;
+    case LiveControlOperation::prepare_local_goose_dialogue_responder_intent:
+        if (command.text.empty() || command.text.size() > 4096
+            || !valid_v3_message_kind(command.message_kind)
+            || !command.speaker_kind.empty() || !command.speaker_id.empty()
+            || !command.thread_alias.empty() || command.expected_thread_revision
+            || !command.predecessor_task_id.empty()
+            || !command.responder_completion_sequence
+            || *command.responder_completion_sequence == 0
+            || *command.responder_completion_sequence
+                > static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max())
+            || !command.responder_ttl_ms
+            || *command.responder_ttl_ms <= 0
+            || *command.responder_ttl_ms > max_responder_duration_ms
+            || command.responder_max_system_turns
+            || command.responder_min_interval_ms) {
+            throw std::invalid_argument(
+                "responder intent prepare requires lease id, next sequence, message kind, message and ttl");
+        }
+        break;
     case LiveControlOperation::inspect_task:
         if (!command.text.empty()) {
             throw std::invalid_argument("inspect_task does not accept text");
