@@ -713,132 +713,37 @@ LiveControlReply LiveControlProcessor::process_one(
         }
         if (!dialogue_thread_store_) return thread_store_disabled();
 
-        auto head = dialogue_thread_store_->find(command.thread_alias);
-        if (!head) {
-            return LiveControlReply{
-                false, 3,
-                "gaudere-agent: preferred dialogue thread alias not found\n"};
+        const auto submit = submit_local_goose_dialogue_v3_preferred(
+            runtime_, store_, *dialogue_thread_store_,
+            local_goose_dialogue_model_sha256_,
+            command.id, command.thread_alias,
+            *command.expected_thread_revision,
+            command.speaker_kind, command.speaker_id,
+            command.message_kind, command.text);
+        work_may_be_pending =
+            work_may_be_pending || submit.work_may_be_pending;
+
+        std::string body =
+            "gaudere-agent: " + submit.detail + "\n";
+        if (submit.task) body += task_report(*submit.task);
+        if (submit.head) {
+            body += local_goose_dialogue_thread_head_report(*submit.head);
         }
-        const auto expected_revision = *command.expected_thread_revision;
-        if (head->revision != expected_revision) {
-            if (expected_revision
-                    < static_cast<std::uint64_t>(
-                        std::numeric_limits<std::int64_t>::max())
-                && head->revision == expected_revision + 1) {
-                const auto current_task = store_.find(head->head_task_id);
-                if (current_task
-                    && same_preferred_v3_request(*current_task, command)) {
-                    if (!gaudere::work::is_terminal(current_task->status)) {
-                        work_may_be_pending = true;
-                    }
-                    return LiveControlReply{
-                        true, 0,
-                        task_report(*current_task)
-                            + local_goose_dialogue_thread_head_report(*head)};
-                }
+
+        switch (submit.result) {
+        case LocalGooseDialoguePreferredSubmitResultCode::accepted:
+        case LocalGooseDialoguePreferredSubmitResultCode::duplicate:
+            if (!submit.task || !submit.head) {
+                throw std::runtime_error(
+                    "preferred dialogue success lacks canonical Task/head");
             }
-            return LiveControlReply{
-                false, 4,
-                "gaudere-agent: preferred dialogue thread revision conflict\n"
-                    + local_goose_dialogue_thread_head_report(*head)};
+            return LiveControlReply{true, 0, std::move(body)};
+        case LocalGooseDialoguePreferredSubmitResultCode::conflict:
+        case LocalGooseDialoguePreferredSubmitResultCode::invalid:
+        case LocalGooseDialoguePreferredSubmitResultCode::unavailable:
+            return LiveControlReply{false, 4, std::move(body)};
         }
-        if (head->revision
-            == static_cast<std::uint64_t>(
-                std::numeric_limits<std::int64_t>::max())) {
-            return LiveControlReply{
-                false, 4,
-                "gaudere-agent: preferred dialogue thread revision exhausted\n"};
-        }
-
-        const auto predecessor = store_.find(head->head_task_id);
-        if (!predecessor) {
-            return LiveControlReply{
-                false, 3,
-                "gaudere-agent: preferred dialogue predecessor Task not found\n"};
-        }
-        const auto root = canonical_dialogue_root(*predecessor);
-        if (!root || *root != head->root_task_id) {
-            return LiveControlReply{
-                false, 4,
-                "gaudere-agent: preferred dialogue head is not canonical success for declared root\n"};
-        }
-
-        gaudere::work::Task task;
-        try {
-            if (predecessor->kind == local_goose_dialogue_v2_task_kind) {
-                task = make_local_goose_dialogue_v3_bridge_from_v2_task(
-                    command.id, command.speaker_kind, command.speaker_id,
-                    command.message_kind, command.text,
-                    local_goose_dialogue_model_sha256_, *predecessor);
-            } else {
-                task = make_local_goose_dialogue_v3_successor_task(
-                    command.id, command.speaker_kind, command.speaker_id,
-                    command.message_kind, command.text,
-                    local_goose_dialogue_model_sha256_, *predecessor);
-            }
-        } catch (const std::invalid_argument& error) {
-            return LiveControlReply{
-                false, 4,
-                std::string("gaudere-agent: preferred dialogue predecessor rejected: ")
-                    + error.what() + "\n"};
-        }
-
-        const auto existing =
-            store_.find_by_idempotency_key(task.idempotency_key);
-        if (existing && !same_local_goose_dialogue_definition(*existing, task)) {
-            return LiveControlReply{
-                false, 4,
-                "gaudere-agent: Local Goose dialogue request id conflicts with an existing Task\n"};
-        }
-
-        const auto submit = runtime_.submit(task);
-        if (submit != gaudere::work::SubmitResult::accepted
-            && submit != gaudere::work::SubmitResult::duplicate) {
-            return LiveControlReply{
-                false, 4,
-                "gaudere-agent: preferred Local Goose dialogue v3 submission rejected\n"};
-        }
-
-        auto stored = store_.find(task.id);
-        if (!stored
-            || !same_local_goose_dialogue_definition(*stored, task)) {
-            throw std::runtime_error(
-                "preferred Local Goose dialogue v3 Task differs after submission");
-        }
-        if (!gaudere::work::is_terminal(stored->status)) {
-            work_may_be_pending = true;
-        }
-
-        auto replacement = *head;
-        replacement.revision = head->revision + 1;
-        replacement.head_task_id = task.id;
-        const auto write =
-            dialogue_thread_store_->replace(*head, replacement);
-        switch (write.result) {
-        case LocalGooseDialogueThreadStoreResult::accepted:
-        case LocalGooseDialogueThreadStoreResult::duplicate:
-            return LiveControlReply{
-                true, 0,
-                task_report(*stored)
-                    + local_goose_dialogue_thread_head_report(*write.head)};
-        case LocalGooseDialogueThreadStoreResult::conflict:
-            return LiveControlReply{
-                false, 4,
-                std::string(
-                    "gaudere-agent: preferred dialogue head conflict after durable Task submission\n")
-                    + task_report(*stored)
-                    + (write.head
-                        ? local_goose_dialogue_thread_head_report(*write.head)
-                        : std::string{})};
-        case LocalGooseDialogueThreadStoreResult::invalid:
-        case LocalGooseDialogueThreadStoreResult::unavailable:
-            return LiveControlReply{
-                false, 4,
-                std::string(
-                    "gaudere-agent: preferred dialogue head update failed after durable Task submission: ")
-                    + write.detail + "\n"
-                    + task_report(*stored)};
-        }
+        throw std::logic_error("unknown preferred dialogue submit result");
     }
 
     if (command.operation == LiveControlOperation::inspect_task) {
