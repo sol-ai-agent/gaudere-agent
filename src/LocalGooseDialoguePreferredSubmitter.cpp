@@ -46,7 +46,9 @@ bool same_request(const gaudere::work::Task& task,
                   const std::string& speaker_kind,
                   const std::string& speaker_id,
                   const std::string& message_kind,
-                  const std::string& message) noexcept
+                  const std::string& message,
+                  const std::string& expected_root_task_id,
+                  const std::string& expected_predecessor_task_id) noexcept
 {
     const auto dialogue = inspect_local_goose_dialogue_v3_task(task);
     return dialogue.eligible
@@ -54,7 +56,9 @@ bool same_request(const gaudere::work::Task& task,
         && dialogue.speaker_kind == speaker_kind
         && dialogue.speaker_id == speaker_id
         && dialogue.message_kind == message_kind
-        && dialogue.message == message;
+        && dialogue.message == message
+        && dialogue.root_task_id == expected_root_task_id
+        && dialogue.predecessor_task_id == expected_predecessor_task_id;
 }
 
 } // namespace
@@ -92,30 +96,43 @@ submit_local_goose_dialogue_v3_preferred(
                 < static_cast<std::uint64_t>(
                     std::numeric_limits<std::int64_t>::max())
             && head->revision == expected_thread_revision + 1) {
-            const auto current_task = task_store.find(head->head_task_id);
-            if (current_task
-                && same_request(
-                    *current_task, request_id, speaker_kind, speaker_id,
-                    message_kind, message)) {
-                out.result =
-                    LocalGooseDialoguePreferredSubmitResultCode::duplicate;
-                out.task = current_task;
-                out.head = head;
-                out.work_may_be_pending =
-                    !gaudere::work::is_terminal(current_task->status);
-                out.detail = "preferred dialogue request already committed";
-                return out;
-            }
-            const auto expected_task = task_store.find_by_idempotency_key(
-                std::string{local_goose_dialogue_v3_task_prefix}
-                    + "request-id:" + sha256_hex(request_id));
-            if (expected_task
-                && same_request(
-                    *expected_task, request_id, speaker_kind, speaker_id,
-                    message_kind, message)) {
-                out.task = expected_task;
-                out.work_may_be_pending =
-                    !gaudere::work::is_terminal(expected_task->status);
+            const auto history = thread_store.history_from(
+                thread_alias, expected_thread_revision, 2);
+            const bool contiguous =
+                history.size() == 2
+                && history[0].revision == expected_thread_revision
+                && history[1].revision == expected_thread_revision + 1
+                && history[1].head_task_id == head->head_task_id
+                && history[0].root_task_id == head->root_task_id
+                && history[1].root_task_id == head->root_task_id;
+            if (contiguous) {
+                const auto current_task = task_store.find(head->head_task_id);
+                if (current_task
+                    && same_request(
+                        *current_task, request_id, speaker_kind, speaker_id,
+                        message_kind, message, head->root_task_id,
+                        history[0].head_task_id)) {
+                    out.result =
+                        LocalGooseDialoguePreferredSubmitResultCode::duplicate;
+                    out.task = current_task;
+                    out.head = head;
+                    out.work_may_be_pending =
+                        !gaudere::work::is_terminal(current_task->status);
+                    out.detail = "preferred dialogue request already committed";
+                    return out;
+                }
+                const auto expected_task = task_store.find_by_idempotency_key(
+                    std::string{local_goose_dialogue_v3_task_prefix}
+                        + "request-id:" + sha256_hex(request_id));
+                if (expected_task
+                    && same_request(
+                        *expected_task, request_id, speaker_kind, speaker_id,
+                        message_kind, message, head->root_task_id,
+                        history[0].head_task_id)) {
+                    out.task = expected_task;
+                    out.work_may_be_pending =
+                        !gaudere::work::is_terminal(expected_task->status);
+                }
             }
         }
         out.result = LocalGooseDialoguePreferredSubmitResultCode::conflict;
@@ -123,7 +140,6 @@ submit_local_goose_dialogue_v3_preferred(
         out.detail = "preferred dialogue thread revision conflict";
         return out;
     }
-
     if (head->revision
         == static_cast<std::uint64_t>(
             std::numeric_limits<std::int64_t>::max())) {
