@@ -105,6 +105,16 @@ submit_local_goose_dialogue_v3_preferred(
                 out.detail = "preferred dialogue request already committed";
                 return out;
             }
+            const auto expected_task = task_store.find_by_idempotency_key(
+                "cognition.local-goose-dialogue.v3:" + request_id);
+            if (expected_task
+                && same_request(
+                    *expected_task, request_id, speaker_kind, speaker_id,
+                    message_kind, message)) {
+                out.task = expected_task;
+                out.work_may_be_pending =
+                    !gaudere::work::is_terminal(expected_task->status);
+            }
         }
         out.result = LocalGooseDialoguePreferredSubmitResultCode::conflict;
         out.head = head;
