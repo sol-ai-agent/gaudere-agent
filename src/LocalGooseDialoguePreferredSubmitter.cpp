@@ -2,6 +2,7 @@
 
 #include "LocalGooseDialogueV2.hpp"
 #include "LocalGooseDialogueV3.hpp"
+#include "Sha256.hpp"
 
 #include <limits>
 #include <stdexcept>
@@ -106,7 +107,8 @@ submit_local_goose_dialogue_v3_preferred(
                 return out;
             }
             const auto expected_task = task_store.find_by_idempotency_key(
-                "cognition.local-goose-dialogue.v3:" + request_id);
+                std::string{local_goose_dialogue_v3_task_prefix}
+                    + "request-id:" + sha256_hex(request_id));
             if (expected_task
                 && same_request(
                     *expected_task, request_id, speaker_kind, speaker_id,
