@@ -246,6 +246,17 @@ local_goose_dialogue_completion_feed_test_SOURCES = \
 local_goose_dialogue_completion_feed_test_LDADD = \
 	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
+local_goose_dialogue_responder_store_test_SOURCES = \
+	local_goose_dialogue_responder_store_test.cpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+local_goose_dialogue_responder_store_test_LDADD = \
+	$(JSON_LIBS) -lsqlite3
+
 local_goose_dialogue_v2_handler_test_SOURCES = \
 	local_goose_dialogue_v2_handler_test.cpp \
 	../src/LocalGooseDialogueV2.cpp \
