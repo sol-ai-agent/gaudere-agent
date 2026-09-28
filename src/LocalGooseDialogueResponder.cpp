@@ -99,12 +99,6 @@ void append(std::string& out, const std::uint64_t value)
     out += '|';
 }
 
-void append(std::string& out, const std::int64_t value)
-{
-    out += std::to_string(value);
-    out += '|';
-}
-
 std::string intent_digest(const LocalGooseDialogueResponderIntent& intent)
 {
     std::string canonical =
