@@ -5,6 +5,7 @@
 #include "LocalGooseDialogue.hpp"
 #include "LocalGooseDialogueV2.hpp"
 #include "LocalGooseDialogueV3.hpp"
+#include "LocalGooseDialoguePreferredSubmitter.hpp"
 #include "OpenAIBudget.hpp"
 #include "OpenAITask.hpp"
 #include "TaskExecutor.hpp"
@@ -212,19 +213,6 @@ std::optional<std::string> canonical_dialogue_root(
     return std::nullopt;
 }
 
-bool same_preferred_v3_request(
-    const gaudere::work::Task& task,
-    const LiveControlCommand& command) noexcept
-{
-    const auto dialogue = inspect_local_goose_dialogue_v3_task(task);
-    return dialogue.eligible
-        && dialogue.request_id == command.id
-        && dialogue.speaker_kind == command.speaker_kind
-        && dialogue.speaker_id == command.speaker_id
-        && dialogue.message_kind == command.message_kind
-        && dialogue.message == command.text;
-}
-
 LiveControlReply thread_store_disabled()
 {
     return LiveControlReply{
@@ -237,6 +225,117 @@ LiveControlReply completion_feed_disabled()
     return LiveControlReply{
         false, 4,
         "gaudere-agent: dialogue completion feed capability is not enabled in this service\n"};
+}
+
+LiveControlReply responder_disabled()
+{
+    return LiveControlReply{
+        false, 4,
+        "gaudere-agent: dialogue responder capability is not enabled in this service\n"};
+}
+
+const char* responder_dispatch_name(
+    const LocalGooseDialogueResponderDispatchCode result) noexcept
+{
+    switch (result) {
+    case LocalGooseDialogueResponderDispatchCode::accepted: return "accepted";
+    case LocalGooseDialogueResponderDispatchCode::duplicate: return "duplicate";
+    case LocalGooseDialogueResponderDispatchCode::conflict: return "conflict";
+    case LocalGooseDialogueResponderDispatchCode::invalid: return "invalid";
+    case LocalGooseDialogueResponderDispatchCode::unavailable: return "unavailable";
+    }
+    return "unknown";
+}
+
+const char* responder_lease_state_name(
+    const LocalGooseDialogueResponderLeaseState state) noexcept
+{
+    switch (state) {
+    case LocalGooseDialogueResponderLeaseState::active: return "active";
+    case LocalGooseDialogueResponderLeaseState::exhausted: return "exhausted";
+    case LocalGooseDialogueResponderLeaseState::expired: return "expired";
+    case LocalGooseDialogueResponderLeaseState::revoked: return "revoked";
+    case LocalGooseDialogueResponderLeaseState::manual_review: return "manual_review";
+    }
+    return "unknown";
+}
+
+const char* responder_intent_state_name(
+    const LocalGooseDialogueResponderIntentState state) noexcept
+{
+    switch (state) {
+    case LocalGooseDialogueResponderIntentState::prepared: return "prepared";
+    case LocalGooseDialogueResponderIntentState::submitted: return "submitted";
+    case LocalGooseDialogueResponderIntentState::completed: return "completed";
+    case LocalGooseDialogueResponderIntentState::conflict: return "conflict";
+    case LocalGooseDialogueResponderIntentState::expired: return "expired";
+    case LocalGooseDialogueResponderIntentState::manual_review: return "manual_review";
+    }
+    return "unknown";
+}
+
+std::string responder_lease_report(
+    const LocalGooseDialogueResponderLease& lease)
+{
+    std::ostringstream output;
+    output
+        << "lease_id=\"" << lease.lease_id << "\"\n"
+        << "thread_alias=\"" << lease.thread_alias << "\"\n"
+        << "state=" << responder_lease_state_name(lease.state) << '\n'
+        << "speaker_kind=\"" << lease.speaker_kind << "\"\n"
+        << "speaker_id=\"" << lease.speaker_id << "\"\n"
+        << "allowed_message_kinds=" << lease.allowed_message_kinds << '\n'
+        << "purpose_json=" << nlohmann::json(lease.purpose).dump() << '\n'
+        << "max_system_turns=" << lease.max_system_turns << '\n'
+        << "turns_committed=" << lease.turns_committed << '\n'
+        << "issued_at_ms=" << lease.issued_at_ms << '\n'
+        << "expires_at_ms=" << lease.expires_at_ms << '\n'
+        << "min_interval_ms=" << lease.min_interval_ms << '\n'
+        << "next_eligible_at_ms=" << lease.next_eligible_at_ms << '\n'
+        << "terminal_reason_json="
+        << nlohmann::json(lease.terminal_reason).dump() << '\n'
+        << "terminal_at_ms=";
+    if (lease.terminal_at_ms) output << *lease.terminal_at_ms;
+    else output << "none";
+    output << '\n';
+    return output.str();
+}
+
+std::string responder_intent_report(
+    const LocalGooseDialogueResponderIntent& intent)
+{
+    std::ostringstream output;
+    output
+        << "intent_id=\"" << intent.intent_id << "\"\n"
+        << "lease_id=\"" << intent.lease_id << "\"\n"
+        << "thread_alias=\"" << intent.thread_alias << "\"\n"
+        << "state=" << responder_intent_state_name(intent.state) << '\n'
+        << "completion_sequence=" << intent.completion_sequence << '\n'
+        << "event_id=\"" << intent.event_id << "\"\n"
+        << "result_sha256=" << intent.result_sha256 << '\n'
+        << "triggering_task_id=\"" << intent.triggering_task_id << "\"\n"
+        << "expected_thread_revision=" << intent.expected_thread_revision << '\n'
+        << "expected_head_task_id=\"" << intent.expected_head_task_id << "\"\n"
+        << "speaker_kind=\"" << intent.speaker_kind << "\"\n"
+        << "speaker_id=\"" << intent.speaker_id << "\"\n"
+        << "message_kind=\"" << intent.message_kind << "\"\n"
+        << "message_json=" << nlohmann::json(intent.message).dump() << '\n'
+        << "request_id=\"" << intent.request_id << "\"\n"
+        << "created_at_ms=" << intent.created_at_ms << '\n'
+        << "expires_at_ms=" << intent.expires_at_ms << '\n'
+        << "submitted_task_id=\"" << intent.submitted_task_id << "\"\n"
+        << "submitted_thread_revision=";
+    if (intent.submitted_thread_revision) output << *intent.submitted_thread_revision;
+    else output << "none";
+    output << "\ncommitted_at_ms=";
+    if (intent.committed_at_ms) output << *intent.committed_at_ms;
+    else output << "none";
+    output << "\ncompleted_at_ms=";
+    if (intent.completed_at_ms) output << *intent.completed_at_ms;
+    else output << "none";
+    output << "\nterminal_reason_json="
+           << nlohmann::json(intent.terminal_reason).dump() << '\n';
+    return output.str();
 }
 
 std::optional<std::uint64_t> parse_completion_sequence(
