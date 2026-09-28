@@ -238,7 +238,7 @@ jobs:
       - name: Prove responder store remains non-production
         run: |
           set -eu
-          grep -q 'local_goose_dialogue_responder_store_test' agent/tests/Makefile.am
+          grep -q '^[[:space:]]*local_goose_dialogue_responder_store_test \\' agent/tests/Makefile.am
           grep -q 'LocalGooseDialogueResponderStore.cpp' agent/tests/Makefile.am
           grep -q 'local_goose_dialogue_responder_sidecar_schema = 1' \
             agent/src/LocalGooseDialogueResponder.hpp
