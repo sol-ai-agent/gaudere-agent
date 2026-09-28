@@ -52,6 +52,18 @@ std::string operation_name(const LiveControlOperation operation)
         return "inspect_local_goose_dialogue_completion";
     case LiveControlOperation::acknowledge_local_goose_dialogue_completion:
         return "acknowledge_local_goose_dialogue_completion";
+    case LiveControlOperation::create_local_goose_dialogue_responder_lease:
+        return "create_local_goose_dialogue_responder_lease";
+    case LiveControlOperation::revoke_local_goose_dialogue_responder_lease:
+        return "revoke_local_goose_dialogue_responder_lease";
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_lease:
+        return "inspect_local_goose_dialogue_responder_lease";
+    case LiveControlOperation::prepare_local_goose_dialogue_responder_intent:
+        return "prepare_local_goose_dialogue_responder_intent";
+    case LiveControlOperation::dispatch_local_goose_dialogue_responder_intent:
+        return "dispatch_local_goose_dialogue_responder_intent";
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_intent:
+        return "inspect_local_goose_dialogue_responder_intent";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
@@ -110,6 +122,24 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "acknowledge_local_goose_dialogue_completion") {
         return LiveControlOperation::acknowledge_local_goose_dialogue_completion;
+    }
+    if (value == "create_local_goose_dialogue_responder_lease") {
+        return LiveControlOperation::create_local_goose_dialogue_responder_lease;
+    }
+    if (value == "revoke_local_goose_dialogue_responder_lease") {
+        return LiveControlOperation::revoke_local_goose_dialogue_responder_lease;
+    }
+    if (value == "inspect_local_goose_dialogue_responder_lease") {
+        return LiveControlOperation::inspect_local_goose_dialogue_responder_lease;
+    }
+    if (value == "prepare_local_goose_dialogue_responder_intent") {
+        return LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    }
+    if (value == "dispatch_local_goose_dialogue_responder_intent") {
+        return LiveControlOperation::dispatch_local_goose_dialogue_responder_intent;
+    }
+    if (value == "inspect_local_goose_dialogue_responder_intent") {
+        return LiveControlOperation::inspect_local_goose_dialogue_responder_intent;
     }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
