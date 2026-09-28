@@ -516,6 +516,106 @@ LiveControlReply LiveControlProcessor::process_one(
     bool& local_goose_cycle_may_have_changed)
 {
     if (command.operation
+        == LiveControlOperation::create_local_goose_dialogue_responder_lease) {
+        if (!dialogue_responder_dispatcher_) return responder_disabled();
+        const auto result = dialogue_responder_dispatcher_->create_lease(
+            command.id, command.thread_alias, command.speaker_id,
+            command.message_kind, command.text,
+            *command.responder_max_system_turns,
+            *command.responder_ttl_ms,
+            *command.responder_min_interval_ms);
+        const bool ok =
+            result.result == LocalGooseDialogueResponderDispatchCode::accepted
+            || result.result == LocalGooseDialogueResponderDispatchCode::duplicate;
+        std::string body =
+            "result=" + std::string(responder_dispatch_name(result.result)) + "\n"
+            + "detail_json=" + nlohmann::json(result.detail).dump() + "\n";
+        if (result.lease) body += responder_lease_report(*result.lease);
+        return LiveControlReply{ok, ok ? 0 : 4, std::move(body)};
+    }
+
+    if (command.operation
+        == LiveControlOperation::revoke_local_goose_dialogue_responder_lease) {
+        if (!dialogue_responder_dispatcher_) return responder_disabled();
+        const auto result = dialogue_responder_dispatcher_->revoke_lease(
+            command.id, command.text);
+        const bool ok =
+            result.result == LocalGooseDialogueResponderDispatchCode::accepted
+            || result.result == LocalGooseDialogueResponderDispatchCode::duplicate;
+        std::string body =
+            "result=" + std::string(responder_dispatch_name(result.result)) + "\n"
+            + "detail_json=" + nlohmann::json(result.detail).dump() + "\n";
+        if (result.lease) body += responder_lease_report(*result.lease);
+        return LiveControlReply{ok, ok ? 0 : 4, std::move(body)};
+    }
+
+    if (command.operation
+        == LiveControlOperation::inspect_local_goose_dialogue_responder_lease) {
+        if (!dialogue_responder_dispatcher_) return responder_disabled();
+        const auto lease =
+            dialogue_responder_dispatcher_->find_lease(command.id);
+        return lease
+            ? LiveControlReply{true, 0, responder_lease_report(*lease)}
+            : LiveControlReply{
+                false, 3, "gaudere-agent: dialogue responder lease not found\n"};
+    }
+
+    if (command.operation
+        == LiveControlOperation::prepare_local_goose_dialogue_responder_intent) {
+        if (!dialogue_responder_dispatcher_) return responder_disabled();
+        const auto result = dialogue_responder_dispatcher_->prepare(
+            command.id, *command.responder_completion_sequence,
+            command.message_kind, command.text, *command.responder_ttl_ms);
+        const bool ok =
+            result.result == LocalGooseDialogueResponderDispatchCode::accepted
+            || result.result == LocalGooseDialogueResponderDispatchCode::duplicate;
+        std::string body =
+            "result=" + std::string(responder_dispatch_name(result.result)) + "\n"
+            + "consumer_last_sequence="
+            + std::to_string(result.consumer_last_sequence) + "\n"
+            + "detail_json=" + nlohmann::json(result.detail).dump() + "\n";
+        if (result.intent) body += responder_intent_report(*result.intent);
+        if (result.head) {
+            body += local_goose_dialogue_thread_head_report(*result.head);
+        }
+        return LiveControlReply{ok, ok ? 0 : 4, std::move(body)};
+    }
+
+    if (command.operation
+        == LiveControlOperation::dispatch_local_goose_dialogue_responder_intent) {
+        if (!dialogue_responder_dispatcher_) return responder_disabled();
+        const auto result =
+            dialogue_responder_dispatcher_->dispatch(command.id);
+        work_may_be_pending =
+            work_may_be_pending || result.work_may_be_pending;
+        const bool ok =
+            result.result == LocalGooseDialogueResponderDispatchCode::accepted
+            || result.result == LocalGooseDialogueResponderDispatchCode::duplicate;
+        std::string body =
+            "result=" + std::string(responder_dispatch_name(result.result)) + "\n"
+            + "consumer_last_sequence="
+            + std::to_string(result.consumer_last_sequence) + "\n"
+            + "detail_json=" + nlohmann::json(result.detail).dump() + "\n";
+        if (result.intent) body += responder_intent_report(*result.intent);
+        if (result.task) body += task_report(*result.task);
+        if (result.head) {
+            body += local_goose_dialogue_thread_head_report(*result.head);
+        }
+        return LiveControlReply{ok, ok ? 0 : 4, std::move(body)};
+    }
+
+    if (command.operation
+        == LiveControlOperation::inspect_local_goose_dialogue_responder_intent) {
+        if (!dialogue_responder_dispatcher_) return responder_disabled();
+        const auto intent =
+            dialogue_responder_dispatcher_->find_intent(command.id);
+        return intent
+            ? LiveControlReply{true, 0, responder_intent_report(*intent)}
+            : LiveControlReply{
+                false, 3, "gaudere-agent: dialogue responder intent not found\n"};
+    }
+
+    if (command.operation
         == LiveControlOperation::inspect_local_goose_dialogue_completion) {
         if (!dialogue_completion_store_) return completion_feed_disabled();
         const auto event =
