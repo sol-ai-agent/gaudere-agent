@@ -22,6 +22,8 @@ using Json = nlohmann::json;
 constexpr std::size_t max_request_bytes = 24 * 1024;
 constexpr std::size_t max_response_bytes = 80 * 1024;
 constexpr int protocol_version = 1;
+constexpr std::int64_t max_responder_duration_ms =
+    24LL * 60 * 60 * 1000;
 
 std::string operation_name(const LiveControlOperation operation)
 {
@@ -235,6 +237,14 @@ bool has_thread_fields(const LiveControlCommand& command) noexcept
 {
     return !command.thread_alias.empty()
         || command.expected_thread_revision.has_value();
+}
+
+bool has_responder_fields(const LiveControlCommand& command) noexcept
+{
+    return command.responder_completion_sequence.has_value()
+        || command.responder_max_system_turns.has_value()
+        || command.responder_ttl_ms.has_value()
+        || command.responder_min_interval_ms.has_value();
 }
 
 void validate_command(const LiveControlCommand& command)
