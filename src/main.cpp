@@ -17,6 +17,8 @@
 #include "LocalGooseCognitionService.hpp"
 #include "LocalGooseDialogue.hpp"
 #include "LocalGooseDialogueCompletionFeed.hpp"
+#include "LocalGooseDialogueResponderDispatcher.hpp"
+#include "LocalGooseDialogueResponderStore.hpp"
 #include "LocalGooseDialogueHandler.hpp"
 #include "LocalGooseDialogueThreadStore.hpp"
 #include "LocalGooseDialogueV2Handler.hpp"
@@ -92,6 +94,8 @@ struct Options {
     std::string local_goose_governance;
     std::string local_goose_cycle_sidecar;
     std::string local_goose_cycle_stimulus_sidecar;
+    std::string local_goose_dialogue_responder_sidecar;
+    std::string local_goose_dialogue_responder_consumer_id;
 };
 
 void usage(const char* program)
@@ -110,6 +114,8 @@ void usage(const char* program)
         << "--local-goose-governance PATH] "
         << "[--local-goose-cycle-sidecar PATH] "
         << "[--local-goose-cycle-stimulus-sidecar PATH] "
+        << "[--local-goose-dialogue-responder-sidecar PATH "
+        << "--local-goose-dialogue-responder-consumer-id ID] "
         << "[--openai-model MODEL [--openai-secret NAME] [--secret-dir PATH]]\n";
 }
 
@@ -128,6 +134,12 @@ bool local_goose_requested(const Options& options)
     return !options.local_goose_model.empty()
         || !options.local_goose_model_sha256.empty()
         || !options.local_goose_governance.empty();
+}
+
+bool dialogue_responder_requested(const Options& options)
+{
+    return !options.local_goose_dialogue_responder_sidecar.empty()
+        || !options.local_goose_dialogue_responder_consumer_id.empty();
 }
 
 Options parse_options(const int argc, char* argv[])
@@ -181,6 +193,12 @@ Options parse_options(const int argc, char* argv[])
         } else if (argument == "--local-goose-cycle-stimulus-sidecar"
                    && index + 1 < argc) {
             options.local_goose_cycle_stimulus_sidecar = argv[++index];
+        } else if (argument == "--local-goose-dialogue-responder-sidecar"
+                   && index + 1 < argc) {
+            options.local_goose_dialogue_responder_sidecar = argv[++index];
+        } else if (argument == "--local-goose-dialogue-responder-consumer-id"
+                   && index + 1 < argc) {
+            options.local_goose_dialogue_responder_consumer_id = argv[++index];
         } else if (argument == "--wake-intents") {
             options.wake_intents_enabled = true;
         } else if (argument == "--openai-model" && index + 1 < argc) {
@@ -228,7 +246,8 @@ Options parse_options(const int argc, char* argv[])
     }
     if ((local_goose_requested(options)
          || !options.local_goose_cycle_sidecar.empty()
-         || !options.local_goose_cycle_stimulus_sidecar.empty())
+         || !options.local_goose_cycle_stimulus_sidecar.empty()
+         || dialogue_responder_requested(options))
         && modes != 0) {
         throw std::invalid_argument(
             "local Goose cognition is only valid in service mode");
@@ -268,6 +287,21 @@ Options parse_options(const int argc, char* argv[])
         && options.local_goose_cycle_sidecar.empty()) {
         throw std::invalid_argument(
             "--local-goose-cycle-stimulus-sidecar requires --local-goose-cycle-sidecar");
+    }
+    if (dialogue_responder_requested(options)) {
+        if (options.local_goose_dialogue_responder_sidecar.empty()
+            || options.local_goose_dialogue_responder_consumer_id.empty()) {
+            throw std::invalid_argument(
+                "dialogue responder requires sidecar path and consumer id together");
+        }
+        if (!local_goose_requested(options)) {
+            throw std::invalid_argument(
+                "dialogue responder requires the complete local Goose configuration");
+        }
+        if (options.local_goose_dialogue_responder_sidecar.front() != '/') {
+            throw std::invalid_argument(
+                "dialogue responder sidecar path must be absolute");
+        }
     }
 
     if (local_goose_requested(options)) {
@@ -1065,6 +1099,10 @@ int main(int argc, char* argv[])
                 local_goose_dialogue_completion_store;
             std::unique_ptr<gaudere_agent::LocalGooseDialogueCompletionFeedService>
                 local_goose_dialogue_completion_service;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueResponderStore>
+                local_goose_dialogue_responder_store;
+            std::unique_ptr<gaudere_agent::LocalGooseDialogueResponderDispatcher>
+                local_goose_dialogue_responder_dispatcher;
             constexpr const char* preferred_dialogue_thread_alias = "main";
             if (local_goose_requested(options)) {
                 local_goose_dialogue_runner =
@@ -1143,6 +1181,32 @@ int main(int argc, char* argv[])
                         << " completion_sidecar=" << completion_sidecar
                         << " preferred_alias=" << preferred_dialogue_thread_alias
                         << " automatic_submission=false automatic_ack=false\n";
+
+                    if (dialogue_responder_requested(options)) {
+                        local_goose_dialogue_responder_store =
+                            std::make_unique<
+                                gaudere_agent::LocalGooseDialogueResponderStore>(
+                                options.local_goose_dialogue_responder_sidecar);
+                        local_goose_dialogue_responder_dispatcher =
+                            std::make_unique<
+                                gaudere_agent::LocalGooseDialogueResponderDispatcher>(
+                                work_runtime,
+                                task_store,
+                                *local_goose_dialogue_thread_store,
+                                *local_goose_dialogue_completion_store,
+                                *local_goose_dialogue_responder_store,
+                                options.local_goose_model_sha256,
+                                options.local_goose_dialogue_responder_consumer_id,
+                                cycle_now_ms);
+                        std::cout
+                            << "gaudere-agent: local Goose dialogue responder wired"
+                            << " sidecar="
+                            << options.local_goose_dialogue_responder_sidecar
+                            << " consumer_id="
+                            << options.local_goose_dialogue_responder_consumer_id
+                            << " automatic_lease=false automatic_prepare=false"
+                            << " automatic_dispatch=false automatic_ack=false\n";
+                    }
                 }
 
                 std::cout
@@ -1189,7 +1253,8 @@ int main(int argc, char* argv[])
                         ? options.local_goose_model_sha256
                         : std::string{},
                     local_goose_dialogue_thread_store.get(),
-                    local_goose_dialogue_completion_store.get());
+                    local_goose_dialogue_completion_store.get(),
+                    local_goose_dialogue_responder_dispatcher.get());
                 control_server = std::make_unique<gaudere_agent::LiveControlServer>(
                     options.control_socket, *control_mailbox,
                     [&work_controller] { work_controller.interrupt(); });
