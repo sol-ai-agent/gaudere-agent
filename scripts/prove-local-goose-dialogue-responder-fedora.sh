@@ -163,6 +163,11 @@ PY
 [ "$(sqlite3 -readonly "$baseline/local-goose-dialogue-completion.db" "SELECT last_sequence FROM local_goose_dialogue_consumer_cursor WHERE consumer_id='$consumer_id';")" = "1" ] || fail "baseline consumer cursor differs"
 [ "$(sqlite3 -readonly "$baseline/local-goose-dialogue-thread.db" "SELECT revision FROM local_goose_dialogue_thread_head WHERE alias='$thread_alias';")" = "1" ] || fail "baseline preferred revision differs"
 
+# A failed prior proof may have left the same proof-only tag behind.
+# Remove that attributable proof image before rebuilding so the retry cannot
+# accidentally observe stale packaging and does not accumulate tagged leftovers.
+"$podman_command" image rm "$proof_image" >/dev/null 2>&1 || true
+
 printf '=== BUILD RESPONDER ISOLATED PROOF CANDIDATE ===\n'
 GAUDERE_IMAGE_TAG="$proof_image" sh "$script_directory/build-image.sh"
 "$podman_command" run --rm --network none --entrypoint /usr/bin/test "$proof_image" -x /usr/local/bin/gaudere-local-goose-dialogue-responder-proof || fail "candidate lacks responder proof helper"
