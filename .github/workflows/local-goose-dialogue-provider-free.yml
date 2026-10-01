@@ -161,8 +161,11 @@ jobs:
           grep -q 'local-thread-v3-bind' agent/src/control_main.cpp
           grep -q 'local-thread-v3-head' agent/src/control_main.cpp
           grep -q 'local-thread-v3-send' agent/src/control_main.cpp
-          grep -q 'preferred dialogue head conflict after durable Task submission' agent/src/LiveControlProcessor.cpp
-          grep -q 'same_preferred_v3_request' agent/src/LiveControlProcessor.cpp
+          grep -q 'submit_local_goose_dialogue_v3_preferred' agent/src/LiveControlProcessor.cpp
+          grep -q 'preferred dialogue head conflict after durable Task submission' agent/src/LocalGooseDialoguePreferredSubmitter.cpp
+          grep -q 'same_request' agent/src/LocalGooseDialoguePreferredSubmitter.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|systemctl|podman|LocalGooseCycleStimulus' \
+            agent/src/LocalGooseDialoguePreferredSubmitter.cpp agent/src/LocalGooseDialoguePreferredSubmitter.hpp
           grep -q 'LocalGooseDialogueThreadStore' agent/src/main.cpp
           grep -q 'local-goose-dialogue-thread.db' agent/src/main.cpp
           grep -q 'preferred_dialogue_thread_alias = "main"' agent/src/main.cpp
