@@ -283,6 +283,10 @@ jobs:
           set -eu
           sh -n agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
           grep -q 'gaudere-local-goose-dialogue-responder-proof' agent/src/Makefile.am
+          grep -q 'cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-proof /opt/runtime/bin/' \
+            agent/Containerfile
+          grep -q 'test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-proof' \
+            agent/Containerfile
           grep -q 'preferred-from-intent' agent/src/local_goose_dialogue_responder_proof_main.cpp
           grep -q 'compete' agent/src/local_goose_dialogue_responder_proof_main.cpp
           grep -q 'production responder sidecar already exists before code deployment' \
