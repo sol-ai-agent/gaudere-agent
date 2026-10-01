@@ -307,6 +307,42 @@ jobs:
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/local_goose_dialogue_responder_proof_main.cpp
 
+      - name: Prove first responder activation stays explicit and one-turn
+        run: |
+          set -eu
+          sh -n agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'AUTHORIZED_FIRST_PRODUCTION_DIALOGUE_RESPONDER_V1' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'responder_consumer_id=system-responder-v1' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'manual_consumer_id=sol' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'lease_id=first-production-responder-v1' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'dialogue-feed-ack "\$responder_consumer_id" 1' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'dialogue-responder-lease-create "\$lease_id".* 1 "\$lease_ttl_ms" 0' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'dialogue-responder-prepare "\$lease_id" 2' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'dialogue-responder-dispatch "\$intent_id"' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=3' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q 'DIALOGUE_CONSUMER_SOL=sol:1' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          grep -q -- '--local-goose-dialogue-responder-sidecar PATH' agent/src/main.cpp
+          grep -q -- '--local-goose-dialogue-responder-consumer-id ID' agent/src/main.cpp
+          grep -q 'dialogue_responder_requested(options)' agent/src/main.cpp
+          grep -q 'local_goose_dialogue_responder_dispatcher.get()' agent/src/main.cpp
+          grep -q 'automatic_lease=false automatic_prepare=false' agent/src/main.cpp
+          grep -q 'automatic_dispatch=false automatic_ack=false' agent/src/main.cpp
+          ! grep -Eq 'dialogue-responder-(lease-create|prepare|dispatch)' agent/src/main.cpp
+          ! grep -Eq 'control[[:space:]]+(openai|stimulate-local-goose-cycle|accept-wake)' \
+            agent/scripts/first-production-dialogue-responder-v1.sh
+          ! grep -q -- '--local-goose-dialogue-responder-' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+
       - name: Prove responder production deploy remains code-only
         run: |
           set -eu

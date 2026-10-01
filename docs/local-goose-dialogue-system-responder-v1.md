@@ -178,3 +178,67 @@ Every stage preserves:
 `code -> CI green -> merge -> Fedora deployment/integration -> real Fedora proof`
 
 No design, merge or code deployment authorizes a production lease, completion ACK, system-authored turn, provider call or autonomous-cycle effect.
+
+
+## Stage 9J6 first production activation contract
+
+Stage 9J6 fixes the production responder consumer identity to:
+
+`system-responder-v1`
+
+This identity is distinct from the existing manual `sol` consumer. The `sol`
+cursor remains independent and must stay at sequence 1 during the first responder
+activation.
+
+A fresh responder consumer must not silently replay historical sequence 1.
+Therefore the first production activation performs one explicit cursor migration
+before any responder lease exists:
+
+1. stop and back up production state;
+2. start the explicitly responder-wired image/profile;
+3. verify responder sidecar/store exists but contains no lease or intent;
+4. acknowledge exactly completion sequence 1 as consumer
+   `system-responder-v1`;
+5. verify that consumer now has cursor 1 and its next event is exactly sequence 2;
+6. verify the independent `sol` cursor remains 1.
+
+That sequence-1 acknowledgement is a one-time explicit migration step. It is not
+an automatic responder observation and it does not authorize a successor.
+
+The first production responder lease is deliberately minimal:
+
+- lease id: `first-production-responder-v1`;
+- thread alias: `main`;
+- speaker kind: `system`;
+- speaker id: `sol`;
+- allowed message kind: `intervention`;
+- maximum system turns: 1;
+- lease TTL: at most 10 minutes;
+- minimum interval: 0 for this one-turn proof;
+- no renewal.
+
+The exact first intervention message is fixed before activation:
+
+`Merci. Je confirme que ce message provient du responder système borné de Gaudere. Cette première intervention de production est limitée à un seul tour et n'active ni provider externe ni cycle autonome. Peux-tu confirmer que tu reçois ce tour système ?`
+
+The intent must target exactly pending completion sequence 2 and preferred thread
+revision 1/head
+`cognition.local-goose-dialogue.v3:3a28c66f9d089bccedbac2e51cd62e949905c6a7ec109423e3e9adefef52b65f`.
+
+Successful dispatch must:
+
+- submit/reconcile exactly one V3 successor through preferred-head CAS;
+- advance preferred thread to revision 2;
+- account exactly one lease turn and exhaust the one-turn lease;
+- advance `system-responder-v1` to cursor 2 only after canonical submission;
+- leave `sol` at cursor 1;
+- leave provider total, autonomous cycle and stimuli unchanged.
+
+After the submitted Local Goose Task succeeds, completion reconciliation may
+materialize sequence 3. Stage 9J6 must prove sequence 3 is pending for
+`system-responder-v1` and must not ACK it. No second intent or lease is created.
+
+The production wiring itself remains opt-in through explicit service arguments.
+Code merge alone and image presence alone are not activation. No responder
+sidecar, consumer migration, lease, intent, dispatch or ACK may occur until the
+separate Stage 9J6 human authorization gate runs.
