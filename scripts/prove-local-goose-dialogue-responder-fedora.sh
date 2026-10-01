@@ -50,7 +50,7 @@ cleanup()
 }
 trap cleanup EXIT HUP INT TERM
 
-for command in "$podman_command" "$systemctl_command" git python3 sqlite3 sed grep awk cut stat cp mkdir mktemp rm id; do
+for command in "$podman_command" "$systemctl_command" git python3 sqlite3 sed grep awk cut stat cp mkdir mktemp rm id basename chmod head sh tr; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 
