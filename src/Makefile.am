@@ -43,6 +43,14 @@ gaudere_agent_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialoguePreferredSubmitter.cpp \
+	LocalGooseDialoguePreferredSubmitter.hpp \
+	LocalGooseDialogueResponder.cpp \
+	LocalGooseDialogueResponder.hpp \
+	LocalGooseDialogueResponderDispatcher.cpp \
+	LocalGooseDialogueResponderDispatcher.hpp \
+	LocalGooseDialogueResponderStore.cpp \
+	LocalGooseDialogueResponderStore.hpp \
 	LocalGooseDialogueCompletionFeed.cpp \
 	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
@@ -393,6 +401,14 @@ gaudere_local_goose_cycle_runtime_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialoguePreferredSubmitter.cpp \
+	LocalGooseDialoguePreferredSubmitter.hpp \
+	LocalGooseDialogueResponder.cpp \
+	LocalGooseDialogueResponder.hpp \
+	LocalGooseDialogueResponderDispatcher.cpp \
+	LocalGooseDialogueResponderDispatcher.hpp \
+	LocalGooseDialogueResponderStore.cpp \
+	LocalGooseDialogueResponderStore.hpp \
 	LocalGooseDialogueCompletionFeed.cpp \
 	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
@@ -534,6 +550,14 @@ gaudere_local_goose_dialogue_proof_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialoguePreferredSubmitter.cpp \
+	LocalGooseDialoguePreferredSubmitter.hpp \
+	LocalGooseDialogueResponder.cpp \
+	LocalGooseDialogueResponder.hpp \
+	LocalGooseDialogueResponderDispatcher.cpp \
+	LocalGooseDialogueResponderDispatcher.hpp \
+	LocalGooseDialogueResponderStore.cpp \
+	LocalGooseDialogueResponderStore.hpp \
 	LocalGooseDialogueCompletionFeed.cpp \
 	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
@@ -585,6 +609,14 @@ gaudere_local_goose_dialogue_v2_proof_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialoguePreferredSubmitter.cpp \
+	LocalGooseDialoguePreferredSubmitter.hpp \
+	LocalGooseDialogueResponder.cpp \
+	LocalGooseDialogueResponder.hpp \
+	LocalGooseDialogueResponderDispatcher.cpp \
+	LocalGooseDialogueResponderDispatcher.hpp \
+	LocalGooseDialogueResponderStore.cpp \
+	LocalGooseDialogueResponderStore.hpp \
 	LocalGooseDialogueCompletionFeed.cpp \
 	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \
@@ -635,6 +667,14 @@ gaudere_local_goose_dialogue_v3_proof_SOURCES = \
 	LiveControl.hpp \
 	LiveControlProcessor.cpp \
 	LiveControlProcessor.hpp \
+	LocalGooseDialoguePreferredSubmitter.cpp \
+	LocalGooseDialoguePreferredSubmitter.hpp \
+	LocalGooseDialogueResponder.cpp \
+	LocalGooseDialogueResponder.hpp \
+	LocalGooseDialogueResponderDispatcher.cpp \
+	LocalGooseDialogueResponderDispatcher.hpp \
+	LocalGooseDialogueResponderStore.cpp \
+	LocalGooseDialogueResponderStore.hpp \
 	LocalGooseDialogueCompletionFeed.cpp \
 	LocalGooseDialogueCompletionFeed.hpp \
 	LocalGooseDialogueThreadStore.cpp \

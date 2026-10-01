@@ -32,6 +32,12 @@ enum class LiveControlOperation {
     submit_local_goose_dialogue_v3_preferred_next,
     inspect_local_goose_dialogue_completion,
     acknowledge_local_goose_dialogue_completion,
+    create_local_goose_dialogue_responder_lease,
+    revoke_local_goose_dialogue_responder_lease,
+    inspect_local_goose_dialogue_responder_lease,
+    prepare_local_goose_dialogue_responder_intent,
+    dispatch_local_goose_dialogue_responder_intent,
+    inspect_local_goose_dialogue_responder_intent,
     inspect_task,
     inspect_budget,
     accept_wake,
@@ -74,6 +80,10 @@ struct LiveControlCommand {
     std::string message_kind;
     std::string thread_alias;
     std::optional<std::uint64_t> expected_thread_revision;
+    std::optional<std::uint64_t> responder_completion_sequence;
+    std::optional<std::uint64_t> responder_max_system_turns;
+    std::optional<std::int64_t> responder_ttl_ms;
+    std::optional<std::int64_t> responder_min_interval_ms;
 };
 
 struct LiveControlReply {

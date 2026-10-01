@@ -99,12 +99,6 @@ void append(std::string& out, const std::uint64_t value)
     out += '|';
 }
 
-void append(std::string& out, const std::int64_t value)
-{
-    out += std::to_string(value);
-    out += '|';
-}
-
 std::string intent_digest(const LocalGooseDialogueResponderIntent& intent)
 {
     std::string canonical =
@@ -120,8 +114,6 @@ std::string intent_digest(const LocalGooseDialogueResponderIntent& intent)
     append(canonical, intent.speaker_id);
     append(canonical, intent.message_kind);
     append(canonical, intent.message);
-    append(canonical, intent.created_at_ms);
-    append(canonical, intent.expires_at_ms);
     return sha256_hex(canonical);
 }
 

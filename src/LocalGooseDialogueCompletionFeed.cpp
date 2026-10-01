@@ -676,6 +676,16 @@ LocalGooseDialogueCompletionFeedStore::next_for_consumer(
     return first_event_after(database_, last);
 }
 
+std::optional<std::uint64_t>
+LocalGooseDialogueCompletionFeedStore::consumer_last_sequence(
+    const std::string& consumer_id) const
+{
+    if (!safe_identifier(consumer_id, max_consumer_id_bytes)) {
+        return std::nullopt;
+    }
+    return consumer_cursor(database_, consumer_id);
+}
+
 LocalGooseDialogueCompletionCursorWrite
 LocalGooseDialogueCompletionFeedStore::acknowledge(
     const std::string& consumer_id,

@@ -161,8 +161,11 @@ jobs:
           grep -q 'local-thread-v3-bind' agent/src/control_main.cpp
           grep -q 'local-thread-v3-head' agent/src/control_main.cpp
           grep -q 'local-thread-v3-send' agent/src/control_main.cpp
-          grep -q 'preferred dialogue head conflict after durable Task submission' agent/src/LiveControlProcessor.cpp
-          grep -q 'same_preferred_v3_request' agent/src/LiveControlProcessor.cpp
+          grep -q 'submit_local_goose_dialogue_v3_preferred' agent/src/LiveControlProcessor.cpp
+          grep -q 'preferred dialogue head conflict after durable Task submission' agent/src/LocalGooseDialoguePreferredSubmitter.cpp
+          grep -q 'same_request' agent/src/LocalGooseDialoguePreferredSubmitter.cpp
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|systemctl|podman|LocalGooseCycleStimulus' \
+            agent/src/LocalGooseDialoguePreferredSubmitter.cpp agent/src/LocalGooseDialoguePreferredSubmitter.hpp
           grep -q 'LocalGooseDialogueThreadStore' agent/src/main.cpp
           grep -q 'local-goose-dialogue-thread.db' agent/src/main.cpp
           grep -q 'preferred_dialogue_thread_alias = "main"' agent/src/main.cpp
@@ -235,11 +238,13 @@ jobs:
           grep -q 'provider_execution=false tools_enabled=false network_expected=none' \
             agent/src/local_goose_dialogue_proof_main.cpp
 
-      - name: Prove responder store remains non-production
+      - name: Prove responder dispatcher remains idle by default
         run: |
           set -eu
           grep -q '^[[:space:]]*local_goose_dialogue_responder_store_test \\' agent/tests/Makefile.am
+          grep -q '^[[:space:]]*local_goose_dialogue_responder_dispatcher_test \\' agent/tests/Makefile.am
           grep -q 'LocalGooseDialogueResponderStore.cpp' agent/tests/Makefile.am
+          grep -q 'LocalGooseDialogueResponderDispatcher.cpp' agent/tests/Makefile.am
           grep -q 'local_goose_dialogue_responder_sidecar_schema = 1' \
             agent/src/LocalGooseDialogueResponder.hpp
           grep -q 'max_system_turns = 8' \
@@ -247,15 +252,30 @@ jobs:
           grep -q 'O_NOFOLLOW' agent/src/LocalGooseDialogueResponderStore.cpp
           grep -q 'PRAGMA synchronous=FULL' agent/src/LocalGooseDialogueResponderStore.cpp
           grep -q 'one_active' agent/src/LocalGooseDialogueResponderStore.cpp
-          ! grep -q 'LocalGooseDialogueResponder' agent/src/main.cpp
-          ! grep -q 'LocalGooseDialogueResponder' agent/src/Makefile.am
+          grep -q 'submit_local_goose_dialogue_v3_preferred' \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp
+          grep -q 'consumer_last_sequence' \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp
+          grep -q 'dialogue-responder-lease-create' agent/src/control_main.cpp
+          grep -q 'dialogue-responder-prepare' agent/src/control_main.cpp
+          grep -q 'dialogue-responder-dispatch' agent/src/control_main.cpp
+          ! grep -Eq 'LocalGooseDialogueResponder(Store|Dispatcher)|dialogue_responder_dispatcher' \
+            agent/src/main.cpp
+          ! grep -Eq 'while[[:space:]]*\(' \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp
           ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|systemctl|podman' \
+            agent/src/LocalGooseDialoguePreferredSubmitter.cpp \
+            agent/src/LocalGooseDialoguePreferredSubmitter.hpp \
             agent/src/LocalGooseDialogueResponder.cpp \
             agent/src/LocalGooseDialogueResponder.hpp \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp \
+            agent/src/LocalGooseDialogueResponderDispatcher.hpp \
             agent/src/LocalGooseDialogueResponderStore.cpp \
             agent/src/LocalGooseDialogueResponderStore.hpp
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/LocalGooseDialoguePreferredSubmitter.cpp \
             agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp \
             agent/src/LocalGooseDialogueResponderStore.cpp
 
       - name: Prove deploy remains code-only

@@ -23,11 +23,22 @@ std::uint64_t parse_revision(const char* value)
     return static_cast<std::uint64_t>(parsed);
 }
 
+std::int64_t parse_duration_ms(const char* value)
+{
+    const std::string text{value};
+    std::size_t consumed = 0;
+    const auto parsed = std::stoll(text, &consumed, 10);
+    if (consumed != text.size()) {
+        throw std::invalid_argument("duration is invalid");
+    }
+    return static_cast<std::int64_t>(parsed);
+}
+
 void usage(const char* program)
 {
     std::cerr
         << "Usage: " << program << " --socket PATH "
-        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | local-thread-v3-start REQUEST_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-next REQUEST_ID PREDECESSOR_TASK_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-bind THREAD_ALIAS HEAD_TASK_ID | local-thread-v3-head THREAD_ALIAS | local-thread-v3-send REQUEST_ID THREAD_ALIAS EXPECTED_REVISION SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | dialogue-feed-next CONSUMER_ID | dialogue-feed-ack CONSUMER_ID SEQUENCE | task ID | "
+        << "[echo ID TEXT | openai ID TEXT | reflect ID OBJECTIVE | local-message REQUEST_ID MESSAGE | local-thread-start REQUEST_ID MESSAGE | local-thread-next REQUEST_ID PREDECESSOR_TASK_ID MESSAGE | local-thread-v3-start REQUEST_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-next REQUEST_ID PREDECESSOR_TASK_ID SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | local-thread-v3-bind THREAD_ALIAS HEAD_TASK_ID | local-thread-v3-head THREAD_ALIAS | local-thread-v3-send REQUEST_ID THREAD_ALIAS EXPECTED_REVISION SPEAKER_KIND SPEAKER_ID MESSAGE_KIND MESSAGE | dialogue-feed-next CONSUMER_ID | dialogue-feed-ack CONSUMER_ID SEQUENCE | dialogue-responder-lease-create LEASE_ID THREAD_ALIAS SPEAKER_ID MESSAGE_KIND MAX_TURNS TTL_MS MIN_INTERVAL_MS PURPOSE | dialogue-responder-lease-revoke LEASE_ID REASON | dialogue-responder-lease LEASE_ID | dialogue-responder-prepare LEASE_ID SEQUENCE MESSAGE_KIND TTL_MS MESSAGE | dialogue-responder-dispatch INTENT_ID | dialogue-responder-intent INTENT_ID | task ID | "
         << "budget | accept-wake SOURCE_TASK_ID | revoke-wake WAKE_ID REASON | "
         << "wake WAKE_ID | wake-status | stimulate-local-goose-cycle REQUEST_ID]\n";
 }
@@ -118,6 +129,45 @@ int main(int argc, char* argv[])
                 gaudere_agent::LiveControlOperation::acknowledge_local_goose_dialogue_completion;
             command.id = argv[4];
             command.text = argv[5];
+
+        } else if (operation == "dialogue-responder-lease-create"
+                   && argc == 12) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::create_local_goose_dialogue_responder_lease;
+            command.id = argv[4];
+            command.thread_alias = argv[5];
+            command.speaker_id = argv[6];
+            command.message_kind = argv[7];
+            command.responder_max_system_turns = parse_revision(argv[8]);
+            command.responder_ttl_ms = parse_duration_ms(argv[9]);
+            command.responder_min_interval_ms = parse_duration_ms(argv[10]);
+            command.text = argv[11];
+        } else if (operation == "dialogue-responder-lease-revoke"
+                   && argc == 6) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::revoke_local_goose_dialogue_responder_lease;
+            command.id = argv[4];
+            command.text = argv[5];
+        } else if (operation == "dialogue-responder-lease" && argc == 5) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::inspect_local_goose_dialogue_responder_lease;
+            command.id = argv[4];
+        } else if (operation == "dialogue-responder-prepare" && argc == 9) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+            command.id = argv[4];
+            command.responder_completion_sequence = parse_revision(argv[5]);
+            command.message_kind = argv[6];
+            command.responder_ttl_ms = parse_duration_ms(argv[7]);
+            command.text = argv[8];
+        } else if (operation == "dialogue-responder-dispatch" && argc == 5) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::dispatch_local_goose_dialogue_responder_intent;
+            command.id = argv[4];
+        } else if (operation == "dialogue-responder-intent" && argc == 5) {
+            command.operation =
+                gaudere_agent::LiveControlOperation::inspect_local_goose_dialogue_responder_intent;
+            command.id = argv[4];
         } else if (operation == "task" && argc == 5) {
             command.operation = gaudere_agent::LiveControlOperation::inspect_task;
             command.id = argv[4];

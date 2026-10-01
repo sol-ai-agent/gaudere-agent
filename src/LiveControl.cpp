@@ -22,6 +22,8 @@ using Json = nlohmann::json;
 constexpr std::size_t max_request_bytes = 24 * 1024;
 constexpr std::size_t max_response_bytes = 80 * 1024;
 constexpr int protocol_version = 1;
+constexpr std::int64_t max_responder_duration_ms =
+    24LL * 60 * 60 * 1000;
 
 std::string operation_name(const LiveControlOperation operation)
 {
@@ -52,6 +54,18 @@ std::string operation_name(const LiveControlOperation operation)
         return "inspect_local_goose_dialogue_completion";
     case LiveControlOperation::acknowledge_local_goose_dialogue_completion:
         return "acknowledge_local_goose_dialogue_completion";
+    case LiveControlOperation::create_local_goose_dialogue_responder_lease:
+        return "create_local_goose_dialogue_responder_lease";
+    case LiveControlOperation::revoke_local_goose_dialogue_responder_lease:
+        return "revoke_local_goose_dialogue_responder_lease";
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_lease:
+        return "inspect_local_goose_dialogue_responder_lease";
+    case LiveControlOperation::prepare_local_goose_dialogue_responder_intent:
+        return "prepare_local_goose_dialogue_responder_intent";
+    case LiveControlOperation::dispatch_local_goose_dialogue_responder_intent:
+        return "dispatch_local_goose_dialogue_responder_intent";
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_intent:
+        return "inspect_local_goose_dialogue_responder_intent";
     case LiveControlOperation::inspect_task:
         return "inspect_task";
     case LiveControlOperation::inspect_budget:
@@ -110,6 +124,24 @@ LiveControlOperation parse_operation(const std::string& value)
     }
     if (value == "acknowledge_local_goose_dialogue_completion") {
         return LiveControlOperation::acknowledge_local_goose_dialogue_completion;
+    }
+    if (value == "create_local_goose_dialogue_responder_lease") {
+        return LiveControlOperation::create_local_goose_dialogue_responder_lease;
+    }
+    if (value == "revoke_local_goose_dialogue_responder_lease") {
+        return LiveControlOperation::revoke_local_goose_dialogue_responder_lease;
+    }
+    if (value == "inspect_local_goose_dialogue_responder_lease") {
+        return LiveControlOperation::inspect_local_goose_dialogue_responder_lease;
+    }
+    if (value == "prepare_local_goose_dialogue_responder_intent") {
+        return LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    }
+    if (value == "dispatch_local_goose_dialogue_responder_intent") {
+        return LiveControlOperation::dispatch_local_goose_dialogue_responder_intent;
+    }
+    if (value == "inspect_local_goose_dialogue_responder_intent") {
+        return LiveControlOperation::inspect_local_goose_dialogue_responder_intent;
     }
     if (value == "inspect_task") {
         return LiveControlOperation::inspect_task;
@@ -205,6 +237,14 @@ bool has_thread_fields(const LiveControlCommand& command) noexcept
 {
     return !command.thread_alias.empty()
         || command.expected_thread_revision.has_value();
+}
+
+bool has_responder_fields(const LiveControlCommand& command) noexcept
+{
+    return command.responder_completion_sequence.has_value()
+        || command.responder_max_system_turns.has_value()
+        || command.responder_ttl_ms.has_value()
+        || command.responder_min_interval_ms.has_value();
 }
 
 void validate_command(const LiveControlCommand& command)
@@ -329,6 +369,66 @@ void validate_command(const LiveControlCommand& command)
                 "dialogue completion acknowledgement requires a positive sequence");
         }
         break;
+    case LiveControlOperation::create_local_goose_dialogue_responder_lease:
+        if (!safe_id(command.thread_alias)
+            || !safe_id(command.speaker_id)
+            || !valid_v3_message_kind(command.message_kind)
+            || !command.speaker_kind.empty()
+            || !command.predecessor_task_id.empty()
+            || command.expected_thread_revision
+            || !safe_reason(command.text)
+            || !command.responder_max_system_turns
+            || *command.responder_max_system_turns == 0
+            || *command.responder_max_system_turns > 8
+            || !command.responder_ttl_ms
+            || *command.responder_ttl_ms <= 0
+            || *command.responder_ttl_ms > max_responder_duration_ms
+            || !command.responder_min_interval_ms
+            || *command.responder_min_interval_ms < 0
+            || *command.responder_min_interval_ms > max_responder_duration_ms
+            || command.responder_completion_sequence) {
+            throw std::invalid_argument(
+                "responder lease requires alias, system speaker id, message kind, purpose, 1..8 turns, ttl and minimum interval");
+        }
+        break;
+    case LiveControlOperation::revoke_local_goose_dialogue_responder_lease:
+        if (!safe_reason(command.text) || has_responder_fields(command)
+            || has_v3_provenance(command) || has_thread_fields(command)
+            || !command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "responder lease revocation accepts only lease id and reason");
+        }
+        break;
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_lease:
+    case LiveControlOperation::dispatch_local_goose_dialogue_responder_intent:
+    case LiveControlOperation::inspect_local_goose_dialogue_responder_intent:
+        if (!command.text.empty() || has_responder_fields(command)
+            || has_v3_provenance(command) || has_thread_fields(command)
+            || !command.predecessor_task_id.empty()) {
+            throw std::invalid_argument(
+                "responder inspection/dispatch accepts only an id");
+        }
+        break;
+    case LiveControlOperation::prepare_local_goose_dialogue_responder_intent:
+        if (command.text.empty() || command.text.size() > 4096
+            || !valid_v3_message_kind(command.message_kind)
+            || !command.speaker_kind.empty() || !command.speaker_id.empty()
+            || !command.thread_alias.empty() || command.expected_thread_revision
+            || !command.predecessor_task_id.empty()
+            || !command.responder_completion_sequence
+            || *command.responder_completion_sequence == 0
+            || *command.responder_completion_sequence
+                > static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max())
+            || !command.responder_ttl_ms
+            || *command.responder_ttl_ms <= 0
+            || *command.responder_ttl_ms > max_responder_duration_ms
+            || command.responder_max_system_turns
+            || command.responder_min_interval_ms) {
+            throw std::invalid_argument(
+                "responder intent prepare requires lease id, next sequence, message kind, message and ttl");
+        }
+        break;
     case LiveControlOperation::inspect_task:
         if (!command.text.empty()) {
             throw std::invalid_argument("inspect_task does not accept text");
@@ -381,16 +481,36 @@ void validate_command(const LiveControlCommand& command)
         command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_root
         || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_next
         || command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
-    if (!v3_operation && has_v3_provenance(command)) {
+    const bool responder_provenance_operation =
+        command.operation
+            == LiveControlOperation::create_local_goose_dialogue_responder_lease
+        || command.operation
+            == LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    if (!v3_operation && !responder_provenance_operation
+        && has_v3_provenance(command)) {
         throw std::invalid_argument(
-            "live control v3 provenance is only valid for V3 dialogue");
+            "live control provenance is only valid for V3 dialogue or responder control");
     }
 
     const bool preferred_operation =
         command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
-    if (!preferred_operation && has_thread_fields(command)) {
+    const bool responder_thread_operation =
+        command.operation
+            == LiveControlOperation::create_local_goose_dialogue_responder_lease;
+    if (!preferred_operation && !responder_thread_operation
+        && has_thread_fields(command)) {
         throw std::invalid_argument(
-            "live control thread alias/revision is only valid for preferred V3 dialogue");
+            "live control thread alias/revision is only valid for preferred V3 dialogue or responder lease creation");
+    }
+
+    const bool responder_field_operation =
+        command.operation
+            == LiveControlOperation::create_local_goose_dialogue_responder_lease
+        || command.operation
+            == LiveControlOperation::prepare_local_goose_dialogue_responder_intent;
+    if (!responder_field_operation && has_responder_fields(command)) {
+        throw std::invalid_argument(
+            "live control responder numeric fields are only valid for responder lease/intent creation");
     }
 }
 
@@ -423,6 +543,21 @@ std::string encode_command(const LiveControlCommand& command)
     if (command.expected_thread_revision) {
         document["expected_thread_revision"] =
             *command.expected_thread_revision;
+    }
+    if (command.responder_completion_sequence) {
+        document["responder_completion_sequence"] =
+            *command.responder_completion_sequence;
+    }
+    if (command.responder_max_system_turns) {
+        document["responder_max_system_turns"] =
+            *command.responder_max_system_turns;
+    }
+    if (command.responder_ttl_ms) {
+        document["responder_ttl_ms"] = *command.responder_ttl_ms;
+    }
+    if (command.responder_min_interval_ms) {
+        document["responder_min_interval_ms"] =
+            *command.responder_min_interval_ms;
     }
     return document.dump();
 }
@@ -489,6 +624,38 @@ LiveControlCommand decode_command(const std::string& payload)
         }
         command.expected_thread_revision =
             document.at("expected_thread_revision").get<std::uint64_t>();
+    }
+    if (document.contains("responder_completion_sequence")) {
+        if (!document.at("responder_completion_sequence").is_number_unsigned()) {
+            throw std::invalid_argument(
+                "live control responder_completion_sequence must be unsigned");
+        }
+        command.responder_completion_sequence =
+            document.at("responder_completion_sequence").get<std::uint64_t>();
+    }
+    if (document.contains("responder_max_system_turns")) {
+        if (!document.at("responder_max_system_turns").is_number_unsigned()) {
+            throw std::invalid_argument(
+                "live control responder_max_system_turns must be unsigned");
+        }
+        command.responder_max_system_turns =
+            document.at("responder_max_system_turns").get<std::uint64_t>();
+    }
+    if (document.contains("responder_ttl_ms")) {
+        if (!document.at("responder_ttl_ms").is_number_integer()) {
+            throw std::invalid_argument(
+                "live control responder_ttl_ms must be an integer");
+        }
+        command.responder_ttl_ms =
+            document.at("responder_ttl_ms").get<std::int64_t>();
+    }
+    if (document.contains("responder_min_interval_ms")) {
+        if (!document.at("responder_min_interval_ms").is_number_integer()) {
+            throw std::invalid_argument(
+                "live control responder_min_interval_ms must be an integer");
+        }
+        command.responder_min_interval_ms =
+            document.at("responder_min_interval_ms").get<std::int64_t>();
     }
     validate_command(command);
     return command;

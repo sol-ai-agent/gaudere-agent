@@ -16,6 +16,7 @@ check_PROGRAMS = \
 	local_goose_dialogue_thread_store_test \
 	local_goose_dialogue_completion_feed_test \
 	local_goose_dialogue_responder_store_test \
+	local_goose_dialogue_responder_dispatcher_test \
 	local_goose_dialogue_v2_handler_test \
 	local_goose_dialogue_handler_test \
 	local_goose_cycle_stimulus_service_test \
@@ -103,6 +104,14 @@ explicit_wake_integration_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \
@@ -155,6 +164,14 @@ live_control_processor_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \
@@ -257,6 +274,29 @@ local_goose_dialogue_responder_store_test_SOURCES = \
 	../src/Sha256.hpp
 local_goose_dialogue_responder_store_test_LDADD = \
 	$(JSON_LIBS) -lsqlite3
+
+local_goose_dialogue_responder_dispatcher_test_SOURCES = \
+	local_goose_dialogue_responder_dispatcher_test.cpp \
+	../src/LocalGooseDialogueCompletionFeed.cpp \
+	../src/LocalGooseDialogueCompletionFeed.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
+	../src/LocalGooseDialogueThreadStore.cpp \
+	../src/LocalGooseDialogueThreadStore.hpp \
+	../src/LocalGooseDialogueV2.cpp \
+	../src/LocalGooseDialogueV2.hpp \
+	../src/LocalGooseDialogueV3.cpp \
+	../src/LocalGooseDialogueV3.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+local_goose_dialogue_responder_dispatcher_test_LDADD = \
+	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 
 local_goose_dialogue_v2_handler_test_SOURCES = \
 	local_goose_dialogue_v2_handler_test.cpp \
@@ -466,6 +506,14 @@ wake_intent_adversarial_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \
@@ -505,6 +553,14 @@ wake_status_test_SOURCES = \
 	../src/LiveControl.hpp \
 	../src/LiveControlProcessor.cpp \
 	../src/LiveControlProcessor.hpp \
+	../src/LocalGooseDialoguePreferredSubmitter.cpp \
+	../src/LocalGooseDialoguePreferredSubmitter.hpp \
+	../src/LocalGooseDialogueResponder.cpp \
+	../src/LocalGooseDialogueResponder.hpp \
+	../src/LocalGooseDialogueResponderDispatcher.cpp \
+	../src/LocalGooseDialogueResponderDispatcher.hpp \
+	../src/LocalGooseDialogueResponderStore.cpp \
+	../src/LocalGooseDialogueResponderStore.hpp \
 	../src/LocalGooseDialogueCompletionFeed.cpp \
 	../src/LocalGooseDialogueCompletionFeed.hpp \
 	../src/LocalGooseDialogueThreadStore.cpp \

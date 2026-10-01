@@ -98,6 +98,9 @@ public:
     [[nodiscard]] std::optional<LocalGooseDialogueCompletionEvent>
     next_for_consumer(const std::string& consumer_id) const;
 
+    [[nodiscard]] std::optional<std::uint64_t> consumer_last_sequence(
+        const std::string& consumer_id) const;
+
     [[nodiscard]] LocalGooseDialogueCompletionCursorWrite acknowledge(
         const std::string& consumer_id,
         std::uint64_t sequence);

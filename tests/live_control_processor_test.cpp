@@ -805,6 +805,38 @@ void test_dialogue_completion_feed_is_bounded_and_sequential()
            "completion next reports caught-up consumer without side effects");
 }
 
+void test_dialogue_responder_requires_explicit_capability()
+{
+    TemporaryDatabase database;
+    Harness harness(database.path, false);
+
+    LiveControlCommand command;
+    command.operation =
+        LiveControlOperation::create_local_goose_dialogue_responder_lease;
+    command.id = "lease-disabled";
+    command.thread_alias = "main";
+    command.speaker_id = "sol";
+    command.message_kind = "feedback";
+    command.text = "Bounded responder proof";
+    command.responder_max_system_turns = 1;
+    command.responder_ttl_ms = 60000;
+    command.responder_min_interval_ms = 0;
+
+    auto pending = harness.mailbox.submit(command);
+    const auto processed = harness.processor.process(harness.mailbox);
+    const auto reply = pending->wait();
+
+    expect(processed.processed == 1
+               && !processed.work_may_be_pending
+               && !reply.ok
+               && reply.code == 4
+               && reply.body.find("responder capability is not enabled")
+                    != std::string::npos,
+           "responder control is explicitly disabled without injected dispatcher");
+    expect(!harness.store.has_active(),
+           "disabled responder control creates no durable Task");
+}
+
 void test_inspect_reads_durable_task_without_submission()
 {
     TemporaryDatabase database;
@@ -1064,6 +1096,7 @@ int main()
     test_local_goose_dialogue_v3_submission_preserves_actor_and_bridge();
     test_preferred_dialogue_thread_serializes_v2_to_v3();
     test_dialogue_completion_feed_is_bounded_and_sequential();
+    test_dialogue_responder_requires_explicit_capability();
     test_inspect_reads_durable_task_without_submission();
     test_budget_status_is_observational_and_live();
     test_duplicate_preserves_original_definition();
