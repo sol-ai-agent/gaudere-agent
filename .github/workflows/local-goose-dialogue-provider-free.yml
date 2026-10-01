@@ -288,6 +288,7 @@ jobs:
           grep -q 'test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-proof' \
             agent/Containerfile
           grep -q 'preferred-from-intent' agent/src/local_goose_dialogue_responder_proof_main.cpp
+          grep -q 'runtime.recover();' agent/src/local_goose_dialogue_responder_proof_main.cpp
           grep -q 'compete' agent/src/local_goose_dialogue_responder_proof_main.cpp
           grep -q 'production responder sidecar already exists before code deployment' \
             agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
