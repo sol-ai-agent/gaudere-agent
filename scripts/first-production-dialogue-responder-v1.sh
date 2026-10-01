@@ -445,6 +445,7 @@ event = completion.execute(
 completion.close()
 if event != ("main", 2, task_id, result_sha):
     raise SystemExit(f"completion sequence 3 differs: {event!r}")
+print("RESPONDER_RESPONSE_JSON=" + json.dumps(out["response"], ensure_ascii=False))
 PY
 
 next_responder=$(control dialogue-feed-next "$responder_consumer_id") || fail "responder post-dispatch feed read failed"
@@ -499,6 +500,7 @@ printf 'DIALOGUE_CONSUMER_RESPONDER=%s:2\n' "$responder_consumer_id"
 printf 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=3\n'
 printf 'RESPONDER_LEASE=%s:exhausted:1/1\n' "$lease_id"
 printf 'RESPONDER_INTENT=%s:completed\n' "$intent_id"
+printf 'RESPONDER_REQUEST_ID=%s\n' "$responder_request_id"
 printf 'RESPONDER_TASK=%s\n' "$task_id"
 printf 'BACKUP=%s\n' "$backup_archive"
 printf 'TRANSITION_WORKSPACE=%s\n' "$workspace"
