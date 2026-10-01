@@ -296,6 +296,10 @@ int main(int argc, char* argv[])
                 std::chrono::milliseconds{ms}};
         };
         gaudere::work::Runtime runtime(task_store, runtime_now);
+        // Runtime starts in recovering state by contract. The proof helper must
+        // explicitly recover the copied TaskStore before exercising submit().
+        runtime.recover();
+
         gaudere_agent::LocalGooseDialogueThreadStore thread_store(
             options.thread_sidecar);
         gaudere_agent::LocalGooseDialogueCompletionFeedStore completion_store(
