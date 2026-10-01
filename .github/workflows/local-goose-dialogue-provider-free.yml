@@ -329,9 +329,11 @@ jobs:
             agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
           grep -q 'dialogue-responder-lease proof-disabled' \
             agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
-          ! grep -Eq 'dialogue-responder-(lease-create|lease-revoke|prepare|dispatch)[[:space:]]' \
+          grep -q 'production profile unexpectedly contains provider authority' \
             agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
-          ! grep -Eq -- '--openai-model|--autonomous-pulse-provider|--wake-intents' \
+          grep -q 'provider total changed during responder code deploy' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          ! grep -Eq -- '--socket[[:space:]].*(dialogue-responder-(lease-create|lease-revoke|prepare|dispatch)|dialogue-feed-ack|local-thread-v3-send|openai|stimulate-local-goose-cycle|accept-wake)' \
             agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
 
       - name: Prove deploy remains code-only
