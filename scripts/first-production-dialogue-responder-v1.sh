@@ -296,6 +296,308 @@ responder_request_id=$(printf '%s\n' "$prepare_output" | sed -n 's/^request_id="
 [ -n "$intent_id" ] || fail "could not resolve responder intent id"
 [ -n "$responder_request_id" ] || fail "could not resolve responder request id"
 printf '%s\n' "$prepare_output" | grep -q '^state=prepared
+dispatch_output=$(control dialogue-responder-dispatch "$intent_id") || fail "responder intent dispatch failed"
+printf '%s\n' "$dispatch_output"
+printf '%s\n' "$dispatch_output" | grep -Eq '^result=(accepted|duplicate)$' || fail "responder dispatch was not accepted"
+printf '%s\n' "$dispatch_output" | grep -q '^consumer_last_sequence=2$' || fail "responder cursor did not advance to 2 after dispatch"
+printf '%s\n' "$dispatch_output" | grep -q '^state=completed$' || fail "responder intent did not complete"
+printf '%s\n' "$dispatch_output" | grep -q '^revision=2$' || fail "preferred thread did not advance to revision 2"
+task_id=$(printf '%s\n' "$dispatch_output" | sed -n 's/^id="\(.*\)"$/\1/p' | head -n 1)
+[ -n "$task_id" ] || fail "could not resolve responder successor Task id"
+
+attempt=0
+status=""
+task_output=""
+while [ "$attempt" -lt 180 ]; do
+    attempt=$((attempt + 1))
+    task_output=$(control task "$task_id") || fail "responder successor Task inspection failed"
+    status=$(printf '%s\n' "$task_output" | sed -n 's/^status=//p' | head -n 1)
+    case "$status" in succeeded|failed|cancelled|manual_review) break ;; esac
+    sleep 1
+done
+[ "$status" = "succeeded" ] || {
+    printf '%s\n' "$task_output" >&2
+    fail "responder successor Task did not succeed; status=$status"
+}
+
+feed_attempt=0
+completion_events=0
+completion_materialization=0
+while [ "$feed_attempt" -lt 30 ]; do
+    feed_attempt=$((feed_attempt + 1))
+    completion_events=$(sqlite3 -readonly "$completion_sidecar" 'SELECT COUNT(*) FROM local_goose_dialogue_completion_event;')
+    completion_materialization=$(sqlite3 -readonly "$completion_sidecar" "SELECT next_revision FROM local_goose_dialogue_materialization WHERE thread_alias='$thread_alias';")
+    if [ "$completion_events" = "3" ] && [ "$completion_materialization" = "3" ]; then break; fi
+    sleep 1
+done
+[ "$completion_events" = "3" ] || fail "responder successor completion event was not materialized"
+[ "$completion_materialization" = "3" ] || fail "completion materialization cursor did not advance to 3"
+
+python3 - \
+    "$state_database" "$completion_sidecar" "$task_id" "$root_task_id" \
+    "$v3_head_task_id" "$responder_request_id" "$speaker_id" \
+    "$message_kind" "$message" "$model_sha256" <<'PY'
+import hashlib
+import json
+import sqlite3
+import sys
+
+(
+    state_path,
+    completion_path,
+    task_id,
+    root_id,
+    predecessor_id,
+    request_id,
+    speaker_id,
+    message_kind,
+    message,
+    model_sha,
+) = sys.argv[1:]
+
+state = sqlite3.connect(f"file:{state_path}?mode=ro", uri=True)
+predecessor = state.execute(
+    "SELECT result_output FROM tasks WHERE id=? "
+    "AND kind='cognition.local-goose-dialogue.v3' AND status=3",
+    (predecessor_id,),
+).fetchone()
+task = state.execute(
+    "SELECT input,status,attempts_started,result_content_type,result_output,"
+    "COALESCE(result_failure_code,''),COALESCE(result_failure_message,'') "
+    "FROM tasks WHERE id=? AND kind='cognition.local-goose-dialogue.v3'",
+    (task_id,),
+).fetchone()
+state.close()
+
+if predecessor is None or predecessor[0] is None:
+    raise SystemExit("canonical responder predecessor result is missing")
+if task is None:
+    raise SystemExit("responder successor Task is missing")
+
+raw_input, status, attempts, result_type, raw_result, failure_code, failure_message = task
+if status != 3 or attempts != 1:
+    raise SystemExit(
+        f"responder successor is not one canonical success: "
+        f"status={status} attempts={attempts}"
+    )
+if result_type != "application/vnd.gaudere.local-goose-dialogue-v3-response+json":
+    raise SystemExit("responder successor result content type differs")
+if failure_code or failure_message or raw_result is None:
+    raise SystemExit("responder successor contains failure evidence")
+
+inp = json.loads(raw_input)
+predecessor_sha = hashlib.sha256(predecessor[0].encode("utf-8")).hexdigest()
+expected = {
+    "schema": "gaudere.cognition.local-goose-dialogue.v3",
+    "request_id": request_id,
+    "speaker_kind": "system",
+    "speaker_id": speaker_id,
+    "message_kind": message_kind,
+    "message": message,
+    "model_sha256": model_sha,
+    "turn_index": 3,
+    "root_task_id": root_id,
+    "predecessor_task_id": predecessor_id,
+    "predecessor_result_sha256": predecessor_sha,
+}
+for key, value in expected.items():
+    if inp.get(key) != value:
+        raise SystemExit(
+            f"responder successor input differs for {key}: "
+            f"{inp.get(key)!r} != {value!r}"
+        )
+expected_task_id = (
+    "cognition.local-goose-dialogue.v3:"
+    + hashlib.sha256(raw_input.encode("utf-8")).hexdigest()
+)
+if task_id != expected_task_id:
+    raise SystemExit("responder successor Task id differs from canonical input hash")
+
+out = json.loads(raw_result)
+for key, value in {
+    "schema": "gaudere.cognition.local-goose-dialogue-v3-response.v1",
+    "request_id": request_id,
+    "speaker_kind": "system",
+    "speaker_id": speaker_id,
+    "message_kind": message_kind,
+    "model_sha256": model_sha,
+    "turn_index": 3,
+    "root_task_id": root_id,
+    "predecessor_task_id": predecessor_id,
+    "predecessor_result_sha256": predecessor_sha,
+}.items():
+    if out.get(key) != value:
+        raise SystemExit(
+            f"responder successor result differs for {key}: "
+            f"{out.get(key)!r} != {value!r}"
+        )
+if not isinstance(out.get("response"), str) or not out["response"].strip():
+    raise SystemExit("responder successor response is empty")
+
+result_sha = hashlib.sha256(raw_result.encode("utf-8")).hexdigest()
+completion = sqlite3.connect(f"file:{completion_path}?mode=ro", uri=True)
+event = completion.execute(
+    "SELECT thread_alias,thread_revision,task_id,result_sha256 "
+    "FROM local_goose_dialogue_completion_event WHERE sequence=3"
+).fetchone()
+completion.close()
+if event != ("main", 2, task_id, result_sha):
+    raise SystemExit(f"completion sequence 3 differs: {event!r}")
+print("RESPONDER_RESPONSE_JSON=" + json.dumps(out["response"], ensure_ascii=False))
+PY
+
+next_responder=$(control dialogue-feed-next "$responder_consumer_id") || fail "responder post-dispatch feed read failed"
+printf '%s\n' "$next_responder"
+printf '%s\n' "$next_responder" | grep -q '^sequence=3$' || fail "sequence 3 is not pending for responder consumer"
+sol_pending_after=$(control dialogue-feed-next "$manual_consumer_id") || fail "sol post-dispatch feed read failed"
+printf '%s\n' "$sol_pending_after" | grep -q '^sequence=2$' || fail "sol cursor changed during responder activation"
+
+lease_final=$(control dialogue-responder-lease "$lease_id") || fail "final responder lease inspection failed"
+printf '%s\n' "$lease_final"
+printf '%s\n' "$lease_final" | grep -q '^state=exhausted$' || fail "one-turn responder lease is not exhausted"
+printf '%s\n' "$lease_final" | grep -q '^turns_committed=1$' || fail "one-turn responder lease accounting differs"
+
+intent_final=$(control dialogue-responder-intent "$intent_id") || fail "final responder intent inspection failed"
+printf '%s\n' "$intent_final" | grep -q '^state=completed$' || fail "responder intent final state is not completed"
+
+[ "$(sqlite3 -readonly "$completion_sidecar" "SELECT last_sequence FROM local_goose_dialogue_consumer_cursor WHERE consumer_id='$manual_consumer_id';")" = "1" ] || fail "sol durable cursor changed"
+[ "$(sqlite3 -readonly "$completion_sidecar" "SELECT last_sequence FROM local_goose_dialogue_consumer_cursor WHERE consumer_id='$responder_consumer_id';")" = "2" ] || fail "responder durable cursor is not 2"
+[ "$(sqlite3 -readonly "$completion_sidecar" 'SELECT COUNT(*) FROM local_goose_dialogue_consumer_cursor;')" = "2" ] || fail "completion consumer count is not 2"
+[ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_lease WHERE lease_id='$lease_id' AND state=1 AND turns_committed=1;")" = "1" ] || fail "responder durable exhausted lease differs"
+[ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_intent WHERE intent_id='$intent_id' AND state=2;")" = "1" ] || fail "responder durable completed intent differs"
+[ "$(sqlite3 -readonly "$thread_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_thread_head WHERE alias='$thread_alias' AND revision=2 AND head_task_id='$task_id';")" = "1" ] || fail "preferred durable head is not responder successor revision 2"
+[ "$(task_count cognition.local-goose-dialogue.v3)" = "2" ] || fail "production V3 Task count is not exactly 2 after responder turn"
+[ "$(provider_total)" = "$provider_before" ] || fail "provider total changed during responder activation"
+[ "$(cycle_cursor)" = "$cursor_before" ] || fail "autonomous cycle changed during responder activation"
+[ "$(stimulus_count)" = "$stimuli_before" ] || fail "stimulus ledger changed during responder activation"
+network_after=$("$podman_command" inspect gaudere-agent --format '{{.HostConfig.NetworkMode}}' 2>/dev/null)
+[ "$network_after" = "none" ] || fail "network changed during responder activation"
+
+committed=1
+trap - EXIT HUP INT TERM
+
+printf 'AGENT_REF=%s\n' "$agent_ref"
+printf 'CORE_REF=%s\n' "$core_ref"
+printf 'CANDIDATE_IMAGE=%s\n' "$candidate_normalized"
+printf 'ROLLBACK_IMAGE=%s\n' "$previous_image"
+printf 'NETWORK=%s\n' "$network_after"
+printf 'PROVIDER_TOTAL=%s\n' "$(provider_total)"
+printf 'CYCLE_CURSOR=%s\n' "$(cycle_cursor)"
+printf 'LOCAL_GOOSE_CYCLE_TASKS=%s\n' "$(task_count cognition.local-goose-cycle.v1)"
+printf 'LOCAL_GOOSE_DIALOGUE_V1_TASKS=%s\n' "$(task_count cognition.local-goose-dialogue.v1)"
+printf 'LOCAL_GOOSE_DIALOGUE_V2_TASKS=%s\n' "$(task_count cognition.local-goose-dialogue.v2)"
+printf 'LOCAL_GOOSE_DIALOGUE_V3_TASKS=%s\n' "$(task_count cognition.local-goose-dialogue.v3)"
+printf 'STIMULI=%s\n' "$(stimulus_count)"
+printf 'DIALOGUE_THREAD_REVISION=2\n'
+printf 'DIALOGUE_THREAD_HEAD=%s\n' "$task_id"
+printf 'DIALOGUE_COMPLETION_EVENTS=3\n'
+printf 'DIALOGUE_COMPLETION_MATERIALIZATION=3\n'
+printf 'DIALOGUE_COMPLETION_CONSUMERS=2\n'
+printf 'DIALOGUE_CONSUMER_SOL=sol:1\n'
+printf 'DIALOGUE_CONSUMER_RESPONDER=%s:2\n' "$responder_consumer_id"
+printf 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=3\n'
+printf 'RESPONDER_LEASE=%s:exhausted:1/1\n' "$lease_id"
+printf 'RESPONDER_INTENT=%s:completed\n' "$intent_id"
+printf 'RESPONDER_REQUEST_ID=%s\n' "$responder_request_id"
+printf 'RESPONDER_TASK=%s\n' "$task_id"
+printf 'BACKUP=%s\n' "$backup_archive"
+printf 'TRANSITION_WORKSPACE=%s\n' "$workspace"
+printf 'FIRST_PRODUCTION_DIALOGUE_RESPONDER_V1=PASS\n' || fail "responder intent is not prepared"
+
+printf '=== DISPATCH EXACT ONE-TURN RESPONDER INTENT ===\n'
+dispatch_output=$(control dialogue-responder-dispatch "$intent_id") || fail "responder intent dispatch failed"
+printf '%s\n' "$dispatch_output"
+printf '%s\n' "$dispatch_output" | grep -Eq '^result=(accepted|duplicate)$' || fail "responder dispatch was not accepted"
+printf '%s\n' "$dispatch_output" | grep -q '^consumer_last_sequence=2$' || fail "responder cursor did not advance to 2 after dispatch"
+printf '%s\n' "$dispatch_output" | grep -q '^state=completed$' || fail "responder intent did not complete"
+printf '%s\n' "$dispatch_output" | grep -q '^revision=2$' || fail "preferred thread did not advance to revision 2"
+task_id=$(printf '%s\n' "$dispatch_output" | sed -n 's/^id="\(.*\)"$/\1/p' | head -n 1)
+[ -n "$task_id" ] || fail "could not resolve responder successor Task id"
+
+attempt=0
+status=""
+task_output=""
+while [ "$attempt" -lt 180 ]; do
+    attempt=$((attempt + 1))
+    task_output=$(control task "$task_id") || fail "responder successor Task inspection failed"
+    status=$(printf '%s\n' "$task_output" | sed -n 's/^status=//p' | head -n 1)
+    case "$status" in succeeded|failed|cancelled|manual_review) break ;; esac
+    sleep 1
+done
+[ "$status" = "succeeded" ] || {
+    printf '%s\n' "$task_output" >&2
+    fail "responder successor Task did not succeed; status=$status"
+}
+
+feed_attempt=0
+completion_events=0
+completion_materialization=0
+while [ "$feed_attempt" -lt 30 ]; do
+    feed_attempt=$((feed_attempt + 1))
+    completion_events=$(sqlite3 -readonly "$completion_sidecar" 'SELECT COUNT(*) FROM local_goose_dialogue_completion_event;')
+    completion_materialization=$(sqlite3 -readonly "$completion_sidecar" "SELECT next_revision FROM local_goose_dialogue_materialization WHERE thread_alias='$thread_alias';")
+    if [ "$completion_events" = "3" ] && [ "$completion_materialization" = "3" ]; then break; fi
+    sleep 1
+done
+[ "$completion_events" = "3" ] || fail "responder successor completion event was not materialized"
+[ "$completion_materialization" = "3" ] || fail "completion materialization cursor did not advance to 3"
+
+next_responder=$(control dialogue-feed-next "$responder_consumer_id") || fail "responder post-dispatch feed read failed"
+printf '%s\n' "$next_responder"
+printf '%s\n' "$next_responder" | grep -q '^sequence=3$' || fail "sequence 3 is not pending for responder consumer"
+sol_pending_after=$(control dialogue-feed-next "$manual_consumer_id") || fail "sol post-dispatch feed read failed"
+printf '%s\n' "$sol_pending_after" | grep -q '^sequence=2$' || fail "sol cursor changed during responder activation"
+
+lease_final=$(control dialogue-responder-lease "$lease_id") || fail "final responder lease inspection failed"
+printf '%s\n' "$lease_final"
+printf '%s\n' "$lease_final" | grep -q '^state=exhausted$' || fail "one-turn responder lease is not exhausted"
+printf '%s\n' "$lease_final" | grep -q '^turns_committed=1$' || fail "one-turn responder lease accounting differs"
+
+intent_final=$(control dialogue-responder-intent "$intent_id") || fail "final responder intent inspection failed"
+printf '%s\n' "$intent_final" | grep -q '^state=completed$' || fail "responder intent final state is not completed"
+
+[ "$(sqlite3 -readonly "$completion_sidecar" "SELECT last_sequence FROM local_goose_dialogue_consumer_cursor WHERE consumer_id='$manual_consumer_id';")" = "1" ] || fail "sol durable cursor changed"
+[ "$(sqlite3 -readonly "$completion_sidecar" "SELECT last_sequence FROM local_goose_dialogue_consumer_cursor WHERE consumer_id='$responder_consumer_id';")" = "2" ] || fail "responder durable cursor is not 2"
+[ "$(sqlite3 -readonly "$completion_sidecar" 'SELECT COUNT(*) FROM local_goose_dialogue_consumer_cursor;')" = "2" ] || fail "completion consumer count is not 2"
+[ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_lease WHERE lease_id='$lease_id' AND state=1 AND turns_committed=1;")" = "1" ] || fail "responder durable exhausted lease differs"
+[ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_intent WHERE intent_id='$intent_id' AND state=2;")" = "1" ] || fail "responder durable completed intent differs"
+[ "$(sqlite3 -readonly "$thread_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_thread_head WHERE alias='$thread_alias' AND revision=2 AND head_task_id='$task_id';")" = "1" ] || fail "preferred durable head is not responder successor revision 2"
+[ "$(task_count cognition.local-goose-dialogue.v3)" = "2" ] || fail "production V3 Task count is not exactly 2 after responder turn"
+[ "$(provider_total)" = "$provider_before" ] || fail "provider total changed during responder activation"
+[ "$(cycle_cursor)" = "$cursor_before" ] || fail "autonomous cycle changed during responder activation"
+[ "$(stimulus_count)" = "$stimuli_before" ] || fail "stimulus ledger changed during responder activation"
+network_after=$("$podman_command" inspect gaudere-agent --format '{{.HostConfig.NetworkMode}}' 2>/dev/null)
+[ "$network_after" = "none" ] || fail "network changed during responder activation"
+
+committed=1
+trap - EXIT HUP INT TERM
+
+printf 'AGENT_REF=%s\n' "$agent_ref"
+printf 'CORE_REF=%s\n' "$core_ref"
+printf 'CANDIDATE_IMAGE=%s\n' "$candidate_normalized"
+printf 'ROLLBACK_IMAGE=%s\n' "$previous_image"
+printf 'NETWORK=%s\n' "$network_after"
+printf 'PROVIDER_TOTAL=%s\n' "$(provider_total)"
+printf 'CYCLE_CURSOR=%s\n' "$(cycle_cursor)"
+printf 'LOCAL_GOOSE_CYCLE_TASKS=%s\n' "$(task_count cognition.local-goose-cycle.v1)"
+printf 'LOCAL_GOOSE_DIALOGUE_V1_TASKS=%s\n' "$(task_count cognition.local-goose-dialogue.v1)"
+printf 'LOCAL_GOOSE_DIALOGUE_V2_TASKS=%s\n' "$(task_count cognition.local-goose-dialogue.v2)"
+printf 'LOCAL_GOOSE_DIALOGUE_V3_TASKS=%s\n' "$(task_count cognition.local-goose-dialogue.v3)"
+printf 'STIMULI=%s\n' "$(stimulus_count)"
+printf 'DIALOGUE_THREAD_REVISION=2\n'
+printf 'DIALOGUE_THREAD_HEAD=%s\n' "$task_id"
+printf 'DIALOGUE_COMPLETION_EVENTS=3\n'
+printf 'DIALOGUE_COMPLETION_MATERIALIZATION=3\n'
+printf 'DIALOGUE_COMPLETION_CONSUMERS=2\n'
+printf 'DIALOGUE_CONSUMER_SOL=sol:1\n'
+printf 'DIALOGUE_CONSUMER_RESPONDER=%s:2\n' "$responder_consumer_id"
+printf 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=3\n'
+printf 'RESPONDER_LEASE=%s:exhausted:1/1\n' "$lease_id"
+printf 'RESPONDER_INTENT=%s:completed\n' "$intent_id"
+printf 'RESPONDER_TASK=%s\n' "$task_id"
+printf 'BACKUP=%s\n' "$backup_archive"
+printf 'TRANSITION_WORKSPACE=%s\n' "$workspace"
+printf 'FIRST_PRODUCTION_DIALOGUE_RESPONDER_V1=PASS\n' || fail "responder intent is not prepared"
 
 printf '=== DISPATCH EXACT ONE-TURN RESPONDER INTENT ===\n'
 dispatch_output=$(control dialogue-responder-dispatch "$intent_id") || fail "responder intent dispatch failed"
