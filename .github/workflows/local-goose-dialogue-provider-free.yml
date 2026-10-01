@@ -307,6 +307,35 @@ jobs:
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/local_goose_dialogue_responder_proof_main.cpp
 
+      - name: Prove responder production deploy remains code-only
+        run: |
+          set -eu
+          sh -n agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'AUTHORIZED_LOCAL_GOOSE_DIALOGUE_RESPONDER_CODE_DEPLOY' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'production responder sidecar already exists before code-only deploy' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'dialogue responder capability is not enabled in this service' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'DIALOGUE_CONSUMER=%s:%s' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'DIALOGUE_NEXT_PENDING_SEQUENCE=2' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'RESPONDER_SIDECAR_PRESENT=no' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'RESPONDER_LIVE_AUTHORITY=disabled' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_RESPONDER_CODE_DEPLOY=PASS' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'dialogue-responder-lease proof-disabled' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'production profile unexpectedly contains provider authority' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          grep -q 'provider total changed during responder code deploy' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+          ! grep -Eq -- '--socket[[:space:]].*(dialogue-responder-(lease-create|lease-revoke|prepare|dispatch)|dialogue-feed-ack|local-thread-v3-send|openai|stimulate-local-goose-cycle|accept-wake)' \
+            agent/scripts/deploy-local-goose-dialogue-responder-code-production.sh
+
       - name: Prove deploy remains code-only
         run: |
           set -eu
