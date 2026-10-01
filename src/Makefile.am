@@ -716,3 +716,30 @@ gaudere_local_goose_dialogue_v3_proof_SOURCES = \
 gaudere_local_goose_dialogue_v3_proof_LDADD = \
 	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
 gaudere_local_goose_dialogue_v3_proof_LDFLAGS = -pthread
+
+
+bin_PROGRAMS += gaudere-local-goose-dialogue-responder-proof
+
+gaudere_local_goose_dialogue_responder_proof_SOURCES = \
+	local_goose_dialogue_responder_proof_main.cpp \
+	LocalGooseDialoguePreferredSubmitter.cpp \
+	LocalGooseDialoguePreferredSubmitter.hpp \
+	LocalGooseDialogueResponder.cpp \
+	LocalGooseDialogueResponder.hpp \
+	LocalGooseDialogueResponderDispatcher.cpp \
+	LocalGooseDialogueResponderDispatcher.hpp \
+	LocalGooseDialogueResponderStore.cpp \
+	LocalGooseDialogueResponderStore.hpp \
+	LocalGooseDialogueCompletionFeed.cpp \
+	LocalGooseDialogueCompletionFeed.hpp \
+	LocalGooseDialogueThreadStore.cpp \
+	LocalGooseDialogueThreadStore.hpp \
+	LocalGooseDialogueV2.cpp \
+	LocalGooseDialogueV2.hpp \
+	LocalGooseDialogueV3.cpp \
+	LocalGooseDialogueV3.hpp \
+	Sha256.cpp \
+	Sha256.hpp
+
+gaudere_local_goose_dialogue_responder_proof_LDADD = \
+	$(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3

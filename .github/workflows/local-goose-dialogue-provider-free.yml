@@ -278,6 +278,30 @@ jobs:
             agent/src/LocalGooseDialogueResponderDispatcher.cpp \
             agent/src/LocalGooseDialogueResponderStore.cpp
 
+      - name: Prove responder isolated Fedora gate remains copy-only
+        run: |
+          set -eu
+          sh -n agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
+          grep -q 'gaudere-local-goose-dialogue-responder-proof' agent/src/Makefile.am
+          grep -q 'preferred-from-intent' agent/src/local_goose_dialogue_responder_proof_main.cpp
+          grep -q 'compete' agent/src/local_goose_dialogue_responder_proof_main.cpp
+          grep -q 'production responder sidecar already exists before code deployment' \
+            agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
+          grep -q 'SCENARIO CRASH AFTER TASK/CAS BEFORE ACCOUNTING/ACK' \
+            agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
+          grep -q 'SCENARIO STALE HEAD RACE' \
+            agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
+          grep -q 'SCENARIO FINITE EXPIRY' \
+            agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
+          grep -q 'FEDORA_LOCAL_GOOSE_DIALOGUE_RESPONDER_ISOLATED=PASS' \
+            agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
+          grep -q -- '--network none' \
+            agent/scripts/prove-local-goose-dialogue-responder-fedora.sh
+          ! grep -Eq 'OpenAI|CurlHttpTransport|SecretSource|ProviderTaskHandler|LocalGooseCycleStimulus' \
+            agent/src/local_goose_dialogue_responder_proof_main.cpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
+            agent/src/local_goose_dialogue_responder_proof_main.cpp
+
       - name: Prove deploy remains code-only
         run: |
           set -eu
