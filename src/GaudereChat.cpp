@@ -281,6 +281,7 @@ GaudereChatSession::GaudereChatSession(
         throw std::invalid_argument("gaudere-chat thread alias is invalid");
     }
     if (options_.poll_interval.count() <= 0
+        || options_.transport_timeout.count() <= 0
         || options_.timeout.count() <= 0) {
         throw std::invalid_argument("gaudere-chat timing bounds are invalid");
     }
@@ -299,7 +300,7 @@ GaudereChatHeadResult GaudereChatSession::inspect_head() const
     LiveControlCommand command;
     command.operation = LiveControlOperation::inspect_local_goose_dialogue_thread_head;
     command.id = options_.thread_alias;
-    const auto reply = transport_(command);
+    const auto reply = transport_(command, options_.transport_timeout);
     if (reply.code != 0) {
         return GaudereChatHeadResult{
             false, {}, reply.body.empty()
@@ -379,8 +380,8 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     command.message_kind = local_goose_dialogue_v3_message_dialogue;
     command.text = attempt.message;
 
-    const auto reply = transport_(command);
-    if (reply.code == 1) {
+    const auto reply = transport_(command, options_.transport_timeout);
+    if (reply.code == 1 || reply.code == live_control_client_timeout_code) {
         ambiguous_attempt_ = attempt;
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::transport_ambiguous;
@@ -463,16 +464,40 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
 {
     const auto deadline = clock_() + options_.timeout;
     for (;;) {
+        const auto now = clock_();
+        if (now >= deadline) {
+            GaudereChatTurnResult out;
+            out.code = GaudereChatTurnCode::timeout;
+            out.request_id = attempt.request_id;
+            out.task_id = task_id;
+            out.expected_revision = attempt.head.revision;
+            out.current_revision = attempt.head.revision + 1;
+            out.detail = "submitted Task is still non-terminal after bounded wait";
+            return out;
+        }
+        auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
+        if (remaining.count() <= 0) remaining = std::chrono::milliseconds{1};
+
         LiveControlCommand command;
         command.operation = LiveControlOperation::inspect_task;
         command.id = task_id;
-        const auto reply = transport_(command);
-        if (reply.code != 0) {
-            if (reply.code == 1) ambiguous_attempt_ = attempt;
+        const auto reply = transport_(command, remaining);
+        if (reply.code == live_control_client_timeout_code) {
             GaudereChatTurnResult out;
-            out.code = reply.code == 1
-                ? GaudereChatTurnCode::transport_ambiguous
-                : GaudereChatTurnCode::invalid_reply;
+            out.code = GaudereChatTurnCode::timeout;
+            out.request_id = attempt.request_id;
+            out.task_id = task_id;
+            out.expected_revision = attempt.head.revision;
+            out.current_revision = attempt.head.revision + 1;
+            out.detail = reply.body.empty()
+                ? "submitted Task inspection reached its bounded deadline"
+                : reply.body;
+            return out;
+        }
+        if (reply.code != 0) {
+            GaudereChatTurnResult out;
+            out.code = GaudereChatTurnCode::invalid_reply;
             out.request_id = attempt.request_id;
             out.task_id = task_id;
             out.expected_revision = attempt.head.revision;
