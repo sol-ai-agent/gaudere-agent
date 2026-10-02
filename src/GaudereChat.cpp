@@ -190,7 +190,8 @@ bool active_status(const std::string& value) noexcept
 
 std::optional<std::string> canonical_response(
     const std::string& raw,
-    const GaudereChatSession::Attempt& attempt)
+    const std::string& request_id,
+    const GaudereChatHead& predecessor_head)
 {
     try {
         const auto parsed = Json::parse(raw);
@@ -212,7 +213,7 @@ std::optional<std::string> canonical_response(
         for (const auto& item : parsed.items()) keys.insert(item.key());
         if (keys != expected || parsed.dump() != raw
             || parsed.value("schema", "") != local_goose_dialogue_v3_response_schema
-            || parsed.value("request_id", "") != attempt.request_id
+            || parsed.value("request_id", "") != request_id
             || parsed.value("speaker_kind", "") != local_goose_dialogue_v3_speaker_human
             || parsed.value("speaker_id", "") != "bertrand"
             || parsed.value("message_kind", "") != local_goose_dialogue_v3_message_dialogue
@@ -232,8 +233,8 @@ std::optional<std::string> canonical_response(
             parsed.at("predecessor_result_sha256").get<std::string>();
         const auto model_sha = parsed.at("model_sha256").get<std::string>();
         if (response.empty() || response.size() > 16 * 1024
-            || root != attempt.head.root_task_id
-            || predecessor != attempt.head.head_task_id
+            || root != predecessor_head.root_task_id
+            || predecessor != predecessor_head.head_task_id
             || !lowercase_hex(predecessor_sha, 64)
             || !lowercase_hex(model_sha, 64)) {
             return std::nullopt;
@@ -250,7 +251,7 @@ GaudereChatTurnResult malformed(
 {
     GaudereChatTurnResult out;
     out.code = GaudereChatTurnCode::invalid_reply;
-    out.request_id = attempt.request_id;
+    out.request_id = request_id;
     out.expected_revision = attempt.head.revision;
     out.detail = std::move(detail);
     return out;
@@ -369,7 +370,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     LiveControlCommand command;
     command.operation =
         LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next;
-    command.id = attempt.request_id;
+    command.id = request_id;
     command.thread_alias = attempt.head.alias;
     command.expected_thread_revision = attempt.head.revision;
     command.speaker_kind = local_goose_dialogue_v3_speaker_human;
@@ -382,7 +383,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         ambiguous_attempt_ = attempt;
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::transport_ambiguous;
-        out.request_id = attempt.request_id;
+        out.request_id = request_id;
         out.expected_revision = attempt.head.revision;
         out.detail = reply.body.empty()
             ? "submission transport state is ambiguous"
@@ -393,9 +394,16 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     ambiguous_attempt_.reset();
 
     if (reply.code != 0) {
+        if (reply.code != 4) {
+            return malformed(
+                attempt,
+                reply.body.empty()
+                    ? "preferred dialogue submission failed"
+                    : reply.body);
+        }
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::conflict;
-        out.request_id = attempt.request_id;
+        out.request_id = request_id;
         out.expected_revision = attempt.head.revision;
         try {
             const auto fields = parse_report(reply.body);
@@ -433,7 +441,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         || !dialogue_task_id(id->second)
         || kind->second != local_goose_dialogue_v3_task_kind
         || alias->second != attempt.head.alias
-        || root->second != attempt.head.root_task_id
+        || root->second != predecessor_head.root_task_id
         || head_task->second != id->second) {
         return malformed(attempt, "preferred dialogue commit report differs");
     }
@@ -458,11 +466,12 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         command.id = task_id;
         const auto reply = transport_(command);
         if (reply.code != 0) {
+            if (reply.code == 1) ambiguous_attempt_ = attempt;
             GaudereChatTurnResult out;
             out.code = reply.code == 1
                 ? GaudereChatTurnCode::transport_ambiguous
                 : GaudereChatTurnCode::invalid_reply;
-            out.request_id = attempt.request_id;
+            out.request_id = request_id;
             out.task_id = task_id;
             out.expected_revision = attempt.head.revision;
             out.detail = reply.body.empty()
@@ -493,13 +502,14 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
                 || type->second != local_goose_dialogue_v3_response_content_type) {
                 return malformed(attempt, "successful Task result envelope differs");
             }
-            const auto response = canonical_response(output->second, attempt);
+            const auto response = canonical_response(
+                output->second, attempt.request_id, attempt.head);
             if (!response) {
                 return malformed(attempt, "successful Task response is not canonical v3");
             }
             GaudereChatTurnResult out;
             out.code = GaudereChatTurnCode::succeeded;
-            out.request_id = attempt.request_id;
+            out.request_id = request_id;
             out.task_id = task_id;
             out.response = *response;
             out.expected_revision = attempt.head.revision;
@@ -510,7 +520,7 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         if (terminal_status(status->second)) {
             GaudereChatTurnResult out;
             out.code = GaudereChatTurnCode::terminal_failure;
-            out.request_id = attempt.request_id;
+            out.request_id = request_id;
             out.task_id = task_id;
             out.expected_revision = attempt.head.revision;
             out.detail = reply.body;
@@ -523,7 +533,7 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         if (clock_() >= deadline) {
             GaudereChatTurnResult out;
             out.code = GaudereChatTurnCode::timeout;
-            out.request_id = attempt.request_id;
+            out.request_id = request_id;
             out.task_id = task_id;
             out.expected_revision = attempt.head.revision;
             out.current_revision = attempt.head.revision + 1;
