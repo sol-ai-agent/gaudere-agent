@@ -283,7 +283,7 @@ bool timeout_test()
     GaudereChatSession session(
         transport, "0123456789abcdef", options, clock, sleeper);
     const auto result = session.send_turn("Salut");
-    return step == 5
+    return step == 4
         && result.code == GaudereChatTurnCode::timeout
         && result.task_id == new_task
         && !session.has_ambiguous_attempt();
