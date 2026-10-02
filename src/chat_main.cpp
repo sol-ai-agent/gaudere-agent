@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -122,13 +123,15 @@ int main(int argc, char* argv[])
             }
 
             gaudere_agent::GaudereChatTurnResult result;
+            std::string attempted_message;
             if (line == "/retry") {
                 if (session.has_ambiguous_attempt()) {
+                    attempted_message = session.ambiguous_message();
                     result = session.retry_ambiguous();
                 } else if (!conflict_message.empty()) {
-                    const auto message = conflict_message;
+                    attempted_message = conflict_message;
                     conflict_message.clear();
-                    result = session.send_turn(message);
+                    result = session.send_turn(attempted_message);
                 } else {
                     std::cerr << "gaudere-chat: nothing requires an explicit retry\n";
                     continue;
@@ -141,7 +144,8 @@ int main(int argc, char* argv[])
                     continue;
                 }
                 conflict_message.clear();
-                result = session.send_turn(line);
+                attempted_message = line;
+                result = session.send_turn(attempted_message);
             }
 
             if (verbose) {
@@ -163,12 +167,7 @@ int main(int argc, char* argv[])
                 std::cout << "Gaudere> " << result.response << '\n';
                 break;
             case gaudere_agent::GaudereChatTurnCode::conflict:
-                conflict_message = line == "/retry"
-                    ? conflict_message
-                    : line;
-                if (conflict_message.empty()) {
-                    conflict_message = session.ambiguous_message();
-                }
+                conflict_message = attempted_message;
                 std::cerr
                     << "gaudere-chat: preferred thread advanced concurrently; "
                     << "the message was not committed to the preferred thread";
