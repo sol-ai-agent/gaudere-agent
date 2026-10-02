@@ -62,6 +62,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp -a /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /opt/runtime/lib/ \
     && cp /opt/gaudere-agent/bin/gaudere-agent /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-control /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-chat /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake-v1-prepare /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-resume-after-wake-v1 /opt/runtime/bin/ \
@@ -80,6 +81,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-proof /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-seed /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-activate /opt/runtime/bin/ \
+    && test -x /opt/runtime/bin/gaudere-chat \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1-prepare \
     && test -x /opt/runtime/bin/gaudere-resume-after-wake-v1 \
@@ -137,7 +139,8 @@ RUN dnf install -y libcurl libstdc++ sqlite-libs \
 COPY --from=builder /opt/runtime/ /usr/local/
 COPY --from=goose-cli /opt/goose/goose /usr/local/bin/goose
 
-RUN test -x /usr/local/bin/gaudere-resume-after-wake \
+RUN test -x /usr/local/bin/gaudere-chat \
+    && test -x /usr/local/bin/gaudere-resume-after-wake \
     && test -x /usr/local/bin/gaudere-resume-after-wake-v1-prepare \
     && test -x /usr/local/bin/gaudere-resume-after-wake-v1 \
     && test -x /usr/local/bin/gaudere-current-cognition-prepare \
