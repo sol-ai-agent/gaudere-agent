@@ -25,6 +25,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -38,6 +39,7 @@ struct Options {
     std::string thread_alias = "main";
     std::string goose_path_root = "/var/lib/gaudere/goose";
     std::size_t expected_tasks = 0;
+    std::chrono::milliseconds linger{0};
 };
 
 void usage(const char* program)
@@ -47,6 +49,7 @@ void usage(const char* program)
         << " --state PATH --model SELECTOR --model-sha256 SHA256"
         << " --control-socket PATH --thread-sidecar PATH"
         << " --completion-sidecar PATH --expected-tasks N"
+        << " [--linger-ms N]"
         << " [--thread-alias ALIAS] [--goose-root PATH]\n";
 }
 
@@ -92,6 +95,20 @@ std::size_t parse_size(const std::string& value)
     return static_cast<std::size_t>(parsed);
 }
 
+std::chrono::milliseconds parse_milliseconds(const std::string& value)
+{
+    if (value.empty()) {
+        throw std::invalid_argument("empty linger duration");
+    }
+    std::size_t consumed = 0;
+    const auto parsed = std::stoll(value, &consumed, 10);
+    if (consumed != value.size() || parsed < 0 || parsed > 60000) {
+        throw std::invalid_argument(
+            "linger duration must be an integer in 0..60000 ms");
+    }
+    return std::chrono::milliseconds{parsed};
+}
+
 Options parse_options(const int argc, char* argv[])
 {
     Options options;
@@ -113,6 +130,8 @@ Options parse_options(const int argc, char* argv[])
             options.thread_alias = argv[++i];
         } else if (arg == "--expected-tasks" && i + 1 < argc) {
             options.expected_tasks = parse_size(argv[++i]);
+        } else if (arg == "--linger-ms" && i + 1 < argc) {
+            options.linger = parse_milliseconds(argv[++i]);
         } else if (arg == "--goose-root" && i + 1 < argc) {
             options.goose_path_root = argv[++i];
         } else if (arg == "--help") {
@@ -292,7 +311,8 @@ int main(int argc, char* argv[])
             << " provider_execution=false tools_enabled=false"
             << " network_expected=none multi_actor=true"
             << " preferred_head_cas=true completion_feed=true"
-            << " expected_tasks=" << options.expected_tasks << "\n";
+            << " expected_tasks=" << options.expected_tasks
+            << " linger_ms=" << options.linger.count() << "\n";
 
         std::size_t worked_tasks = 0;
         bool conflict = false;
@@ -312,6 +332,25 @@ int main(int argc, char* argv[])
                 conflict = true;
             } else if (work == gaudere_agent::WorkCycleResult::stopped) {
                 break;
+            }
+        }
+
+        if (!conflict && worked_tasks == options.expected_tasks
+            && options.linger > std::chrono::milliseconds::zero()) {
+            const auto until = std::chrono::steady_clock::now() + options.linger;
+            while (std::chrono::steady_clock::now() < until) {
+                const auto control = processor.process(mailbox);
+                if (control.work_may_be_pending) {
+                    throw std::runtime_error(
+                        "dialogue v3 proof received an unexpected submission during linger");
+                }
+                if (control.wake_deadline_may_have_changed
+                    || control.local_goose_cycle_may_have_changed) {
+                    throw std::runtime_error(
+                        "dialogue v3 proof received unexpected authority during linger");
+                }
+                reconcile_feed();
+                std::this_thread::sleep_for(std::chrono::milliseconds{10});
             }
         }
 
