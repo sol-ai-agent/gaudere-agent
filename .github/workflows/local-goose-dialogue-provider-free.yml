@@ -312,7 +312,10 @@ jobs:
           set -eu
           grep -q 'gaudere-chat' agent/src/Makefile.am
           grep -q 'gaudere_chat_test' agent/tests/Makefile.am
-          grep -q 'run_live_control_client' agent/src/chat_main.cpp
+          grep -q 'run_live_control_client_with_timeout' agent/src/chat_main.cpp
+          grep -q 'live_control_client_timeout_code' agent/src/GaudereChat.cpp
+          grep -q -- '--transport-timeout-ms' agent/src/chat_main.cpp
+          ! grep -Eq 'run_live_control_client[[:space:]]*\\(' agent/src/chat_main.cpp
           grep -q 'submit_local_goose_dialogue_v3_preferred_next' agent/src/GaudereChat.cpp
           grep -q 'inspect_local_goose_dialogue_thread_head' agent/src/GaudereChat.cpp
           grep -q 'inspect_task' agent/src/GaudereChat.cpp

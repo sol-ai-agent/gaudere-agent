@@ -28,7 +28,7 @@ void usage(const char* program)
     std::cerr
         << "Usage: " << program
         << " [--socket PATH] [--thread ALIAS] [--poll-ms N]"
-        << " [--timeout-ms N] [--verbose]\n";
+        << " [--transport-timeout-ms N] [--timeout-ms N] [--verbose]\n";
 }
 
 void help()
@@ -66,6 +66,10 @@ int main(int argc, char* argv[])
             } else if (argument == "--poll-ms" && index + 1 < argc) {
                 options.poll_interval = std::chrono::milliseconds{
                     parse_positive_ms(argv[++index], "--poll-ms")};
+            } else if (argument == "--transport-timeout-ms"
+                       && index + 1 < argc) {
+                options.transport_timeout = std::chrono::milliseconds{
+                    parse_positive_ms(argv[++index], "--transport-timeout-ms")};
             } else if (argument == "--timeout-ms" && index + 1 < argc) {
                 options.timeout = std::chrono::milliseconds{
                     parse_positive_ms(argv[++index], "--timeout-ms")};
@@ -82,11 +86,13 @@ int main(int argc, char* argv[])
         }
 
         auto transport = [&socket_path](
-            const gaudere_agent::LiveControlCommand& command) {
+            const gaudere_agent::LiveControlCommand& command,
+            const std::chrono::milliseconds timeout) {
             std::ostringstream output;
             std::ostringstream error;
-            const int code = gaudere_agent::run_live_control_client(
-                socket_path, command, output, error);
+            const int code =
+                gaudere_agent::run_live_control_client_with_timeout(
+                    socket_path, command, timeout, output, error);
             std::string body = code == 0 ? output.str() : error.str();
             if (body.empty()) body = output.str() + error.str();
             return gaudere_agent::GaudereChatTransportReply{
@@ -180,8 +186,8 @@ int main(int argc, char* argv[])
                 break;
             case gaudere_agent::GaudereChatTurnCode::transport_ambiguous:
                 std::cerr
-                    << "gaudere-chat: submission/inspection transport state is "
-                    << "ambiguous. Do not create a new message; use /retry for "
+                    << "gaudere-chat: submission transport state is ambiguous. "
+                    << "Do not create a new message; use /retry for "
                     << "the exact preserved attempt.\n"
                     << result.detail;
                 break;

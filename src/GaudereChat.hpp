@@ -17,7 +17,9 @@ struct GaudereChatTransportReply {
 };
 
 using GaudereChatTransport =
-    std::function<GaudereChatTransportReply(const LiveControlCommand&)>;
+    std::function<GaudereChatTransportReply(
+        const LiveControlCommand&,
+        std::chrono::milliseconds)>;
 using GaudereChatClock =
     std::function<std::chrono::steady_clock::time_point()>;
 using GaudereChatSleeper =
@@ -26,6 +28,7 @@ using GaudereChatSleeper =
 struct GaudereChatOptions {
     std::string thread_alias = "main";
     std::chrono::milliseconds poll_interval{250};
+    std::chrono::milliseconds transport_timeout{2000};
     std::chrono::milliseconds timeout{600000};
 };
 

@@ -3,6 +3,7 @@
 
 #include <fcntl.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -157,6 +158,22 @@ int run_live_control_client(const std::string& socket_path,
                             const LiveControlCommand& command,
                             std::ostream& output,
                             std::ostream& error);
+
+/** Client-side deadline marker used only by the bounded local operator client. */
+inline constexpr int live_control_client_timeout_code = 124;
+
+/**
+ * One-shot client with a strict client-side deadline.
+ *
+ * The existing unbounded gaudere-control behavior remains unchanged.
+ * A timeout means the remote side may already have received the command.
+ */
+int run_live_control_client_with_timeout(
+    const std::string& socket_path,
+    const LiveControlCommand& command,
+    std::chrono::milliseconds timeout,
+    std::ostream& output,
+    std::ostream& error);
 
 } // namespace gaudere_agent
 
