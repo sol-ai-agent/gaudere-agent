@@ -1,6 +1,6 @@
 AM_CPPFLAGS = $(GAUDERE_CFLAGS) $(JSON_CFLAGS) $(CURL_CFLAGS)
 
-bin_PROGRAMS = gaudere-agent gaudere-control gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1 gaudere-current-cognition-prepare gaudere-current-cognition gaudere-autonomous-cognition-pulse gaudere-continuity-delta-checkpoint gaudere-local-activity-seed gaudere-local-activity-status
+bin_PROGRAMS = gaudere-agent gaudere-control gaudere-chat gaudere-resume-after-wake gaudere-resume-after-wake-v1-prepare gaudere-resume-after-wake-v1 gaudere-current-cognition-prepare gaudere-current-cognition gaudere-autonomous-cognition-pulse gaudere-continuity-delta-checkpoint gaudere-local-activity-seed gaudere-local-activity-status
 
 gaudere_agent_SOURCES = \
 	main.cpp \
@@ -156,6 +156,17 @@ gaudere_control_SOURCES = \
 	LiveControl.cpp \
 	LiveControl.hpp
 gaudere_control_LDADD = $(JSON_LIBS)
+
+gaudere_chat_SOURCES = \
+	chat_main.cpp \
+	GaudereChat.cpp \
+	GaudereChat.hpp \
+	LiveControl.cpp \
+	LiveControl.hpp \
+	LocalGooseDialogueV3.hpp \
+	Sha256.cpp \
+	Sha256.hpp
+gaudere_chat_LDADD = $(JSON_LIBS)
 
 gaudere_resume_after_wake_SOURCES = \
 	resume_after_wake_main.cpp \

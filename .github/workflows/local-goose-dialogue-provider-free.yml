@@ -307,6 +307,25 @@ jobs:
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/local_goose_dialogue_responder_proof_main.cpp
 
+      - name: Prove gaudere-chat remains bounded human V3 only
+        run: |
+          set -eu
+          grep -q 'gaudere-chat' agent/src/Makefile.am
+          grep -q 'gaudere_chat_test' agent/tests/Makefile.am
+          grep -q 'run_live_control_client' agent/src/chat_main.cpp
+          grep -q 'submit_local_goose_dialogue_v3_preferred_next' agent/src/GaudereChat.cpp
+          grep -q 'inspect_local_goose_dialogue_thread_head' agent/src/GaudereChat.cpp
+          grep -q 'inspect_task' agent/src/GaudereChat.cpp
+          grep -q 'speaker_id = "bertrand"' agent/src/GaudereChat.cpp
+          grep -q 'local_goose_dialogue_v3_speaker_human' agent/src/GaudereChat.cpp
+          grep -q 'local_goose_dialogue_v3_message_dialogue' agent/src/GaudereChat.cpp
+          grep -q 'ambiguous_attempt_' agent/src/GaudereChat.cpp
+          grep -q 'retry_ambiguous' agent/src/GaudereChat.cpp
+          ! grep -Eq 'dialogue-feed|dialogue-responder|submit_openai|inspect_budget|accept_wake|revoke_wake|stimulate_local_goose_cycle' \
+            agent/src/GaudereChat.cpp agent/src/chat_main.cpp
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen|execl|execv|execve)[[:space:]]*\(' \
+            agent/src/GaudereChat.cpp agent/src/chat_main.cpp
+
       - name: Prove first responder activation stays explicit and one-turn
         run: |
           set -eu

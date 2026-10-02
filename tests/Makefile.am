@@ -7,6 +7,7 @@ check_PROGRAMS = \
 	explicit_wake_integration_test \
 	explicit_wake_test \
 	file_secret_source_test \
+	gaudere_chat_test \
 	live_control_test \
 	live_control_processor_test \
 	local_goose_dialogue_test \
@@ -145,6 +146,16 @@ file_secret_source_test_SOURCES = \
 	../src/FileSecretSource.hpp \
 	../src/SecretSource.hpp
 file_secret_source_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+gaudere_chat_test_SOURCES = \
+	gaudere_chat_test.cpp \
+	../src/GaudereChat.cpp \
+	../src/GaudereChat.hpp \
+	../src/LiveControl.hpp \
+	../src/LocalGooseDialogueV3.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+gaudere_chat_test_LDADD = $(JSON_LIBS)
 
 live_control_test_SOURCES = \
 	live_control_test.cpp \
