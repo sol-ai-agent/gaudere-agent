@@ -584,7 +584,7 @@ std::string random_gaudere_chat_session_nonce()
 
 } // namespace gaudere_agent
 
-std::chrono::milliseconds GaudereChatSession::io_timeout() const noexcept
+std::chrono::milliseconds gaudere_agent::GaudereChatSession::io_timeout() const noexcept
 {
     return options_.io_timeout;
 }
