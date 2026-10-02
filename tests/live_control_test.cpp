@@ -1036,6 +1036,47 @@ void test_existing_regular_file_is_never_unlinked()
     ::rmdir(directory.c_str());
 }
 
+void test_client_io_timeout_bounds_pending_reply()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool woke = false;
+    LiveControlServer server(socket_path, mailbox, [&] {
+        std::lock_guard<std::mutex> lock(mutex);
+        woke = true;
+        condition.notify_all();
+    });
+    expect(server.start(), "timeout protocol server starts");
+
+    std::ostringstream output;
+    std::ostringstream error;
+    const auto started = std::chrono::steady_clock::now();
+    const int result = run_live_control_client(
+        socket_path,
+        LiveControlCommand{LiveControlOperation::inspect_task, "task-timeout", {}},
+        output, error, 50ms);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    expect(result == 1, "pending live-control reply times out with transport code one");
+    expect(error.str().find("receive timed out") != std::string::npos,
+           "client timeout is explicit");
+    expect(elapsed < 2s, "client timeout is bounded well below two seconds");
+
+    const auto pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "timed-out request reached the worker mailbox exactly once");
+    if (pending.size() == 1) {
+        pending.front()->complete(LiveControlReply{true, 0, "late\n"});
+    }
+
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
 void test_idle_server_stops_without_polling_timeout()
 {
     const auto directory = temporary_directory();
@@ -1075,6 +1116,7 @@ int main()
     test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();
     test_existing_regular_file_is_never_unlinked();
+    test_client_io_timeout_bounds_pending_reply();
     test_idle_server_stops_without_polling_timeout();
 
     if (failures != 0) {
