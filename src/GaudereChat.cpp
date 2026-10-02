@@ -252,7 +252,7 @@ GaudereChatTurnResult malformed(
 {
     GaudereChatTurnResult out;
     out.code = GaudereChatTurnCode::invalid_reply;
-    out.request_id = attempt.request_id;
+    out.request_id = request_id;
     out.expected_revision = expected_revision;
     out.detail = std::move(detail);
     return out;
