@@ -289,6 +289,40 @@ bool timeout_test()
         && !session.has_ambiguous_attempt();
 }
 
+
+bool task_inspection_deadline_does_not_make_submission_ambiguous_test()
+{
+    int step = 0;
+    std::chrono::milliseconds task_deadline{0};
+    auto transport = [&](const LiveControlCommand&,
+                         const std::chrono::milliseconds timeout) {
+        ++step;
+        if (step == 1) {
+            return GaudereChatTransportReply{0, head_report(2, old_head)};
+        }
+        if (step == 2) {
+            return GaudereChatTransportReply{0, submit_report(3)};
+        }
+        task_deadline = timeout;
+        return GaudereChatTransportReply{
+            gaudere_agent::live_control_client_timeout_code,
+            "gaudere-control: live control response timed out\n"};
+    };
+
+    gaudere_agent::GaudereChatOptions options;
+    options.transport_timeout = std::chrono::milliseconds{25};
+    options.timeout = std::chrono::milliseconds{400};
+    GaudereChatSession session(
+        transport, "9999aaaabbbbcccc", options);
+    const auto result = session.send_turn("Salut");
+    return step == 3
+        && task_deadline.count() > 0
+        && task_deadline <= options.timeout
+        && result.code == GaudereChatTurnCode::timeout
+        && result.task_id == new_task
+        && !session.has_ambiguous_attempt();
+}
+
 bool noncanonical_response_test()
 {
     int step = 0;
@@ -322,6 +356,8 @@ int main()
         {"conflict_test", conflict_test},
         {"ambiguous_exact_retry_test", ambiguous_exact_retry_test},
         {"timeout_test", timeout_test},
+        {"task_inspection_deadline_does_not_make_submission_ambiguous_test",
+         task_inspection_deadline_does_not_make_submission_ambiguous_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
 
