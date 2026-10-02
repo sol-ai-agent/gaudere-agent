@@ -121,7 +121,7 @@ bool successful_turn_test()
 {
     int step = 0;
     std::string request_id;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             if (command.operation
@@ -167,7 +167,7 @@ bool conflict_test()
 {
     int step = 0;
     int submit_count = 0;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -209,7 +209,7 @@ bool ambiguous_exact_retry_test()
 {
     int step = 0;
     std::string first_request;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -262,7 +262,7 @@ bool timeout_test()
 {
     int step = 0;
     auto now = std::chrono::steady_clock::time_point{};
-    auto transport = [&](const LiveControlCommand&) {
+    auto transport = [&](const LiveControlCommand&, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -293,7 +293,7 @@ bool noncanonical_response_test()
 {
     int step = 0;
     std::string request_id;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
