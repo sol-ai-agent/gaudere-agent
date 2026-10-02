@@ -9,8 +9,10 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <climits>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -723,6 +725,147 @@ void send_all(const int fd, const std::string& payload)
     }
 }
 
+class LiveControlClientTimeout final : public std::runtime_error {
+public:
+    explicit LiveControlClientTimeout(const std::string& message)
+        : std::runtime_error(message)
+    {
+    }
+};
+
+using SteadyClock = std::chrono::steady_clock;
+
+int remaining_poll_ms(const SteadyClock::time_point deadline)
+{
+    const auto remaining = deadline - SteadyClock::now();
+    if (remaining <= SteadyClock::duration::zero()) return 0;
+    const auto milliseconds =
+        std::chrono::duration_cast<std::chrono::milliseconds>(remaining);
+    const auto rounded = milliseconds.count()
+        + (milliseconds < remaining ? 1LL : 0LL);
+    return rounded > INT_MAX ? INT_MAX : static_cast<int>(rounded);
+}
+
+void wait_until_ready(const int fd,
+                      const short events,
+                      const SteadyClock::time_point deadline,
+                      const char* action)
+{
+    for (;;) {
+        const int timeout_ms = remaining_poll_ms(deadline);
+        if (timeout_ms <= 0) {
+            throw LiveControlClientTimeout(
+                std::string{"live control "} + action + " timed out");
+        }
+        pollfd descriptor{fd, events, 0};
+        const int result = ::poll(&descriptor, 1, timeout_ms);
+        if (result > 0) {
+            if (descriptor.revents & POLLNVAL) {
+                throw std::runtime_error(
+                    std::string{"live control "} + action
+                    + " failed: invalid socket");
+            }
+            if (descriptor.revents & (events | POLLERR | POLLHUP)) return;
+            continue;
+        }
+        if (result == 0) {
+            throw LiveControlClientTimeout(
+                std::string{"live control "} + action + " timed out");
+        }
+        if (errno == EINTR) continue;
+        throw std::runtime_error(
+            std::string{"live control "} + action + " poll failed: "
+            + std::strerror(errno));
+    }
+}
+
+void connect_before(const int fd,
+                    const sockaddr_un& address,
+                    const SteadyClock::time_point deadline)
+{
+    if (::connect(fd, reinterpret_cast<const sockaddr*>(&address),
+                  sizeof(address)) == 0) {
+        return;
+    }
+    if (errno != EINPROGRESS && errno != EAGAIN) {
+        throw std::runtime_error(
+            std::string{"cannot connect to live control socket: "}
+            + std::strerror(errno));
+    }
+    wait_until_ready(fd, POLLOUT, deadline, "connect");
+    int socket_error = 0;
+    socklen_t length = sizeof(socket_error);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error, &length) != 0) {
+        throw std::runtime_error(
+            std::string{"cannot inspect live control connect result: "}
+            + std::strerror(errno));
+    }
+    if (socket_error != 0) {
+        throw std::runtime_error(
+            std::string{"cannot connect to live control socket: "}
+            + std::strerror(socket_error));
+    }
+}
+
+void send_all_before(const int fd,
+                     const std::string& payload,
+                     const SteadyClock::time_point deadline)
+{
+    std::size_t offset = 0;
+    while (offset < payload.size()) {
+        const auto written = ::send(
+            fd, payload.data() + offset, payload.size() - offset, MSG_NOSIGNAL);
+        if (written > 0) {
+            offset += static_cast<std::size_t>(written);
+            continue;
+        }
+        if (written == 0) {
+            throw std::runtime_error("live control send returned zero bytes");
+        }
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            wait_until_ready(fd, POLLOUT, deadline, "send");
+            continue;
+        }
+        throw std::runtime_error(
+            std::string{"live control send failed: "} + std::strerror(errno));
+    }
+}
+
+std::string receive_until_eof_before(
+    const int fd,
+    const std::size_t limit,
+    const SteadyClock::time_point deadline)
+{
+    std::string payload;
+    char buffer[4096];
+    for (;;) {
+        const auto count = ::recv(fd, buffer, sizeof(buffer), 0);
+        if (count == 0) return payload;
+        if (count > 0) {
+            const auto size = static_cast<std::size_t>(count);
+            if (payload.size() > limit - std::min(limit, size)) {
+                throw std::runtime_error(
+                    "live control message exceeds byte limit");
+            }
+            payload.append(buffer, size);
+            if (payload.size() > limit) {
+                throw std::runtime_error(
+                    "live control message exceeds byte limit");
+            }
+            continue;
+        }
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            wait_until_ready(fd, POLLIN, deadline, "response");
+            continue;
+        }
+        throw std::runtime_error(
+            std::string{"live control receive failed: "}
+            + std::strerror(errno));
+    }
+}
+
 std::string receive_until_eof(const int fd, const std::size_t limit)
 {
     std::string payload;
@@ -1004,6 +1147,53 @@ int run_live_control_client(const std::string& socket_path,
             error << reply.body;
         }
         return reply.code;
+    } catch (const std::exception& exception) {
+        close_fd(fd);
+        error << "gaudere-control: " << exception.what() << '\n';
+        return 1;
+    }
+}
+
+int run_live_control_client_with_timeout(
+    const std::string& socket_path,
+    const LiveControlCommand& command,
+    const std::chrono::milliseconds timeout,
+    std::ostream& output,
+    std::ostream& error)
+{
+    if (timeout.count() <= 0) {
+        error << "gaudere-control: live control timeout must be positive\n";
+        return live_control_client_timeout_code;
+    }
+
+    int fd = -1;
+    try {
+        const auto payload = encode_command(command);
+        const auto address = unix_address(socket_path);
+        const auto deadline = SteadyClock::now() + timeout;
+
+        fd = ::socket(
+            AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+        if (fd < 0) {
+            throw std::runtime_error("cannot create live control client socket");
+        }
+        connect_before(fd, address, deadline);
+        send_all_before(fd, payload, deadline);
+        if (::shutdown(fd, SHUT_WR) != 0) {
+            throw std::runtime_error("cannot finish live control request");
+        }
+        const auto response =
+            receive_until_eof_before(fd, max_response_bytes, deadline);
+        close_fd(fd);
+
+        const auto reply = decode_reply(response);
+        if (reply.ok) output << reply.body;
+        else error << reply.body;
+        return reply.code;
+    } catch (const LiveControlClientTimeout& exception) {
+        close_fd(fd);
+        error << "gaudere-control: " << exception.what() << '\n';
+        return live_control_client_timeout_code;
     } catch (const std::exception& exception) {
         close_fd(fd);
         error << "gaudere-control: " << exception.what() << '\n';
