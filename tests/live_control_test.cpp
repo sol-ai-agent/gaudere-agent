@@ -1036,6 +1036,53 @@ void test_existing_regular_file_is_never_unlinked()
     ::rmdir(directory.c_str());
 }
 
+
+void test_bounded_client_times_out_without_changing_unbounded_client()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    LiveControlMailbox mailbox;
+    std::atomic<bool> woke{false};
+    LiveControlServer server(socket_path, mailbox, [&] {
+        woke.store(true);
+    });
+    expect(server.start(), "bounded timeout server starts");
+
+    std::ostringstream output;
+    std::ostringstream error;
+    const auto started = std::chrono::steady_clock::now();
+    const int result = run_live_control_client_with_timeout(
+        socket_path,
+        LiveControlCommand{LiveControlOperation::inspect_task, "task-timeout", {}},
+        50ms,
+        output,
+        error);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+
+    expect(result == live_control_client_timeout_code,
+           "bounded client returns the dedicated timeout code");
+    expect(output.str().empty(),
+           "bounded client timeout does not write normal output");
+    expect(error.str().find("timed out") != std::string::npos,
+           "bounded client timeout is explicit");
+    expect(elapsed >= 20ms && elapsed < 2s,
+           "bounded client returns near its client-side deadline");
+    expect(woke.load(),
+           "bounded request reached the live control mailbox before timeout");
+
+    const auto pending = mailbox.take_all();
+    expect(pending.size() == 1,
+           "bounded timeout leaves exactly one server-side request");
+    if (pending.size() == 1) {
+        pending.front()->complete(
+            LiveControlReply{true, 0, "late-reply\n"});
+    }
+
+    server.stop();
+    server.join();
+    ::rmdir(directory.c_str());
+}
+
 void test_idle_server_stops_without_polling_timeout()
 {
     const auto directory = temporary_directory();
@@ -1075,6 +1122,7 @@ int main()
     test_local_goose_stimulus_rejects_text_before_connect();
     test_invalid_wake_revocation_reason_is_rejected_before_connect();
     test_existing_regular_file_is_never_unlinked();
+    test_bounded_client_times_out_without_changing_unbounded_client();
     test_idle_server_stops_without_polling_timeout();
 
     if (failures != 0) {
