@@ -281,7 +281,8 @@ GaudereChatSession::GaudereChatSession(
         throw std::invalid_argument("gaudere-chat thread alias is invalid");
     }
     if (options_.poll_interval.count() <= 0
-        || options_.timeout.count() <= 0) {
+        || options_.timeout.count() <= 0
+        || options_.io_timeout.count() <= 0) {
         throw std::invalid_argument("gaudere-chat timing bounds are invalid");
     }
     if (!clock_) {
@@ -468,16 +469,16 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         command.id = task_id;
         const auto reply = transport_(command);
         if (reply.code != 0) {
-            if (reply.code == 1) ambiguous_attempt_ = attempt;
             GaudereChatTurnResult out;
             out.code = reply.code == 1
-                ? GaudereChatTurnCode::transport_ambiguous
+                ? GaudereChatTurnCode::timeout
                 : GaudereChatTurnCode::invalid_reply;
             out.request_id = attempt.request_id;
             out.task_id = task_id;
             out.expected_revision = attempt.head.revision;
+            out.current_revision = attempt.head.revision + 1;
             out.detail = reply.body.empty()
-                ? "submitted Task inspection failed"
+                ? "submitted Task inspection did not complete within its I/O bound"
                 : reply.body;
             return out;
         }
@@ -582,3 +583,8 @@ std::string random_gaudere_chat_session_nonce()
 }
 
 } // namespace gaudere_agent
+
+std::chrono::milliseconds gaudere_agent::GaudereChatSession::io_timeout() const noexcept
+{
+    return options_.io_timeout;
+}

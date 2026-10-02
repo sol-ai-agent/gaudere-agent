@@ -307,6 +307,32 @@ jobs:
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/local_goose_dialogue_responder_proof_main.cpp
 
+      - name: Prove gaudere-chat isolated Fedora gate is copy-only
+        run: |
+          set -eu
+          sh -n agent/scripts/prove-gaudere-chat-fedora.sh
+          grep -q 'FEDORA_GAUDERE_CHAT_ISOLATED=PASS' agent/scripts/prove-gaudere-chat-fedora.sh
+          grep -q 'GAUDERE_CHAT_FAKE_CONFLICT=PASS' agent/scripts/prove-gaudere-chat-fedora.sh
+          grep -q 'GAUDERE_CHAT_FAKE_TIMEOUT=PASS' agent/scripts/prove-gaudere-chat-fedora.sh
+          grep -q -- '--network none' agent/scripts/prove-gaudere-chat-fedora.sh
+          grep -q -- '--linger-ms 5000' agent/scripts/prove-gaudere-chat-fedora.sh
+          grep -q 'CHAT_RESPONDER_NEXT_PENDING_SEQUENCE=3' agent/scripts/prove-gaudere-chat-fedora.sh
+          grep -q 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=3' agent/scripts/prove-gaudere-chat-fedora.sh
+          ! grep -Eq 'systemctl[^\n]*(stop|start|restart)|podman[^\n]*exec[^\n]*gaudere-agent|dialogue-feed-ack|dialogue-responder-(lease|prepare|dispatch)|stimulate-local-goose-cycle|control[[:space:]]+openai|--openai-model|--autonomous-pulse-provider' \
+            agent/scripts/prove-gaudere-chat-fedora.sh
+
+      - name: Prove gaudere-chat Fedora packaging and I/O bound
+        run: |
+          set -eu
+          grep -q 'cp /opt/gaudere-agent/bin/gaudere-chat /opt/runtime/bin/' agent/Containerfile
+          grep -q 'test -x /usr/local/bin/gaudere-chat' agent/Containerfile
+          grep -q 'SO_RCVTIMEO' agent/src/LiveControl.cpp
+          grep -q 'SO_SNDTIMEO' agent/src/LiveControl.cpp
+          grep -q 'live control receive timed out' agent/src/LiveControl.cpp
+          grep -q -- '--io-timeout-ms' agent/src/chat_main.cpp
+          grep -q 'task_inspection_io_timeout_test' agent/tests/gaudere_chat_test.cpp
+          grep -q 'test_client_io_timeout_bounds_pending_reply' agent/tests/live_control_test.cpp
+
       - name: Prove gaudere-chat remains bounded human V3 only
         run: |
           set -eu
