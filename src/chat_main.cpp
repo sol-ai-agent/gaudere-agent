@@ -191,8 +191,9 @@ int main(int argc, char* argv[])
             case gaudere_agent::GaudereChatTurnCode::timeout:
                 std::cerr
                     << "gaudere-chat: Task " << result.task_id
-                    << " is durably submitted but still non-terminal after the "
-                    << "bounded wait. Do not resubmit this message.\n";
+                    << " is durably submitted but could not be observed as "
+                    << "terminal within the bounded wait. Do not resubmit this "
+                    << "message.\n";
                 break;
             case gaudere_agent::GaudereChatTurnCode::terminal_failure:
                 std::cerr
