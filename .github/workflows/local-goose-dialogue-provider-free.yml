@@ -307,6 +307,18 @@ jobs:
           ! grep -Eq '(^|[^[:alnum:]_])(system|popen)[[:space:]]*\(' \
             agent/src/local_goose_dialogue_responder_proof_main.cpp
 
+      - name: Prove gaudere-chat Fedora packaging and I/O bound
+        run: |
+          set -eu
+          grep -q 'cp /opt/gaudere-agent/bin/gaudere-chat /opt/runtime/bin/' agent/Containerfile
+          grep -q 'test -x /usr/local/bin/gaudere-chat' agent/Containerfile
+          grep -q 'SO_RCVTIMEO' agent/src/LiveControl.cpp
+          grep -q 'SO_SNDTIMEO' agent/src/LiveControl.cpp
+          grep -q 'live control receive timed out' agent/src/LiveControl.cpp
+          grep -q -- '--io-timeout-ms' agent/src/chat_main.cpp
+          grep -q 'task_inspection_io_timeout_test' agent/tests/gaudere_chat_test.cpp
+          grep -q 'test_client_io_timeout_bounds_pending_reply' agent/tests/live_control_test.cpp
+
       - name: Prove gaudere-chat remains bounded human V3 only
         run: |
           set -eu
