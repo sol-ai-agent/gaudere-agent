@@ -318,7 +318,7 @@ jobs:
           grep -q -- '--linger-ms 5000' agent/scripts/prove-gaudere-chat-fedora.sh
           grep -q 'CHAT_RESPONDER_NEXT_PENDING_SEQUENCE=3' agent/scripts/prove-gaudere-chat-fedora.sh
           grep -q 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=3' agent/scripts/prove-gaudere-chat-fedora.sh
-          ! grep -Eq 'systemctl[^\n]*(stop|start|restart)|podman[^\n]*exec[^\n]*gaudere-agent|dialogue-feed-ack|dialogue-responder-(lease|prepare|dispatch)|stimulate-local-goose-cycle|openai' \
+          ! grep -Eq 'systemctl[^\n]*(stop|start|restart)|podman[^\n]*exec[^\n]*gaudere-agent|dialogue-feed-ack|dialogue-responder-(lease|prepare|dispatch)|stimulate-local-goose-cycle|control[[:space:]]+openai|--openai-model|--autonomous-pulse-provider' \
             agent/scripts/prove-gaudere-chat-fedora.sh
 
       - name: Prove gaudere-chat Fedora packaging and I/O bound
