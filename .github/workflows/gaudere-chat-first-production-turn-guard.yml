@@ -1,0 +1,65 @@
+name: gaudere-chat first production turn guard
+
+on:
+  pull_request:
+    paths:
+      - scripts/first-production-gaudere-chat-turn.sh
+      - .github/workflows/gaudere-chat-first-production-turn-guard.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/first-production-gaudere-chat-turn.sh
+      - .github/workflows/gaudere-chat-first-production-turn-guard.yml
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Stage 9K5 one-human-turn boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=scripts/first-production-gaudere-chat-turn.sh
+          test -x "$script"
+          sh -n "$script"
+
+          grep -q 'AUTHORIZED_GAUDERE_CHAT_FIRST_PRODUCTION_TURN' "$script"
+          grep -q '7335c2a921a46de854748b9b613f5aea74f16cbb73193643d08bf80b5c59ccd7' "$script"
+          grep -q '77ed92357b6c7535cacf19af134bbba083e962bbd6324fadc6a5e77bf4e8d943' "$script"
+
+          test "$(grep -c '/usr/local/bin/gaudere-chat' "$script")" -eq 2
+          grep -q '/usr/local/bin/gaudere-chat --help' "$script"
+          grep -q '/usr/local/bin/gaudere-chat --thread.*--verbose' "$script"
+          ! grep -q '/usr/local/bin/gaudere-control' "$script"
+          ! grep -q 'dialogue-feed-ack' "$script"
+          ! grep -q 'dialogue-responder-prepare' "$script"
+          ! grep -q 'dialogue-responder-dispatch' "$script"
+          ! grep -q 'dialogue-responder-lease-create' "$script"
+          ! grep -q 'local-thread-v3-send' "$script"
+
+          grep -q '\[ -t 0 \]' "$script"
+          test "$(grep -c 'IFS= read -r human_message' "$script")" -eq 1
+          grep -q 'human message exceeds gaudere-chat 4096-byte bound' "$script"
+          grep -Fq "printf '/quit\\n'" "$script"
+          grep -q 'Local commands beginning with "/" are rejected' "$script"
+
+          grep -q '\[ "$v3_before" = "2" \]' "$script"
+          grep -q '\[ "$completion_events" = "3" \]' "$script"
+          grep -q '\[ "$thread_revision" = "2" \]' "$script"
+          grep -q '\[ "$responder_sequence" = "2" \]' "$script"
+
+          grep -q '\[ "$v3_after" = "3" \]' "$script"
+          grep -q '\[ "$completion_events_now" = "4" \]' "$script"
+          grep -q 'heads != \[("main", 3, root_id, task_id)\]' "$script"
+          grep -q 'completion consumers changed' "$script"
+          grep -q 'responder_dump_after.*responder_dump_before' "$script"
+          grep -q 'provider_after.*provider_before' "$script"
+          grep -q 'cursor_after.*cursor_before' "$script"
+          grep -q 'stimuli_after.*stimuli_before' "$script"
+
+          grep -q 'GAUDERE_CHAT_HUMAN_TURNS_ADDED=1' "$script"
+          grep -q 'FEDORA_GAUDERE_CHAT_FIRST_PRODUCTION_TURN=PASS' "$script"
