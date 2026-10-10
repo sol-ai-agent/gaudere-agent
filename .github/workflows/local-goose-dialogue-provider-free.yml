@@ -245,8 +245,17 @@ jobs:
           grep -q '^[[:space:]]*local_goose_dialogue_responder_dispatcher_test \\' agent/tests/Makefile.am
           grep -q 'LocalGooseDialogueResponderStore.cpp' agent/tests/Makefile.am
           grep -q 'LocalGooseDialogueResponderDispatcher.cpp' agent/tests/Makefile.am
-          grep -q 'local_goose_dialogue_responder_sidecar_schema = 1' \
+          grep -q 'local_goose_dialogue_responder_sidecar_schema = 2' \
             agent/src/LocalGooseDialogueResponder.hpp
+          grep -q 'local_goose_dialogue_responder_disposition' \
+            agent/src/LocalGooseDialogueResponderStore.cpp
+          grep -q 'UNIQUE(consumer_id,completion_sequence)' \
+            agent/src/LocalGooseDialogueResponderStore.cpp
+          grep -q 'UNIQUE(consumer_id,event_id)' \
+            agent/src/LocalGooseDialogueResponderStore.cpp
+          ! grep -Eq 'LocalGooseDialogueCompletionFeed|LocalGooseDialogueResponderDispatcher|TaskExecutor' \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueResponderStore.hpp
           grep -q 'max_system_turns = 8' \
             agent/src/LocalGooseDialogueResponder.cpp
           grep -q 'O_NOFOLLOW' agent/src/LocalGooseDialogueResponderStore.cpp
