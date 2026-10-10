@@ -1,0 +1,52 @@
+name: gaudere-chat fake socket SELinux guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fake-socket-selinux-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Keep SELinux exception limited to synthetic socket clients
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=scripts/prove-gaudere-chat-fedora.sh
+          sh -n "$script"
+
+          test "$(grep -c -- '--security-opt label=disable' "$script")" = "2"
+
+          before_count=$(awk '
+            /BINARY CONFLICT PROOF/ { exit }
+            /--security-opt label=disable/ { count++ }
+            END { print count + 0 }
+          ' "$script")
+          test "$before_count" = "0"
+
+          conflict_count=$(awk '
+            /BINARY CONFLICT PROOF/ { active=1 }
+            /BINARY I\/O TIMEOUT PROOF/ { active=0 }
+            active && /--security-opt label=disable/ { count++ }
+            END { print count + 0 }
+          ' "$script")
+          test "$conflict_count" = "1"
+
+          timeout_count=$(awk '
+            /BINARY I\/O TIMEOUT PROOF/ { active=1 }
+            /VERIFY PRODUCTION PRESERVATION/ { active=0 }
+            active && /--security-opt label=disable/ { count++ }
+            END { print count + 0 }
+          ' "$script")
+          test "$timeout_count" = "1"
+
+          grep -q 'GAUDERE_CHAT_FAKE_CONFLICT=PASS' "$script"
+          grep -q 'GAUDERE_CHAT_FAKE_TIMEOUT=PASS' "$script"
+          grep -q -- '--network none' "$script"
