@@ -42,9 +42,9 @@ jobs:
           ! grep -q 'local-thread-v3-send' "$script"
 
           grep -q '\[ -t 0 \]' "$script"
-          grep -q 'IFS= read -r human_message' "$script"
+          test "$(grep -c 'IFS= read -r human_message' "$script")" -eq 1
           grep -q 'human message exceeds gaudere-chat 4096-byte bound' "$script"
-          grep -q "printf '/quit\\\\n'" "$script"
+          grep -Fq "printf '/quit\\n'" "$script"
           grep -q 'Local commands beginning with "/" are rejected' "$script"
 
           grep -q '\[ "$v3_before" = "2" \]' "$script"
