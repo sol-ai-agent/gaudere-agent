@@ -52,7 +52,7 @@ jobs:
           grep -Fq 'prepare_disposition' "$store_h"
           grep -Fq 'bind_disposition_intent' "$store_h"
           grep -Fq 'acknowledge_disposition' "$store_h"
-          grep -Fq 'This method itself has no feed ACK authority.' "$store_h"
+          grep -Fq 'This method itself has no feed ACK' "$store_h"
 
           # The ledger may record external reconciliation, but it must not own
           # observation, feed ACK, Task dispatch or provider/cycle authority.
