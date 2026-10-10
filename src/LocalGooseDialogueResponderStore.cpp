@@ -10,7 +10,6 @@
 #include <fcntl.h>
 #include <limits>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
@@ -28,6 +27,8 @@ constexpr const char* intent_prefix =
     "cognition.local-goose-dialogue.responder-intent.v1:";
 constexpr const char* disposition_prefix =
     "cognition.local-goose-dialogue.responder-disposition.v1:";
+constexpr const char* completion_event_prefix =
+    "cognition.local-goose-dialogue.completion.v1:";
 constexpr const char* v3_prefix = "cognition.local-goose-dialogue.v3:";
 
 class Statement {
@@ -39,14 +40,10 @@ public:
             throw std::runtime_error(sqlite3_errmsg(database));
         }
     }
-
     ~Statement() { sqlite3_finalize(statement_); }
-
     Statement(const Statement&) = delete;
     Statement& operator=(const Statement&) = delete;
-
     [[nodiscard]] sqlite3_stmt* get() const noexcept { return statement_; }
-
 private:
     sqlite3* database_ = nullptr;
     sqlite3_stmt* statement_ = nullptr;
@@ -270,8 +267,11 @@ Json lease_json(const LocalGooseDialogueResponderLease& lease)
         {"state", static_cast<unsigned>(lease.state)},
         {"terminal_reason", lease.terminal_reason}
     };
-    out["terminal_at_ms"] = lease.terminal_at_ms
-        ? Json{*lease.terminal_at_ms} : Json{nullptr};
+    if (lease.terminal_at_ms) {
+        out["terminal_at_ms"] = *lease.terminal_at_ms;
+    } else {
+        out["terminal_at_ms"] = nullptr;
+    }
     return out;
 }
 
@@ -298,12 +298,21 @@ Json intent_json(const LocalGooseDialogueResponderIntent& intent)
         {"submitted_task_id", intent.submitted_task_id},
         {"terminal_reason", intent.terminal_reason}
     };
-    out["submitted_thread_revision"] = intent.submitted_thread_revision
-        ? Json{*intent.submitted_thread_revision} : Json{nullptr};
-    out["committed_at_ms"] = intent.committed_at_ms
-        ? Json{*intent.committed_at_ms} : Json{nullptr};
-    out["completed_at_ms"] = intent.completed_at_ms
-        ? Json{*intent.completed_at_ms} : Json{nullptr};
+    if (intent.submitted_thread_revision) {
+        out["submitted_thread_revision"] = *intent.submitted_thread_revision;
+    } else {
+        out["submitted_thread_revision"] = nullptr;
+    }
+    if (intent.committed_at_ms) {
+        out["committed_at_ms"] = *intent.committed_at_ms;
+    } else {
+        out["committed_at_ms"] = nullptr;
+    }
+    if (intent.completed_at_ms) {
+        out["completed_at_ms"] = *intent.completed_at_ms;
+    } else {
+        out["completed_at_ms"] = nullptr;
+    }
     return out;
 }
 
@@ -326,14 +335,26 @@ Json disposition_json(const LocalGooseDialogueResponderDisposition& disposition)
         {"state", static_cast<unsigned>(disposition.state)},
         {"terminal_reason", disposition.terminal_reason}
     };
-    out["intent_id"] = disposition.intent_id
-        ? Json{*disposition.intent_id} : Json{nullptr};
-    out["bound_at_ms"] = disposition.bound_at_ms
-        ? Json{*disposition.bound_at_ms} : Json{nullptr};
-    out["reconciled_at_ms"] = disposition.reconciled_at_ms
-        ? Json{*disposition.reconciled_at_ms} : Json{nullptr};
-    out["terminal_at_ms"] = disposition.terminal_at_ms
-        ? Json{*disposition.terminal_at_ms} : Json{nullptr};
+    if (disposition.intent_id) {
+        out["intent_id"] = *disposition.intent_id;
+    } else {
+        out["intent_id"] = nullptr;
+    }
+    if (disposition.bound_at_ms) {
+        out["bound_at_ms"] = *disposition.bound_at_ms;
+    } else {
+        out["bound_at_ms"] = nullptr;
+    }
+    if (disposition.reconciled_at_ms) {
+        out["reconciled_at_ms"] = *disposition.reconciled_at_ms;
+    } else {
+        out["reconciled_at_ms"] = nullptr;
+    }
+    if (disposition.terminal_at_ms) {
+        out["terminal_at_ms"] = *disposition.terminal_at_ms;
+    } else {
+        out["terminal_at_ms"] = nullptr;
+    }
     return out;
 }
 
@@ -746,7 +767,6 @@ LocalGooseDialogueResponderStore::LocalGooseDialogueResponderStore(
         database_ = nullptr;
         throw std::runtime_error(message);
     }
-
     try {
         execute(database_, "PRAGMA journal_mode=DELETE;");
         execute(database_, "PRAGMA synchronous=FULL;");
@@ -762,7 +782,6 @@ LocalGooseDialogueResponderStore::LocalGooseDialogueResponderStore(
         if (schema > local_goose_dialogue_responder_sidecar_schema) {
             throw std::runtime_error("unsupported dialogue responder schema");
         }
-
         if (schema == 0) {
             if (!user_table_names(database_).empty()) {
                 throw std::runtime_error(
@@ -777,8 +796,7 @@ LocalGooseDialogueResponderStore::LocalGooseDialogueResponderStore(
                     database_,
                     {"local_goose_dialogue_responder_lease",
                      "local_goose_dialogue_responder_intent"})) {
-                throw std::runtime_error(
-                    "dialogue responder v1 table set differs");
+                throw std::runtime_error("dialogue responder v1 table set differs");
             }
             create_disposition_table(database_);
             execute(database_, "PRAGMA user_version=2;");
@@ -788,11 +806,9 @@ LocalGooseDialogueResponderStore::LocalGooseDialogueResponderStore(
                     {"local_goose_dialogue_responder_lease",
                      "local_goose_dialogue_responder_intent",
                      "local_goose_dialogue_responder_disposition"})) {
-                throw std::runtime_error(
-                    "dialogue responder v2 table set differs");
+                throw std::runtime_error("dialogue responder v2 table set differs");
             }
         }
-
         execute(database_, "COMMIT;");
     } catch (...) {
         try { execute(database_, "ROLLBACK;"); } catch (...) {}
@@ -835,7 +851,6 @@ LocalGooseDialogueResponderStore::create_lease(
         out.detail = "invalid initial dialogue responder lease";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
         const auto existing = ::gaudere_agent::find_lease(database_, lease.lease_id);
@@ -859,7 +874,6 @@ LocalGooseDialogueResponderStore::create_lease(
             out.detail = "preferred thread already has an active responder lease";
             return out;
         }
-
         Statement statement(
             database_,
             "INSERT INTO local_goose_dialogue_responder_lease("
@@ -901,7 +915,6 @@ LocalGooseDialogueResponderStore::close_lease(
         out.detail = "invalid responder lease terminal transition";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
         auto lease = ::gaudere_agent::find_lease(database_, lease_id);
@@ -931,7 +944,6 @@ LocalGooseDialogueResponderStore::close_lease(
             out.detail = "dialogue responder lease close conflicts";
             return out;
         }
-
         const auto expected_state = lease->state;
         const auto expected_turns = lease->turns_committed;
         lease->state = terminal_state;
@@ -994,11 +1006,9 @@ LocalGooseDialogueResponderStore::prepare_intent(
         out.detail = "invalid initial dialogue responder intent";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
-        const auto existing =
-            ::gaudere_agent::find_intent(database_, intent.intent_id);
+        const auto existing = ::gaudere_agent::find_intent(database_, intent.intent_id);
         if (existing) {
             execute(database_, "COMMIT;");
             out.intent = existing;
@@ -1015,8 +1025,7 @@ LocalGooseDialogueResponderStore::prepare_intent(
             out.detail = "lease already has an intent for this completion event";
             return out;
         }
-        const auto lease =
-            ::gaudere_agent::find_lease(database_, intent.lease_id);
+        const auto lease = ::gaudere_agent::find_lease(database_, intent.lease_id);
         const auto bit =
             local_goose_dialogue_responder_message_kind_bit(intent.message_kind);
         if (!lease
@@ -1035,7 +1044,6 @@ LocalGooseDialogueResponderStore::prepare_intent(
             out.detail = "intent is not admitted by active responder lease";
             return out;
         }
-
         Statement statement(
             database_,
             "INSERT INTO local_goose_dialogue_responder_intent("
@@ -1079,7 +1087,6 @@ LocalGooseDialogueResponderStore::commit_submission(
         out.detail = "invalid responder submission reconciliation";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
         auto intent = ::gaudere_agent::find_intent(database_, intent_id);
@@ -1109,7 +1116,6 @@ LocalGooseDialogueResponderStore::commit_submission(
             out.detail = "responder submission reconciliation conflicts";
             return out;
         }
-
         auto lease = ::gaudere_agent::find_lease(database_, intent->lease_id);
         if (!lease || lease->turns_committed >= lease->max_system_turns) {
             execute(database_, "COMMIT;");
@@ -1118,7 +1124,6 @@ LocalGooseDialogueResponderStore::commit_submission(
             out.detail = "responder lease cannot account another turn";
             return out;
         }
-
         std::int64_t next_eligible = 0;
         if (!checked_next_eligible(
                 committed_at_ms, lease->min_interval_ms, next_eligible)) {
@@ -1128,7 +1133,6 @@ LocalGooseDialogueResponderStore::commit_submission(
             out.detail = "responder next eligible time would overflow";
             return out;
         }
-
         const auto old_intent_state = intent->state;
         intent->state = LocalGooseDialogueResponderIntentState::submitted;
         intent->submitted_task_id = task_id;
@@ -1138,7 +1142,6 @@ LocalGooseDialogueResponderStore::commit_submission(
             throw std::runtime_error("reconciled responder intent became invalid");
         }
         update_intent(database_, *intent, old_intent_state);
-
         const auto old_lease_state = lease->state;
         const auto old_turns = lease->turns_committed;
         ++lease->turns_committed;
@@ -1153,7 +1156,6 @@ LocalGooseDialogueResponderStore::commit_submission(
             throw std::runtime_error("accounted responder lease became invalid");
         }
         update_lease(database_, *lease, old_lease_state, old_turns);
-
         execute(database_, "COMMIT;");
         out.result = LocalGooseDialogueResponderStoreResult::accepted;
         out.intent = intent;
@@ -1177,7 +1179,6 @@ LocalGooseDialogueResponderStore::complete_intent(
         out.detail = "invalid responder completion transition";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
         auto intent = ::gaudere_agent::find_intent(database_, intent_id);
@@ -1205,7 +1206,6 @@ LocalGooseDialogueResponderStore::complete_intent(
             out.detail = "dialogue responder completion conflicts";
             return out;
         }
-
         const auto old_state = intent->state;
         intent->state = LocalGooseDialogueResponderIntentState::completed;
         intent->completed_at_ms = completed_at_ms;
@@ -1241,7 +1241,6 @@ LocalGooseDialogueResponderStore::terminalize_intent(
         out.detail = "invalid responder intent terminal transition";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
         auto intent = ::gaudere_agent::find_intent(database_, intent_id);
@@ -1268,7 +1267,6 @@ LocalGooseDialogueResponderStore::terminalize_intent(
             out.detail = "dialogue responder terminal transition conflicts";
             return out;
         }
-
         const auto old_state = intent->state;
         intent->state = terminal_state;
         intent->terminal_reason = reason;
@@ -1293,9 +1291,7 @@ std::optional<LocalGooseDialogueResponderDisposition>
 LocalGooseDialogueResponderStore::find_disposition(
     const std::string& disposition_id) const
 {
-    if (!prefixed_sha256(disposition_id, disposition_prefix)) {
-        return std::nullopt;
-    }
+    if (!prefixed_sha256(disposition_id, disposition_prefix)) return std::nullopt;
     return ::gaudere_agent::find_disposition(database_, disposition_id);
 }
 
@@ -1305,8 +1301,7 @@ LocalGooseDialogueResponderStore::find_disposition_for_event(
     const std::string& event_id) const
 {
     if (!safe_identifier(consumer_id)
-        || !prefixed_sha256(
-            event_id, "cognition.local-goose-dialogue.completion.v1:")) {
+        || !prefixed_sha256(event_id, completion_event_prefix)) {
         return std::nullopt;
     }
     return ::gaudere_agent::find_disposition_for_event(
@@ -1347,7 +1342,6 @@ LocalGooseDialogueResponderStore::prepare_disposition(
         out.detail = "invalid initial dialogue responder disposition";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
         const auto existing =
@@ -1363,7 +1357,6 @@ LocalGooseDialogueResponderStore::prepare_disposition(
                 : "dialogue responder disposition id conflicts";
             return out;
         }
-
         const auto event = ::gaudere_agent::find_disposition_for_event(
             database_, disposition.consumer_id, disposition.event_id);
         if (event) {
@@ -1382,7 +1375,6 @@ LocalGooseDialogueResponderStore::prepare_disposition(
             out.detail = "responder consumer already has a disposition for sequence";
             return out;
         }
-
         Statement statement(
             database_,
             "INSERT INTO local_goose_dialogue_responder_disposition("
@@ -1428,11 +1420,9 @@ LocalGooseDialogueResponderStore::bind_disposition_intent(
         out.detail = "invalid responder disposition intent binding";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
-        auto disposition =
-            ::gaudere_agent::find_disposition(database_, disposition_id);
+        auto disposition = ::gaudere_agent::find_disposition(database_, disposition_id);
         if (!disposition) {
             execute(database_, "COMMIT;");
             out.result = LocalGooseDialogueResponderStoreResult::conflict;
@@ -1449,7 +1439,6 @@ LocalGooseDialogueResponderStore::bind_disposition_intent(
             out.detail = "dialogue responder disposition already bound";
             return out;
         }
-
         const auto intent = ::gaudere_agent::find_intent(database_, intent_id);
         if (disposition->kind != DKind::intervention
             || disposition->state != DState::prepared
@@ -1470,7 +1459,6 @@ LocalGooseDialogueResponderStore::bind_disposition_intent(
             out.detail = "responder disposition intent binding conflicts";
             return out;
         }
-
         const auto old_state = disposition->state;
         disposition->state = DState::intervention_bound;
         disposition->intent_id = intent_id;
@@ -1505,11 +1493,9 @@ LocalGooseDialogueResponderStore::acknowledge_disposition(
         out.detail = "invalid responder disposition ACK reconciliation";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
-        auto disposition =
-            ::gaudere_agent::find_disposition(database_, disposition_id);
+        auto disposition = ::gaudere_agent::find_disposition(database_, disposition_id);
         if (!disposition) {
             execute(database_, "COMMIT;");
             out.result = LocalGooseDialogueResponderStoreResult::conflict;
@@ -1534,7 +1520,6 @@ LocalGooseDialogueResponderStore::acknowledge_disposition(
             out.detail = "responder disposition ACK reconciliation conflicts";
             return out;
         }
-
         const auto old_state = disposition->state;
         disposition->state = DState::acknowledged;
         disposition->reconciled_at_ms = reconciled_at_ms;
@@ -1569,11 +1554,9 @@ LocalGooseDialogueResponderStore::complete_disposition(
         out.detail = "invalid responder intervention disposition reconciliation";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
-        auto disposition =
-            ::gaudere_agent::find_disposition(database_, disposition_id);
+        auto disposition = ::gaudere_agent::find_disposition(database_, disposition_id);
         if (!disposition) {
             execute(database_, "COMMIT;");
             out.result = LocalGooseDialogueResponderStoreResult::conflict;
@@ -1599,7 +1582,6 @@ LocalGooseDialogueResponderStore::complete_disposition(
             out.detail = "responder intervention disposition conflicts";
             return out;
         }
-
         const auto intent = ::gaudere_agent::find_intent(
             database_, *disposition->intent_id);
         if (!intent
@@ -1612,7 +1594,6 @@ LocalGooseDialogueResponderStore::complete_disposition(
             out.detail = "bound responder intent is not durably completed";
             return out;
         }
-
         const auto old_state = disposition->state;
         disposition->state = DState::completed;
         disposition->reconciled_at_ms = reconciled_at_ms;
@@ -1647,11 +1628,9 @@ LocalGooseDialogueResponderStore::terminalize_disposition(
         out.detail = "invalid responder disposition terminal transition";
         return out;
     }
-
     try {
         execute(database_, "BEGIN IMMEDIATE;");
-        auto disposition =
-            ::gaudere_agent::find_disposition(database_, disposition_id);
+        auto disposition = ::gaudere_agent::find_disposition(database_, disposition_id);
         if (!disposition) {
             execute(database_, "COMMIT;");
             out.result = LocalGooseDialogueResponderStoreResult::conflict;
@@ -1679,7 +1658,6 @@ LocalGooseDialogueResponderStore::terminalize_disposition(
             out.detail = "dialogue responder disposition terminal transition conflicts";
             return out;
         }
-
         const auto old_state = disposition->state;
         disposition->state = DState::manual_review;
         disposition->terminal_reason = reason;
