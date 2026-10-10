@@ -1,0 +1,51 @@
+name: gaudere-chat code-only production guard
+
+on:
+  pull_request:
+    paths:
+      - scripts/deploy-gaudere-chat-code-production.sh
+      - .github/workflows/gaudere-chat-code-production-guard.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/deploy-gaudere-chat-code-production.sh
+      - .github/workflows/gaudere-chat-code-production-guard.yml
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Stage 9K4 code-only deployment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=scripts/deploy-gaudere-chat-code-production.sh
+          test -x "$script"
+          sh -n "$script"
+
+          ! grep -q '/usr/local/bin/gaudere-control' "$script"
+          ! grep -q 'dialogue-feed-ack' "$script"
+          ! grep -q 'dialogue-responder-prepare' "$script"
+          ! grep -q 'dialogue-responder-dispatch' "$script"
+          ! grep -q 'dialogue-responder-lease-create' "$script"
+          ! grep -q 'local-thread-v3-send' "$script"
+
+          grep -q -- '--entrypoint /usr/local/bin/gaudere-chat' "$script"
+          grep -q 'exec gaudere-agent /usr/local/bin/gaudere-chat --help' "$script"
+          grep -q -- '--network none' "$script"
+          ! grep -q -- '--security-opt label=disable' "$script"
+
+          grep -q 'line.startswith("Image=")' "$script"
+          grep -q 'normalize(old) != normalize(new)' "$script"
+          grep -q 'mutation beyond Image=' "$script"
+
+          grep -q 'v3_after.*v3_before' "$script"
+          grep -q 'completion_consumers.*completion_consumers_before' "$script"
+          grep -q 'responder_sequence.*responder_sequence_before' "$script"
+          grep -q 'responder_dump_after.*responder_dump_before' "$script"
+          grep -q 'GAUDERE_CHAT_HUMAN_TURNS_ADDED=0' "$script"
+          grep -q 'FEDORA_GAUDERE_CHAT_CODE_PRODUCTION=PASS' "$script"
