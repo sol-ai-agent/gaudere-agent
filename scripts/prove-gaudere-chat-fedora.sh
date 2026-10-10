@@ -595,10 +595,14 @@ while [ "$attempt" -lt 100 ] && [ ! -S "$conflict_socket" ]; do
 done
 [ -S "$conflict_socket" ] || fail "fake conflict socket did not become ready"
 
+# The synthetic server is a host Python process. Fedora SELinux can deny the
+# container-domain AF_UNIX connectto even when the bind mount itself is relabeled.
+# Disable label separation only for this network-none synthetic client.
 conflict_output=$(printf '%s\n/quit\n' "$conflict_message" | "$podman_command" run --rm -i \
     --network none \
     --userns=keep-id \
     --user "$host_uid:$host_gid" \
+    --security-opt label=disable \
     --volume "$fake_dir:/work:Z" \
     --entrypoint /usr/local/bin/gaudere-chat \
     "$proof_image" \
@@ -660,10 +664,13 @@ while [ "$attempt" -lt 100 ] && [ ! -S "$timeout_socket" ]; do
 done
 [ -S "$timeout_socket" ] || fail "fake timeout socket did not become ready"
 
+# Same host-fake/container-client boundary as the conflict probe. Keep the
+# SELinux exception confined to this network-none synthetic client as well.
 timeout_output=$(printf '/head\n/quit\n' | "$podman_command" run --rm -i \
     --network none \
     --userns=keep-id \
     --user "$host_uid:$host_gid" \
+    --security-opt label=disable \
     --volume "$fake_dir:/work:Z" \
     --entrypoint /usr/local/bin/gaudere-chat \
     "$proof_image" \
