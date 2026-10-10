@@ -27,6 +27,7 @@ struct GaudereChatOptions {
     std::string thread_alias = "main";
     std::chrono::milliseconds poll_interval{250};
     std::chrono::milliseconds timeout{600000};
+    std::chrono::milliseconds io_timeout{5000};
 };
 
 struct GaudereChatHead {
@@ -77,6 +78,7 @@ public:
 
     [[nodiscard]] bool has_ambiguous_attempt() const noexcept;
     [[nodiscard]] std::string ambiguous_message() const;
+    [[nodiscard]] std::chrono::milliseconds io_timeout() const noexcept;
 
 private:
     struct Attempt {

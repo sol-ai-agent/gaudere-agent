@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -706,6 +707,28 @@ void close_fd(int& fd) noexcept
     }
 }
 
+void apply_client_timeout(
+    const int fd,
+    const std::chrono::milliseconds timeout)
+{
+    if (timeout <= std::chrono::milliseconds::zero()) return;
+
+    const auto seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(timeout);
+    const auto remainder =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            timeout - seconds);
+    timeval value{};
+    value.tv_sec = static_cast<decltype(value.tv_sec)>(seconds.count());
+    value.tv_usec = static_cast<decltype(value.tv_usec)>(remainder.count());
+    if (::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value)) != 0
+        || ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &value, sizeof(value)) != 0) {
+        throw std::runtime_error(
+            std::string("cannot configure live control client timeout: ")
+            + std::strerror(errno));
+    }
+}
+
 void send_all(const int fd, const std::string& payload)
 {
     std::size_t offset = 0;
@@ -715,6 +738,9 @@ void send_all(const int fd, const std::string& payload)
         if (written < 0) {
             if (errno == EINTR) {
                 continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                throw std::runtime_error("live control send timed out");
             }
             throw std::runtime_error(std::string("live control send failed: ")
                                      + std::strerror(errno));
@@ -735,6 +761,9 @@ std::string receive_until_eof(const int fd, const std::size_t limit)
         if (count < 0) {
             if (errno == EINTR) {
                 continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                throw std::runtime_error("live control receive timed out");
             }
             throw std::runtime_error(std::string("live control receive failed: ")
                                      + std::strerror(errno));
@@ -974,10 +1003,12 @@ void LiveControlServer::run()
     }
 }
 
-int run_live_control_client(const std::string& socket_path,
-                            const LiveControlCommand& command,
-                            std::ostream& output,
-                            std::ostream& error)
+int run_live_control_client(
+    const std::string& socket_path,
+    const LiveControlCommand& command,
+    std::ostream& output,
+    std::ostream& error,
+    const std::chrono::milliseconds io_timeout)
 {
     int fd = -1;
     try {
@@ -987,6 +1018,7 @@ int run_live_control_client(const std::string& socket_path,
         if (fd < 0) {
             throw std::runtime_error("cannot create live control client socket");
         }
+        apply_client_timeout(fd, io_timeout);
         if (::connect(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
             throw std::runtime_error(std::string("cannot connect to live control socket: ")
                                      + std::strerror(errno));

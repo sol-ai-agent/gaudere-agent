@@ -3,6 +3,7 @@
 
 #include <fcntl.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -153,10 +154,12 @@ private:
 };
 
 /** One-shot client used by gaudere-control. */
-int run_live_control_client(const std::string& socket_path,
-                            const LiveControlCommand& command,
-                            std::ostream& output,
-                            std::ostream& error);
+int run_live_control_client(
+    const std::string& socket_path,
+    const LiveControlCommand& command,
+    std::ostream& output,
+    std::ostream& error,
+    std::chrono::milliseconds io_timeout = std::chrono::milliseconds::zero());
 
 } // namespace gaudere_agent
 

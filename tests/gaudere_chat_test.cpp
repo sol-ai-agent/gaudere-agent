@@ -258,6 +258,34 @@ bool ambiguous_exact_retry_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool task_inspection_io_timeout_test()
+{
+    int step = 0;
+    auto transport = [&](const LiveControlCommand& command) {
+        ++step;
+        if (step == 1) {
+            return GaudereChatTransportReply{0, head_report(2, old_head)};
+        }
+        if (step == 2) {
+            return GaudereChatTransportReply{0, submit_report(3)};
+        }
+        if (step == 3 && command.operation == LiveControlOperation::inspect_task) {
+            return GaudereChatTransportReply{
+                1, "gaudere-control: live control receive timed out\n"};
+        }
+        return GaudereChatTransportReply{9, "unexpected command"};
+    };
+
+    GaudereChatSession session(
+        transport, "0011aabbccddeeff");
+    const auto result = session.send_turn("Salut");
+    return step == 3
+        && result.code == GaudereChatTurnCode::timeout
+        && result.task_id == new_task
+        && !session.has_ambiguous_attempt()
+        && result.detail.find("receive timed out") != std::string::npos;
+}
+
 bool timeout_test()
 {
     int step = 0;
@@ -321,6 +349,7 @@ int main()
         {"successful_turn_test", successful_turn_test},
         {"conflict_test", conflict_test},
         {"ambiguous_exact_retry_test", ambiguous_exact_retry_test},
+        {"task_inspection_io_timeout_test", task_inspection_io_timeout_test},
         {"timeout_test", timeout_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
