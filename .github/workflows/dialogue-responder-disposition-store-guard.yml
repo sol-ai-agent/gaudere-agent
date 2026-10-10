@@ -1,0 +1,75 @@
+name: Dialogue responder disposition store guard
+
+on:
+  pull_request:
+    paths:
+      - src/LocalGooseDialogueResponder.cpp
+      - src/LocalGooseDialogueResponder.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - tests/local_goose_dialogue_responder_store_test.cpp
+      - .github/workflows/dialogue-responder-disposition-store-guard.yml
+  push:
+    branches: [main]
+    paths:
+      - src/LocalGooseDialogueResponder.cpp
+      - src/LocalGooseDialogueResponder.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - tests/local_goose_dialogue_responder_store_test.cpp
+      - .github/workflows/dialogue-responder-disposition-store-guard.yml
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify durable disposition store remains authority-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          header=src/LocalGooseDialogueResponder.hpp
+          store_h=src/LocalGooseDialogueResponderStore.hpp
+          store_cpp=src/LocalGooseDialogueResponderStore.cpp
+          test_cpp=tests/local_goose_dialogue_responder_store_test.cpp
+
+          grep -Fq 'local_goose_dialogue_responder_sidecar_schema = 2' "$header"
+          grep -Fq 'responder-disposition.v1:' "$header"
+          grep -Fq 'struct LocalGooseDialogueResponderDisposition' "$header"
+          grep -Fq 'LocalGooseDialogueResponderDispositionKind' "$header"
+          grep -Fq 'LocalGooseDialogueResponderDispositionState' "$header"
+
+          grep -Fq 'CREATE TABLE local_goose_dialogue_responder_disposition' "$store_cpp"
+          grep -Fq 'PRAGMA user_version=2;' "$store_cpp"
+          grep -Fq 'schema == 1' "$store_cpp"
+          grep -Fq 'dialogue responder v1 table set differs' "$store_cpp"
+          grep -Fq 'dialogue responder v2 table set differs' "$store_cpp"
+          grep -Fq 'UNIQUE(consumer_id,completion_sequence)' "$store_cpp"
+          grep -Fq 'UNIQUE(consumer_id,event_id)' "$store_cpp"
+          grep -Fq 'prepare_disposition' "$store_h"
+          grep -Fq 'bind_disposition_intent' "$store_h"
+          grep -Fq 'acknowledge_disposition' "$store_h"
+          grep -Fq 'This method itself has no feed ACK authority.' "$store_h"
+
+          # The ledger may record external reconciliation, but it must not own
+          # observation, feed ACK, Task dispatch or provider/cycle authority.
+          ! grep -Fq 'LocalGooseDialogueCompletionFeed' "$store_h"
+          ! grep -Fq 'LocalGooseDialogueCompletionFeed' "$store_cpp"
+          ! grep -Fq 'LocalGooseDialogueResponderDispatcher' "$store_h"
+          ! grep -Fq 'LocalGooseDialogueResponderDispatcher' "$store_cpp"
+          ! grep -Fq 'TaskExecutor' "$store_h"
+          ! grep -Fq 'TaskExecutor' "$store_cpp"
+          ! grep -Fq 'Provider' "$store_h"
+          ! grep -Fq 'Provider' "$store_cpp"
+          ! grep -Fq 'LocalGooseCycle' "$store_h"
+          ! grep -Fq 'LocalGooseCycle' "$store_cpp"
+
+          grep -Fq 'PRAGMA user_version=1;' "$test_cpp"
+          grep -Fq 'pragma_user_version(migration.path) == 2' "$test_cpp"
+          grep -Fq 'user_table_count(migration.path) == 3' "$test_cpp"
+          grep -Fq 'dispositions_in_state' "$test_cpp"
+          grep -Fq 'same_event_other_kind' "$test_cpp"
+          grep -Fq 'same_sequence_other_event' "$test_cpp"
