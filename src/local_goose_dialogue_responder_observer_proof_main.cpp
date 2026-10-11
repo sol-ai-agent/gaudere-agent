@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -72,7 +73,9 @@ std::uint64_t parse_u64(const std::string& value, const char* label)
     }
     std::size_t consumed = 0;
     const auto parsed = std::stoull(value, &consumed, 10);
-    if (consumed != value.size()) {
+    if (consumed != value.size()
+        || parsed > static_cast<unsigned long long>(
+            std::numeric_limits<std::int64_t>::max())) {
         throw std::invalid_argument(std::string(label) + " is invalid");
     }
     return static_cast<std::uint64_t>(parsed);
@@ -80,6 +83,10 @@ std::uint64_t parse_u64(const std::string& value, const char* label)
 
 Options parse_options(int argc, char* argv[])
 {
+    if (argc >= 2 && std::string{argv[1]} == "--help") {
+        usage(argv[0]);
+        std::exit(0);
+    }
     if (argc < 2) throw std::invalid_argument("missing proof command");
     Options out;
     out.command = argv[1];
