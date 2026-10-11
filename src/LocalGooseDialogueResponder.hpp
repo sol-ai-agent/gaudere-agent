@@ -7,7 +7,7 @@
 
 namespace gaudere_agent {
 
-inline constexpr int local_goose_dialogue_responder_sidecar_schema = 1;
+inline constexpr int local_goose_dialogue_responder_sidecar_schema = 2;
 inline constexpr std::uint32_t local_goose_dialogue_responder_message_dialogue = 1u << 0;
 inline constexpr std::uint32_t local_goose_dialogue_responder_message_feedback = 1u << 1;
 inline constexpr std::uint32_t local_goose_dialogue_responder_message_intervention = 1u << 2;
@@ -22,6 +22,8 @@ inline constexpr const char* local_goose_dialogue_responder_intent_prefix =
     "cognition.local-goose-dialogue.responder-intent.v1:";
 inline constexpr const char* local_goose_dialogue_responder_request_prefix =
     "responder-v1-";
+inline constexpr const char* local_goose_dialogue_responder_disposition_prefix =
+    "cognition.local-goose-dialogue.responder-disposition.v1:";
 
 enum class LocalGooseDialogueResponderLeaseState : std::uint8_t {
     active = 0,
@@ -38,6 +40,21 @@ enum class LocalGooseDialogueResponderIntentState : std::uint8_t {
     conflict = 3,
     expired = 4,
     manual_review = 5
+};
+
+enum class LocalGooseDialogueResponderDispositionKind : std::uint8_t {
+    structural_skip_system = 0,
+    structural_skip_stale = 1,
+    explicit_decline = 2,
+    intervention = 3
+};
+
+enum class LocalGooseDialogueResponderDispositionState : std::uint8_t {
+    prepared = 0,
+    acknowledged = 1,
+    intervention_bound = 2,
+    completed = 3,
+    manual_review = 4
 };
 
 struct LocalGooseDialogueResponderLease {
@@ -85,6 +102,36 @@ struct LocalGooseDialogueResponderIntent {
     std::string terminal_reason;
 };
 
+/**
+ * Durable cause for how one completion event is treated by one responder
+ * consumer. The identity intentionally excludes mutable reconciliation fields
+ * and the authority-source label: it is derived from canonical event evidence,
+ * consumer identity and disposition kind.
+ */
+struct LocalGooseDialogueResponderDisposition {
+    std::string disposition_id;
+    std::string consumer_id;
+    std::string thread_alias;
+    std::uint64_t completion_sequence = 0;
+    std::string event_id;
+    std::string result_sha256;
+    std::uint64_t thread_revision = 0;
+    std::string task_id;
+    std::string speaker_kind;
+    std::string speaker_id;
+    LocalGooseDialogueResponderDispositionKind kind =
+        LocalGooseDialogueResponderDispositionKind::structural_skip_stale;
+    std::string authority_source;
+    std::int64_t created_at_ms = 0;
+    LocalGooseDialogueResponderDispositionState state =
+        LocalGooseDialogueResponderDispositionState::prepared;
+    std::optional<std::string> intent_id;
+    std::optional<std::int64_t> bound_at_ms;
+    std::optional<std::int64_t> reconciled_at_ms;
+    std::string terminal_reason;
+    std::optional<std::int64_t> terminal_at_ms;
+};
+
 [[nodiscard]] std::uint32_t local_goose_dialogue_responder_message_kind_bit(
     const std::string& message_kind) noexcept;
 
@@ -109,6 +156,24 @@ make_local_goose_dialogue_responder_intent(
     const std::string& message,
     std::int64_t created_at_ms,
     std::int64_t expires_at_ms);
+
+[[nodiscard]] bool valid_local_goose_dialogue_responder_disposition(
+    const LocalGooseDialogueResponderDisposition& disposition) noexcept;
+
+[[nodiscard]] LocalGooseDialogueResponderDisposition
+make_local_goose_dialogue_responder_disposition(
+    const std::string& consumer_id,
+    const std::string& thread_alias,
+    std::uint64_t completion_sequence,
+    const std::string& event_id,
+    const std::string& result_sha256,
+    std::uint64_t thread_revision,
+    const std::string& task_id,
+    const std::string& speaker_kind,
+    const std::string& speaker_id,
+    LocalGooseDialogueResponderDispositionKind kind,
+    const std::string& authority_source,
+    std::int64_t created_at_ms);
 
 } // namespace gaudere_agent
 

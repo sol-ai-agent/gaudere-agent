@@ -85,6 +85,25 @@ bool valid_intent_state(const LocalGooseDialogueResponderIntentState state) noex
         || state == State::expired || state == State::manual_review;
 }
 
+bool valid_disposition_kind(
+    const LocalGooseDialogueResponderDispositionKind kind) noexcept
+{
+    using Kind = LocalGooseDialogueResponderDispositionKind;
+    return kind == Kind::structural_skip_system
+        || kind == Kind::structural_skip_stale
+        || kind == Kind::explicit_decline
+        || kind == Kind::intervention;
+}
+
+bool valid_disposition_state(
+    const LocalGooseDialogueResponderDispositionState state) noexcept
+{
+    using State = LocalGooseDialogueResponderDispositionState;
+    return state == State::prepared || state == State::acknowledged
+        || state == State::intervention_bound || state == State::completed
+        || state == State::manual_review;
+}
+
 void append(std::string& out, const std::string& value)
 {
     out += std::to_string(value.size());
@@ -114,6 +133,24 @@ std::string intent_digest(const LocalGooseDialogueResponderIntent& intent)
     append(canonical, intent.speaker_id);
     append(canonical, intent.message_kind);
     append(canonical, intent.message);
+    return sha256_hex(canonical);
+}
+
+std::string disposition_digest(
+    const LocalGooseDialogueResponderDisposition& disposition)
+{
+    std::string canonical =
+        "gaudere.cognition.local-goose-dialogue-responder-disposition.v1|";
+    append(canonical, disposition.consumer_id);
+    append(canonical, disposition.thread_alias);
+    append(canonical, disposition.completion_sequence);
+    append(canonical, disposition.event_id);
+    append(canonical, disposition.result_sha256);
+    append(canonical, disposition.thread_revision);
+    append(canonical, disposition.task_id);
+    append(canonical, disposition.speaker_kind);
+    append(canonical, disposition.speaker_id);
+    append(canonical, static_cast<std::uint64_t>(disposition.kind));
     return sha256_hex(canonical);
 }
 
@@ -283,6 +320,142 @@ bool valid_local_goose_dialogue_responder_intent(
     }
     if (intent.state == State::manual_review) return true;
     return !complete_submission;
+}
+
+LocalGooseDialogueResponderDisposition
+make_local_goose_dialogue_responder_disposition(
+    const std::string& consumer_id,
+    const std::string& thread_alias,
+    const std::uint64_t completion_sequence,
+    const std::string& event_id,
+    const std::string& result_sha256,
+    const std::uint64_t thread_revision,
+    const std::string& task_id,
+    const std::string& speaker_kind,
+    const std::string& speaker_id,
+    const LocalGooseDialogueResponderDispositionKind kind,
+    const std::string& authority_source,
+    const std::int64_t created_at_ms)
+{
+    LocalGooseDialogueResponderDisposition disposition;
+    disposition.consumer_id = consumer_id;
+    disposition.thread_alias = thread_alias;
+    disposition.completion_sequence = completion_sequence;
+    disposition.event_id = event_id;
+    disposition.result_sha256 = result_sha256;
+    disposition.thread_revision = thread_revision;
+    disposition.task_id = task_id;
+    disposition.speaker_kind = speaker_kind;
+    disposition.speaker_id = speaker_id;
+    disposition.kind = kind;
+    disposition.authority_source = authority_source;
+    disposition.created_at_ms = created_at_ms;
+    disposition.disposition_id =
+        std::string{local_goose_dialogue_responder_disposition_prefix}
+        + disposition_digest(disposition);
+    return disposition;
+}
+
+bool valid_local_goose_dialogue_responder_disposition(
+    const LocalGooseDialogueResponderDisposition& disposition) noexcept
+{
+    using Kind = LocalGooseDialogueResponderDispositionKind;
+    using State = LocalGooseDialogueResponderDispositionState;
+
+    if (!prefixed_sha256(
+            disposition.disposition_id,
+            local_goose_dialogue_responder_disposition_prefix)
+        || !safe_identifier(disposition.consumer_id)
+        || !safe_identifier(disposition.thread_alias)
+        || disposition.completion_sequence == 0
+        || disposition.completion_sequence > static_cast<std::uint64_t>(
+            std::numeric_limits<std::int64_t>::max())
+        || !prefixed_sha256(disposition.event_id, completion_event_prefix)
+        || !lowercase_sha256(disposition.result_sha256)
+        || disposition.thread_revision > static_cast<std::uint64_t>(
+            std::numeric_limits<std::int64_t>::max())
+        || !dialogue_task_id(disposition.task_id)
+        || !(disposition.speaker_kind == "human"
+             || disposition.speaker_kind == "system")
+        || !safe_identifier(disposition.speaker_id)
+        || !valid_disposition_kind(disposition.kind)
+        || !safe_identifier(disposition.authority_source)
+        || disposition.created_at_ms < 0
+        || !valid_disposition_state(disposition.state)
+        || disposition.terminal_reason.size() > max_reason_bytes) {
+        return false;
+    }
+
+    if (disposition.disposition_id
+        != std::string{local_goose_dialogue_responder_disposition_prefix}
+            + disposition_digest(disposition)) {
+        return false;
+    }
+
+    if (disposition.kind == Kind::structural_skip_system
+        && disposition.speaker_kind != "system") {
+        return false;
+    }
+    if ((disposition.kind == Kind::explicit_decline
+         || disposition.kind == Kind::intervention)
+        && disposition.speaker_kind != "human") {
+        return false;
+    }
+
+    const bool has_intent = disposition.intent_id.has_value();
+    const bool has_bound = disposition.bound_at_ms.has_value();
+    if (has_intent != has_bound) return false;
+    if (has_intent
+        && (!prefixed_sha256(
+                *disposition.intent_id,
+                local_goose_dialogue_responder_intent_prefix)
+            || *disposition.bound_at_ms < disposition.created_at_ms)) {
+        return false;
+    }
+    if (has_intent && disposition.kind != Kind::intervention) return false;
+
+    if (disposition.reconciled_at_ms
+        && *disposition.reconciled_at_ms < disposition.created_at_ms) {
+        return false;
+    }
+    if (disposition.terminal_at_ms
+        && *disposition.terminal_at_ms < disposition.created_at_ms) {
+        return false;
+    }
+
+    if (disposition.state == State::prepared) {
+        return !has_intent && !disposition.reconciled_at_ms
+            && disposition.terminal_reason.empty()
+            && !disposition.terminal_at_ms;
+    }
+    if (disposition.state == State::acknowledged) {
+        return disposition.kind != Kind::intervention
+            && !has_intent && disposition.reconciled_at_ms
+            && disposition.terminal_reason.empty()
+            && !disposition.terminal_at_ms;
+    }
+    if (disposition.state == State::intervention_bound) {
+        return disposition.kind == Kind::intervention
+            && has_intent && !disposition.reconciled_at_ms
+            && disposition.terminal_reason.empty()
+            && !disposition.terminal_at_ms;
+    }
+    if (disposition.state == State::completed) {
+        return disposition.kind == Kind::intervention
+            && has_intent && disposition.reconciled_at_ms
+            && *disposition.reconciled_at_ms >= *disposition.bound_at_ms
+            && disposition.terminal_reason.empty()
+            && !disposition.terminal_at_ms;
+    }
+
+    if (!bounded_nonempty(disposition.terminal_reason, max_reason_bytes)
+        || !disposition.terminal_at_ms || disposition.reconciled_at_ms) {
+        return false;
+    }
+    if (has_bound && *disposition.terminal_at_ms < *disposition.bound_at_ms) {
+        return false;
+    }
+    return disposition.kind == Kind::intervention || !has_intent;
 }
 
 } // namespace gaudere_agent
