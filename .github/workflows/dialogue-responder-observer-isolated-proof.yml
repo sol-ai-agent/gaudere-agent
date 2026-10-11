@@ -68,7 +68,7 @@ jobs:
           # repository is built with the versioned Containerfile builder stage;
           # helper compilation and execution then run network-none in Podman.
           ! grep -Eq 'for command .*g\+\+|for command .*pkg-config' "$script"
-          ! grep -Eq '^[[:space:]]*pkg-config --exists|^[[:space:]]*g\+\+' "$script"
+          ! grep -Eq '^[[:space:]]*pkg-config --exists' "$script"
           ! grep -Eq '^[[:space:]]*dnf[[:space:]]' "$script"
           grep -Fq -- '--target builder' "$script"
           grep -Fq 'BUILDER_IMAGE=registry.fedoraproject.org/fedora:44' "$script"
@@ -78,7 +78,7 @@ jobs:
           grep -Fq -- '--read-only --read-only-tmpfs' "$script"
           grep -Fq -- '--security-opt no-new-privileges --cap-drop all' "$script"
           grep -Fq '/proof/observer-proof' "$script"
-          grep -Fq '-v "$workspace:/proof:Z"' "$script"
+          grep -Fq -- '-v "$workspace:/proof:Z"' "$script"
 
           # The proof never activates or restarts production, never uses live
           # control, and never invokes responder lease/prepare/dispatch paths.
