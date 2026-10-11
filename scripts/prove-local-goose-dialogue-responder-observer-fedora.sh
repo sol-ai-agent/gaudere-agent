@@ -49,6 +49,8 @@ for command in "$podman_command" "$systemctl_command" git python3 sqlite3 sed gr
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 
+[ "$("$podman_command" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" = "true" ] || fail "isolated proof requires rootless Podman"
+
 for file in "$state_database" "$cycle_sidecar" "$stimulus_sidecar" "$thread_sidecar" "$completion_sidecar" "$responder_sidecar"; do
     [ -f "$file" ] && [ ! -L "$file" ] || fail "required production file is missing or unsafe: $file"
 done
@@ -179,7 +181,7 @@ proof_builder_image="localhost/gaudere-agent:observer-proof-builder-${agent_ref}
     "$repository_root"
 
 "$podman_command" run --rm --network none \
-    --userns keep-id --user "$(id -u):$(id -g)" \
+    --user 0:0 \
     --security-opt no-new-privileges --cap-drop all \
     -e PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
     -e LD_LIBRARY_PATH=/opt/gaudere/lib \
@@ -229,7 +231,7 @@ run_helper()
     esac
     relative=${directory#"$workspace/"}
     "$podman_command" run --rm --network none \
-        --userns keep-id --user "$(id -u):$(id -g)" \
+        --user 0:0 \
         --read-only --read-only-tmpfs \
         --security-opt no-new-privileges --cap-drop all \
         -e LD_LIBRARY_PATH=/opt/gaudere/lib \
