@@ -3,6 +3,7 @@ name: Dialogue responder observer isolated proof gate
 on:
   pull_request:
     paths:
+      - Containerfile
       - src/local_goose_dialogue_responder_observer_proof_main.cpp
       - scripts/prove-local-goose-dialogue-responder-observer-fedora.sh
       - .github/workflows/dialogue-responder-observer-isolated-proof.yml
@@ -17,6 +18,7 @@ on:
   push:
     branches: [main]
     paths:
+      - Containerfile
       - src/local_goose_dialogue_responder_observer_proof_main.cpp
       - scripts/prove-local-goose-dialogue-responder-observer-fedora.sh
       - .github/workflows/dialogue-responder-observer-isolated-proof.yml
@@ -38,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prove isolated copy-only boundary
+      - name: Prove isolated copy-only and host-build confinement boundary
         shell: bash
         run: |
           set -euxo pipefail
@@ -62,14 +64,33 @@ jobs:
           grep -Fq 'Commands: migrate, inspect, step, prepare-system, ack-prepared' "$helper"
           grep -Fq 'LocalGooseDialogueResponderObserver' "$helper"
 
+          # Host Fedora must not need compiler/development packages. The exact
+          # repository is built with the versioned Containerfile builder stage;
+          # helper compilation and execution then run network-none in Podman.
+          ! grep -Eq 'for command .*g\+\+|for command .*pkg-config' "$script"
+          ! grep -Eq '^[[:space:]]*pkg-config --exists|^[[:space:]]*g\+\+' "$script"
+          ! grep -Eq '^[[:space:]]*dnf[[:space:]]' "$script"
+          grep -Fq -- '--target builder' "$script"
+          grep -Fq 'BUILDER_IMAGE=registry.fedoraproject.org/fedora:44' "$script"
+          grep -Fq 'PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig' "$script"
+          grep -Fq 'LD_LIBRARY_PATH=/opt/gaudere/lib' "$script"
+          grep -Fq '"$podman_command" run --rm --network none' "$script"
+          grep -Fq -- '--read-only --read-only-tmpfs' "$script"
+          grep -Fq -- '--security-opt no-new-privileges --cap-drop all' "$script"
+          grep -Fq '/proof/observer-proof' "$script"
+          grep -Fq '-v "$workspace:/proof:Z"' "$script"
+
           # The proof never activates or restarts production, never uses live
           # control, and never invokes responder lease/prepare/dispatch paths.
           ! grep -Eq 'systemctl[^\n]*(start|stop|restart|enable|disable)' "$script"
           ! grep -Eq 'gaudere-control|dialogue-feed-ack|dialogue-responder-(lease-create|prepare|dispatch)' "$script"
           ! grep -Eq 'curl[[:space:]]|wget[[:space:]]|ssh[[:space:]]|scp[[:space:]]' "$script"
-          ! grep -Eq 'podman[^\n]*(run|exec|rm|stop|start|restart)' "$script"
+          ! grep -Eq '\$podman_command"[[:space:]]+(exec|stop|start|restart)' "$script"
           ! grep -Eq 'Provider|OpenAI|LocalGooseCycle|Stimulus|Wake|TaskExecutor|TaskDispatcher|ResponderDispatcher|PreferredSubmitter' "$helper"
           ! grep -Eq 'create_lease|prepare_intent|submit_local_goose_dialogue|dispatch[[:space:]]*\(' "$helper"
+
+          # No production state path may be mounted into a proof container.
+          ! grep -Eq -- '-v "\$(state_directory|state_database|cycle_sidecar|stimulus_sidecar|thread_sidecar|completion_sidecar|responder_sidecar)' "$script"
 
           # Any direct sqlite3 shell access to production paths is read-only.
           if grep -En '^[[:space:]]*sqlite3[[:space:]]' "$script" | grep -v -- '-readonly'; then
@@ -87,7 +108,7 @@ jobs:
     container: fedora:44
     timeout-minutes: 20
     steps:
-      - name: Install build dependencies
+      - name: Install build dependencies inside CI container
         run: >
           dnf install -y
           autoconf
