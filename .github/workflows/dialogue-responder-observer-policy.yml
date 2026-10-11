@@ -1,0 +1,138 @@
+name: Dialogue responder observer policy gate
+
+on:
+  pull_request:
+    paths:
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - tests/local_goose_dialogue_responder_observer_test.cpp
+      - src/main.cpp
+      - .github/workflows/dialogue-responder-observer-policy.yml
+  push:
+    branches: [main]
+    paths:
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - tests/local_goose_dialogue_responder_observer_test.cpp
+      - src/main.cpp
+      - .github/workflows/dialogue-responder-observer-policy.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fedora-44-observer-policy:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Prove observer has no dialogue intervention authority
+        run: |
+          set -eu
+          observer_h=agent/src/LocalGooseDialogueResponderObserver.hpp
+          observer_cpp=agent/src/LocalGooseDialogueResponderObserver.cpp
+          test_cpp=agent/tests/local_goose_dialogue_responder_observer_test.cpp
+
+          grep -Fq 'bool observation_armed = false;' "$observer_h"
+          grep -Fq 'system-responder-v1' "$observer_h"
+          grep -Fq 'observer-policy-v1' "$observer_h"
+          grep -Fq 'current_human' "$observer_h"
+          grep -Fq 'structural_system' "$observer_h"
+          grep -Fq 'structural_stale' "$observer_h"
+          grep -Fq 'intervention_owned' "$observer_h"
+          grep -Fq 'LocalGooseDialogueResponderExplicitDecline' "$observer_h"
+          grep -Fq 'feed_store_.acknowledge' "$observer_cpp"
+          grep -Fq 'prepare_disposition' "$observer_cpp"
+          grep -Fq 'acknowledge_disposition' "$observer_cpp"
+          grep -Fq 'terminalize_disposition' "$observer_cpp"
+          grep -Fq 'prepared intervention belongs to responder dispatch path' "$observer_cpp"
+          grep -Fq 'current human preferred-head completion is held' "$observer_cpp"
+
+          # This tranche deliberately cannot be activated by the production
+          # agent. Wiring is a later code-deploy/activation boundary.
+          ! grep -Fq 'LocalGooseDialogueResponderObserver' agent/src/main.cpp
+          ! grep -Fq 'dialogue_responder_observer' agent/src/main.cpp
+
+          # The observer may reconcile feed ACKs only. It cannot construct or
+          # execute intervention authority, run a provider, or touch cognition.
+          ! grep -Eq 'ResponderDispatcher|PreferredSubmitter|TaskExecutor|TaskDispatcher|Provider|OpenAI|LocalGooseCycle|Stimulus|Wake|Curl|Http|Secret|systemctl|podman' \
+            "$observer_h" "$observer_cpp"
+          ! grep -Eq 'create_lease|prepare_intent|make_local_goose_dialogue_responder_intent|submit_local_goose_dialogue|dispatch[[:space:]]*\(' \
+            "$observer_h" "$observer_cpp"
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen|execl|execv|execve)[[:space:]]*\(' \
+            "$observer_h" "$observer_cpp"
+          ! grep -Eq 'while[[:space:]]*\(' "$observer_cpp"
+
+          grep -Fq 'Disarmed code is read-only' "$test_cpp"
+          grep -Fq 'Crash after the feed ACK' "$test_cpp"
+          grep -Fq 'Crash after durable disposition preparation' "$test_cpp"
+          grep -Fq 'structurally stale' "$test_cpp"
+          grep -Fq 'impossible preferred-head evidence' "$test_cpp"
+          grep -Fq 'intervention disposition is never consumed' "$test_cpp"
+          grep -Fq 'terminalized for manual review' "$test_cpp"
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2
+          make install
+
+      - name: Compile observer policy test
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+          libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -Iagent/src \
+            agent/tests/local_goose_dialogue_responder_observer_test.cpp \
+            agent/src/LocalGooseDialogueResponderObserver.cpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp \
+            agent/src/LocalGooseDialogueThreadStore.cpp \
+            agent/src/LocalGooseDialogueV2.cpp \
+            agent/src/LocalGooseDialogueV3.cpp \
+            agent/src/Sha256.cpp \
+            -o observer-policy-test \
+            $libs -lsqlite3
+
+      - name: Run observer policy test
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          ./observer-policy-test | grep -Fx \
+            'local_goose_dialogue_responder_observer_test: PASS'
