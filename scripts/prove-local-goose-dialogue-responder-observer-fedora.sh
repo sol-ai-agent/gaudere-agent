@@ -20,6 +20,7 @@ completion_sidecar="$state_directory/local-goose-dialogue-completion.db"
 responder_sidecar="$state_directory/local-goose-dialogue-responder.db"
 proof_root="$data_home/gaudere/.dialogue-responder-observer-isolated-proof"
 workspace=""
+proof_builder_image=""
 proof_ok=0
 
 fail()
@@ -32,6 +33,9 @@ cleanup()
 {
     rc=$?
     trap - EXIT HUP INT TERM
+    if [ -n "$proof_builder_image" ]; then
+        "$podman_command" image rm "$proof_builder_image" >/dev/null 2>&1 || true
+    fi
     if [ "$proof_ok" = "1" ] && [ -n "$workspace" ] && [ -d "$workspace" ]; then
         rm -rf "$workspace"
     elif [ -n "$workspace" ] && [ -d "$workspace" ]; then
@@ -41,7 +45,7 @@ cleanup()
 }
 trap cleanup EXIT HUP INT TERM
 
-for command in "$podman_command" "$systemctl_command" git python3 sqlite3 g++ pkg-config sed grep awk cut stat cp mkdir mktemp rm id sha256sum chmod basename; do
+for command in "$podman_command" "$systemctl_command" git python3 sqlite3 sed grep awk cut stat cp mkdir mktemp rm id sha256sum chmod basename; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 
@@ -55,6 +59,15 @@ done
 
 agent_ref=$(git -C "$repository_root" rev-parse HEAD)
 core_ref=$(tr -d '\r\n' < "$repository_root/gaudere.ref")
+
+case "$agent_ref" in
+    *[!0-9a-f]*|'') fail "Agent HEAD is not one lowercase hexadecimal Git SHA" ;;
+esac
+[ "${#agent_ref}" -eq 40 ] || fail "Agent HEAD is not 40 characters"
+case "$core_ref" in
+    *[!0-9a-f]*|'') fail "gaudere.ref is not one lowercase hexadecimal Git SHA" ;;
+esac
+[ "${#core_ref}" -eq 40 ] || fail "gaudere.ref is not 40 characters"
 
 service_state()
 {
@@ -154,26 +167,44 @@ PY
 [ "$(sqlite3 -readonly "$baseline/local-goose-dialogue-responder.db" 'PRAGMA user_version;')" = "1" ] || fail "baseline responder schema differs"
 [ "$(sqlite3 -readonly "$baseline/local-goose-dialogue-completion.db" "SELECT last_sequence FROM local_goose_dialogue_consumer_cursor WHERE consumer_id='$consumer_id';")" = "2" ] || fail "baseline responder cursor differs"
 
-pkg-config --exists 'gaudere-persistence-sqlite >= 0.1.0' || fail "gaudere-persistence-sqlite development package is unavailable"
-pkg-config --exists 'nlohmann_json >= 3.11.0' || fail "nlohmann_json development package is unavailable"
-cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
-libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
-helper="$workspace/observer-proof"
+printf '=== BUILD PROOF HELPER IN CONFINED PODMAN BUILDER ===\n'
+proof_builder_image="localhost/gaudere-agent:observer-proof-builder-${agent_ref}"
+"$podman_command" build \
+    --target builder \
+    --build-arg "BUILDER_IMAGE=registry.fedoraproject.org/fedora:44" \
+    --build-arg "GAUDERE_AGENT_REF=$agent_ref" \
+    --build-arg "GAUDERE_REF=$core_ref" \
+    --tag "$proof_builder_image" \
+    --file "$repository_root/Containerfile" \
+    "$repository_root"
 
-# Compile the proof-only helper from the exact checked-out sources. It is not
-# installed, not wired into gaudere-agent, and is removed with the workspace.
-g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
-    $cflags -I"$repository_root/src" \
-    "$repository_root/src/local_goose_dialogue_responder_observer_proof_main.cpp" \
-    "$repository_root/src/LocalGooseDialogueResponderObserver.cpp" \
-    "$repository_root/src/LocalGooseDialogueResponderStore.cpp" \
-    "$repository_root/src/LocalGooseDialogueResponder.cpp" \
-    "$repository_root/src/LocalGooseDialogueCompletionFeed.cpp" \
-    "$repository_root/src/LocalGooseDialogueThreadStore.cpp" \
-    "$repository_root/src/LocalGooseDialogueV2.cpp" \
-    "$repository_root/src/LocalGooseDialogueV3.cpp" \
-    "$repository_root/src/Sha256.cpp" \
-    -o "$helper" $libs -lsqlite3
+"$podman_command" run --rm --network none \
+    --userns keep-id --user "$(id -u):$(id -g)" \
+    --security-opt no-new-privileges --cap-drop all \
+    -e PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+    -e LD_LIBRARY_PATH=/opt/gaudere/lib \
+    -v "$workspace:/proof:Z" \
+    "$proof_builder_image" \
+    sh -c '
+        set -eu
+        cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+        libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+        g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -I/src/gaudere-agent/src \
+            /src/gaudere-agent/src/local_goose_dialogue_responder_observer_proof_main.cpp \
+            /src/gaudere-agent/src/LocalGooseDialogueResponderObserver.cpp \
+            /src/gaudere-agent/src/LocalGooseDialogueResponderStore.cpp \
+            /src/gaudere-agent/src/LocalGooseDialogueResponder.cpp \
+            /src/gaudere-agent/src/LocalGooseDialogueCompletionFeed.cpp \
+            /src/gaudere-agent/src/LocalGooseDialogueThreadStore.cpp \
+            /src/gaudere-agent/src/LocalGooseDialogueV2.cpp \
+            /src/gaudere-agent/src/LocalGooseDialogueV3.cpp \
+            /src/gaudere-agent/src/Sha256.cpp \
+            -o /proof/observer-proof \
+            $libs -lsqlite3
+        /proof/observer-proof --help 2>&1 | grep -Fq \
+            "Commands: migrate, inspect, step, prepare-system, ack-prepared"
+    '
 
 clone_scenario()
 {
@@ -192,19 +223,25 @@ run_helper()
     now=$2
     command=$3
     shift 3
-    "$helper" "$command" \
-        --thread-sidecar "$directory/local-goose-dialogue-thread.db" \
-        --completion-sidecar "$directory/local-goose-dialogue-completion.db" \
-        --responder-sidecar "$directory/local-goose-dialogue-responder.db" \
+    case "$directory" in
+        "$workspace"/*) ;;
+        *) fail "helper scenario is outside proof workspace" ;;
+    esac
+    relative=${directory#"$workspace/"}
+    "$podman_command" run --rm --network none \
+        --userns keep-id --user "$(id -u):$(id -g)" \
+        --read-only --read-only-tmpfs \
+        --security-opt no-new-privileges --cap-drop all \
+        -e LD_LIBRARY_PATH=/opt/gaudere/lib \
+        -v "$workspace:/proof:Z" \
+        "$proof_builder_image" \
+        /proof/observer-proof "$command" \
+        --thread-sidecar "/proof/$relative/local-goose-dialogue-thread.db" \
+        --completion-sidecar "/proof/$relative/local-goose-dialogue-completion.db" \
+        --responder-sidecar "/proof/$relative/local-goose-dialogue-responder.db" \
         --consumer-id "$consumer_id" \
         --thread-alias "$thread_alias" \
         --now-ms "$now" "$@"
-}
-
-field()
-{
-    name=$1
-    sed -n "s/^$name=//p" | head -n 1
 }
 
 verify_scenario_static()
@@ -254,8 +291,8 @@ printf '%s\n' "$normal_step" | grep -q '^next_sequence=4$' || fail "normal next 
 printf '%s\n' "$normal_step" | grep -q '^consumer_last_sequence=3$' || fail "normal cursor is not 3"
 assert_human_held "$normal" "$((base_now + 2))"
 assert_human_held "$normal" "$((base_now + 3))"
-[ "$(sqlite3 -readonly "$normal/local-goose-dialogue-responder.db" 'SELECT COUNT(*) FROM local_goose_dialogue_responder_disposition;')" = "1" ] || fail "normal retry duplicated disposition"
 [ "$(sqlite3 -readonly "$normal/local-goose-dialogue-responder.db" 'SELECT kind||"|"||state FROM local_goose_dialogue_responder_disposition;')" = "0|1" ] || fail "normal disposition is not acknowledged structural system skip"
+[ "$(sqlite3 -readonly "$normal/local-goose-dialogue-responder.db" 'SELECT COUNT(*) FROM local_goose_dialogue_responder_disposition;')" = "1" ] || fail "normal retry duplicated disposition"
 verify_scenario_static "$normal"
 
 printf '=== OBSERVER CRASH AFTER PREPARE / BEFORE ACK ===\n'
