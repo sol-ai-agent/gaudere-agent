@@ -7,6 +7,7 @@ on:
       - src/LocalGooseDialogueResponder.hpp
       - src/LocalGooseDialogueResponderStore.cpp
       - src/LocalGooseDialogueResponderStore.hpp
+      - src/main.cpp
       - tests/local_goose_dialogue_responder_store_test.cpp
       - .github/workflows/dialogue-responder-disposition-store-guard.yml
   push:
@@ -16,6 +17,7 @@ on:
       - src/LocalGooseDialogueResponder.hpp
       - src/LocalGooseDialogueResponderStore.cpp
       - src/LocalGooseDialogueResponderStore.hpp
+      - src/main.cpp
       - tests/local_goose_dialogue_responder_store_test.cpp
       - .github/workflows/dialogue-responder-disposition-store-guard.yml
 
@@ -34,6 +36,7 @@ jobs:
           header=src/LocalGooseDialogueResponder.hpp
           store_h=src/LocalGooseDialogueResponderStore.hpp
           store_cpp=src/LocalGooseDialogueResponderStore.cpp
+          runtime_main=src/main.cpp
           test_cpp=tests/local_goose_dialogue_responder_store_test.cpp
 
           grep -Fq 'local_goose_dialogue_responder_sidecar_schema = 2' "$header"
@@ -49,10 +52,19 @@ jobs:
           grep -Fq 'dialogue responder v2 table set differs' "$store_cpp"
           grep -Fq 'UNIQUE(consumer_id,completion_sequence)' "$store_cpp"
           grep -Fq 'UNIQUE(consumer_id,event_id)' "$store_cpp"
+          grep -Fq 'LocalGooseDialogueResponderStoreOpenMode' "$store_h"
+          grep -Fq 'preserve_schema = 0' "$store_h"
+          grep -Fq 'allow_schema_upgrade = 1' "$store_h"
+          grep -Fq 'LocalGooseDialogueResponderStoreOpenMode::preserve_schema' "$store_h"
+          grep -Fq 'LocalGooseDialogueResponderStoreOpenMode::allow_schema_upgrade' "$store_cpp"
           grep -Fq 'prepare_disposition' "$store_h"
           grep -Fq 'bind_disposition_intent' "$store_h"
           grep -Fq 'acknowledge_disposition' "$store_h"
           grep -Fq 'This method itself has no feed ACK' "$store_h"
+
+          # Code presence and ordinary service startup must preserve an existing
+          # v1 responder sidecar. Production runtime is not an upgrade gate.
+          ! grep -Fq 'allow_schema_upgrade' "$runtime_main"
 
           # The ledger may record external reconciliation, but it must not own
           # observation, feed ACK, Task dispatch or provider/cycle authority.
@@ -68,6 +80,10 @@ jobs:
           ! grep -Fq 'LocalGooseCycle' "$store_cpp"
 
           grep -Fq 'PRAGMA user_version=1;' "$test_cpp"
+          grep -Fq 'StoreOpenMode::allow_schema_upgrade' "$test_cpp"
+          grep -Fq 'LocalGooseDialogueResponderStore preserved' "$test_cpp"
+          test "$(grep -Fc 'pragma_user_version(migration.path) == 1' "$test_cpp")" -ge 2
+          test "$(grep -Fc 'user_table_count(migration.path) == 2' "$test_cpp")" -ge 2
           grep -Fq 'pragma_user_version(migration.path) == 2' "$test_cpp"
           grep -Fq 'user_table_count(migration.path) == 3' "$test_cpp"
           grep -Fq 'dispositions_in_state' "$test_cpp"
