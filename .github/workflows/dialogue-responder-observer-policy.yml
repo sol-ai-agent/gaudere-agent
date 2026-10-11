@@ -47,6 +47,8 @@ jobs:
           grep -Fq 'terminalize_disposition' "$observer_cpp"
           grep -Fq 'prepared intervention belongs to responder dispatch path' "$observer_cpp"
           grep -Fq 'current human preferred-head completion is held' "$observer_cpp"
+          grep -Fq 'classify_event(*next, head, std::nullopt, config_.thread_alias)' "$observer_cpp"
+          ! grep -Fq 'reclassification == Classification::reconciliation_pending' "$observer_cpp"
 
           # This tranche deliberately cannot be activated by the production
           # agent. Wiring is a later code-deploy/activation boundary.
