@@ -191,9 +191,9 @@ int main()
             feed, threads, responders, {}, [&] { return now++; });
         const auto disarmed_status = disarmed.inspect();
         assert(disarmed_status.classification == Classification::structural_system);
-        assert(!disarmed_status.consumer_last_sequence);
+        assert(disarmed_status.consumer_last_sequence == 0);
         assert(disarmed.step().action == Action::disarmed);
-        assert(!feed.consumer_last_sequence("system-responder-v1"));
+        assert(feed.consumer_last_sequence("system-responder-v1") == 0);
         assert(responders.dispositions_in_state(
             DispositionState::prepared, 64).empty());
 
@@ -289,7 +289,7 @@ int main()
             DispositionKind::structural_skip_system, "observer-policy-v1", 4100);
         assert(responders.prepare_disposition(disposition).result
             == StoreResult::accepted);
-        assert(!feed.consumer_last_sequence("system-responder-v1"));
+        assert(feed.consumer_last_sequence("system-responder-v1") == 0);
 
         std::int64_t now = 4200;
         LocalGooseDialogueResponderObserver observer(
@@ -359,7 +359,7 @@ int main()
         const auto status = observer.inspect();
         assert(status.classification == Classification::ambiguous);
         assert(observer.step().action == Action::held);
-        assert(!feed.consumer_last_sequence("system-responder-v1"));
+        assert(feed.consumer_last_sequence("system-responder-v1") == 0);
         assert(!responders.find_disposition_for_event(
             "system-responder-v1", completed.event_id));
     }
@@ -388,7 +388,7 @@ int main()
             feed, threads, responders, armed_config(), [&] { return now++; });
         assert(observer.inspect().classification == Classification::intervention_owned);
         assert(observer.step().action == Action::held);
-        assert(!feed.consumer_last_sequence("system-responder-v1"));
+        assert(feed.consumer_last_sequence("system-responder-v1") == 0);
         assert(responders.find_disposition(disposition.disposition_id)->state
             == DispositionState::prepared);
     }
@@ -420,7 +420,7 @@ int main()
             feed, threads, responders, armed_config(), [&] { return now++; });
         const auto result = observer.step();
         assert(result.action == Action::manual_review);
-        assert(!feed.consumer_last_sequence("system-responder-v1"));
+        assert(feed.consumer_last_sequence("system-responder-v1") == 0);
         const auto reviewed = responders.find_disposition(unexplained.disposition_id);
         assert(reviewed);
         assert(reviewed->state == DispositionState::manual_review);
