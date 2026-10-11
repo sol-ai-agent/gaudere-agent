@@ -67,7 +67,7 @@ jobs:
           grep -Fq 'Crash after the feed ACK' "$test_cpp"
           grep -Fq 'Crash after durable disposition preparation' "$test_cpp"
           grep -Fq 'structurally stale' "$test_cpp"
-          grep -Fq 'impossible preferred-head evidence' "$test_cpp"
+          grep -Fq 'Same revision with a different Task ID is impossible preferred-head' "$test_cpp"
           grep -Fq 'intervention disposition is never consumed' "$test_cpp"
           grep -Fq 'terminalized for manual review' "$test_cpp"
 
