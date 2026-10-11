@@ -80,6 +80,14 @@ jobs:
           grep -Fq '/proof/observer-proof' "$script"
           grep -Fq -- '-v "$workspace:/proof:Z"' "$script"
 
+          # The builder sources can be root-readable only. The proof therefore
+          # uses UID 0 inside a required rootless Podman user namespace; it must
+          # never switch back to keep-id, which caused the real Fedora failure.
+          grep -Fq "info --format '{{.Host.Security.Rootless}}'" "$script"
+          grep -Fq 'isolated proof requires rootless Podman' "$script"
+          grep -Fq -- '--user 0:0' "$script"
+          ! grep -Fq -- '--userns keep-id' "$script"
+
           # The proof never activates or restarts production, never uses live
           # control, and never invokes responder lease/prepare/dispatch paths.
           ! grep -Eq 'systemctl[^\n]*(start|stop|restart|enable|disable)' "$script"
