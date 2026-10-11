@@ -1,6 +1,7 @@
 #include "LocalGooseDialogueResponderObserver.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -390,25 +391,21 @@ LocalGooseDialogueResponderObserver::step()
             return out;
         }
 
-        // Re-read and reclassify after the durable cause exists. Never ACK an
-        // event that changed identity or ceased to satisfy the same structural
-        // rule in the meantime.
+        // Re-read and reclassify against event/head evidence only. The durable
+        // disposition just created is not evidence that the structural rule is
+        // still true and must not authorize its own ACK.
         const auto next = feed_store_.next_for_consumer(config_.consumer_id);
         const auto head = thread_store_.find(config_.thread_alias);
-        const auto existing = responder_store_.find_disposition_for_event(
-            config_.consumer_id, event.event_id);
         const auto reclassification = next
-            ? classify_event(*next, head, existing, config_.thread_alias)
+            ? classify_event(*next, head, std::nullopt, config_.thread_alias)
             : Classification::ambiguous;
         const bool exact = next
             && exact_event_matches_disposition(*next, *prepared_write.disposition);
         const bool same_rule =
             (kind == DispositionKind::structural_skip_system
-             && (reclassification == Classification::reconciliation_pending
-                 || reclassification == Classification::structural_system))
+             && reclassification == Classification::structural_system)
             || (kind == DispositionKind::structural_skip_stale
-                && (reclassification == Classification::reconciliation_pending
-                    || reclassification == Classification::structural_stale));
+                && reclassification == Classification::structural_stale);
         if (!exact || !same_rule) {
             const auto terminal = responder_store_.terminalize_disposition(
                 prepared_write.disposition->disposition_id,
