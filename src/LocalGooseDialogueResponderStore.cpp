@@ -755,7 +755,8 @@ void update_disposition(
 } // namespace
 
 LocalGooseDialogueResponderStore::LocalGooseDialogueResponderStore(
-    const std::string& path)
+    const std::string& path,
+    const LocalGooseDialogueResponderStoreOpenMode open_mode)
 {
     ensure_secure_file(path);
     if (sqlite3_open_v2(path.c_str(), &database_,
@@ -798,8 +799,11 @@ LocalGooseDialogueResponderStore::LocalGooseDialogueResponderStore(
                      "local_goose_dialogue_responder_intent"})) {
                 throw std::runtime_error("dialogue responder v1 table set differs");
             }
-            create_disposition_table(database_);
-            execute(database_, "PRAGMA user_version=2;");
+            if (open_mode
+                == LocalGooseDialogueResponderStoreOpenMode::allow_schema_upgrade) {
+                create_disposition_table(database_);
+                execute(database_, "PRAGMA user_version=2;");
+            }
         } else if (schema == 2) {
             if (!exact_table_set(
                     database_,
