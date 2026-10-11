@@ -1,0 +1,149 @@
+name: Dialogue responder observer isolated proof gate
+
+on:
+  pull_request:
+    paths:
+      - src/local_goose_dialogue_responder_observer_proof_main.cpp
+      - scripts/prove-local-goose-dialogue-responder-observer-fedora.sh
+      - .github/workflows/dialogue-responder-observer-isolated-proof.yml
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - src/LocalGooseDialogueCompletionFeed.cpp
+      - src/LocalGooseDialogueCompletionFeed.hpp
+      - src/LocalGooseDialogueThreadStore.cpp
+      - src/LocalGooseDialogueThreadStore.hpp
+  push:
+    branches: [main]
+    paths:
+      - src/local_goose_dialogue_responder_observer_proof_main.cpp
+      - scripts/prove-local-goose-dialogue-responder-observer-fedora.sh
+      - .github/workflows/dialogue-responder-observer-isolated-proof.yml
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - src/LocalGooseDialogueCompletionFeed.cpp
+      - src/LocalGooseDialogueCompletionFeed.hpp
+      - src/LocalGooseDialogueThreadStore.cpp
+      - src/LocalGooseDialogueThreadStore.hpp
+
+permissions:
+  contents: read
+
+jobs:
+  copy-only-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove isolated copy-only boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          script=scripts/prove-local-goose-dialogue-responder-observer-fedora.sh
+          helper=src/local_goose_dialogue_responder_observer_proof_main.cpp
+
+          sh -n "$script"
+          test -x "$script"
+          grep -Fq 'FEDORA_GAUDERE_DIALOGUE_RESPONDER_OBSERVER_ISOLATED=PASS' "$script"
+          grep -Fq 'sqlite3.connect(f"file:{source}?mode=ro", uri=True)' "$script"
+          grep -Fq 'src.backup(dst)' "$script"
+          grep -Fq 'PRAGMA user_version;' "$script"
+          grep -Fq 'system-responder-v1' "$script"
+          grep -Fq 'sequence=3' "$script"
+          grep -Fq 'sequence=4' "$script"
+          grep -Fq 'speaker_kind' "$script"
+          grep -Fq 'assert_human_held' "$script"
+          grep -Fq 'production_after' "$script"
+          grep -Fq 'production_before' "$script"
+          grep -Fq 'allow_schema_upgrade' "$helper"
+          grep -Fq 'Commands: migrate, inspect, step, prepare-system, ack-prepared' "$helper"
+          grep -Fq 'LocalGooseDialogueResponderObserver' "$helper"
+
+          # The proof never activates or restarts production, never uses live
+          # control, and never invokes responder lease/prepare/dispatch paths.
+          ! grep -Eq 'systemctl[^\n]*(start|stop|restart|enable|disable)' "$script"
+          ! grep -Eq 'gaudere-control|dialogue-feed-ack|dialogue-responder-(lease-create|prepare|dispatch)' "$script"
+          ! grep -Eq 'curl[[:space:]]|wget[[:space:]]|ssh[[:space:]]|scp[[:space:]]' "$script"
+          ! grep -Eq 'podman[^\n]*(run|exec|rm|stop|start|restart)' "$script"
+          ! grep -Eq 'Provider|OpenAI|LocalGooseCycle|Stimulus|Wake|TaskExecutor|TaskDispatcher|ResponderDispatcher|PreferredSubmitter' "$helper"
+          ! grep -Eq 'create_lease|prepare_intent|submit_local_goose_dialogue|dispatch[[:space:]]*\(' "$helper"
+
+          # Any direct sqlite3 shell access to production paths is read-only.
+          if grep -En '^[[:space:]]*sqlite3[[:space:]]' "$script" | grep -v -- '-readonly'; then
+            echo 'direct sqlite3 invocation without -readonly' >&2
+            exit 1
+          fi
+
+          # The proof helper is intentionally not wired into production.
+          ! grep -Fq 'local_goose_dialogue_responder_observer_proof_main.cpp' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderObserver' src/main.cpp
+
+  fedora-44-helper-build:
+    needs: copy-only-guard
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2
+          make install
+
+      - name: Compile proof-only helper
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+          libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -Iagent/src \
+            agent/src/local_goose_dialogue_responder_observer_proof_main.cpp \
+            agent/src/LocalGooseDialogueResponderObserver.cpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp \
+            agent/src/LocalGooseDialogueThreadStore.cpp \
+            agent/src/LocalGooseDialogueV2.cpp \
+            agent/src/LocalGooseDialogueV3.cpp \
+            agent/src/Sha256.cpp \
+            -o observer-proof \
+            $libs -lsqlite3
+          ./observer-proof --help 2>&1 | grep -Fq \
+            'Commands: migrate, inspect, step, prepare-system, ack-prepared'
