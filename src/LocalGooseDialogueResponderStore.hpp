@@ -21,6 +21,11 @@ enum class LocalGooseDialogueResponderStoreResult {
     unavailable
 };
 
+enum class LocalGooseDialogueResponderStoreOpenMode : std::uint8_t {
+    preserve_schema = 0,
+    allow_schema_upgrade = 1
+};
+
 struct LocalGooseDialogueResponderLeaseWrite {
     LocalGooseDialogueResponderStoreResult result =
         LocalGooseDialogueResponderStoreResult::invalid;
@@ -50,10 +55,18 @@ struct LocalGooseDialogueResponderDispositionWrite {
  * network, shell, preferred-head or completion-feed ACK authority. It persists
  * only finite responder leases, immutable intervention intents and immutable
  * event dispositions plus their reconciliation state.
+ *
+ * Opening an existing schema-v1 sidecar preserves it by default. The v1 -> v2
+ * schema upgrade is a distinct explicit operation selected with
+ * allow_schema_upgrade; ordinary code presence or service restart must not
+ * mutate an existing responder sidecar schema.
  */
 class LocalGooseDialogueResponderStore {
 public:
-    explicit LocalGooseDialogueResponderStore(const std::string& path);
+    explicit LocalGooseDialogueResponderStore(
+        const std::string& path,
+        LocalGooseDialogueResponderStoreOpenMode open_mode =
+            LocalGooseDialogueResponderStoreOpenMode::preserve_schema);
     ~LocalGooseDialogueResponderStore();
 
     LocalGooseDialogueResponderStore(
