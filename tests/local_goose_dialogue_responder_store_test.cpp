@@ -165,6 +165,7 @@ int main()
 {
     using namespace gaudere_agent;
     using StoreResult = LocalGooseDialogueResponderStoreResult;
+    using StoreOpenMode = LocalGooseDialogueResponderStoreOpenMode;
     using DispositionKind = LocalGooseDialogueResponderDispositionKind;
     using DispositionState = LocalGooseDialogueResponderDispositionState;
 
@@ -606,9 +607,9 @@ int main()
             == DispositionState::acknowledged);
     }
 
-    // Explicit v1 -> v2 migration: preserve existing lease/intent evidence,
-    // create only the new empty disposition table, and synthesize no historical
-    // disposition causes.
+    // Existing v1 sidecars are preserved on ordinary open. Migration to v2 is
+    // separately explicit, preserves lease/intent evidence, creates only the
+    // empty disposition table, and synthesizes no historical disposition cause.
     {
         TemporarySidecar migration;
         std::string legacy_intent_id;
@@ -641,7 +642,25 @@ int main()
         assert(pragma_user_version(migration.path) == 1);
         assert(user_table_count(migration.path) == 2);
 
-        LocalGooseDialogueResponderStore migrated(migration.path.string());
+        {
+            LocalGooseDialogueResponderStore preserved(migration.path.string());
+            assert(pragma_user_version(migration.path) == 1);
+            assert(user_table_count(migration.path) == 2);
+            const auto legacy_lease = preserved.find_lease("legacy-lease");
+            assert(legacy_lease);
+            assert(legacy_lease->state
+                == LocalGooseDialogueResponderLeaseState::active);
+            const auto legacy_intent = preserved.find_intent(legacy_intent_id);
+            assert(legacy_intent);
+            assert(legacy_intent->state
+                == LocalGooseDialogueResponderIntentState::prepared);
+        }
+
+        assert(pragma_user_version(migration.path) == 1);
+        assert(user_table_count(migration.path) == 2);
+
+        LocalGooseDialogueResponderStore migrated(
+            migration.path.string(), StoreOpenMode::allow_schema_upgrade);
         assert(pragma_user_version(migration.path) == 2);
         assert(user_table_count(migration.path) == 3);
         const auto legacy_lease = migrated.find_lease("legacy-lease");
