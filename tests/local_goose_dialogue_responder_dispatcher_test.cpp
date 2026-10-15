@@ -4,7 +4,6 @@
 #include "LocalGooseDialogueResponderStore.hpp"
 #include "LocalGooseDialogueV2.hpp"
 #include "LocalGooseDialogueV3.hpp"
-#include "Sha256.hpp"
 
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/work/Runtime.hpp>
@@ -87,22 +86,51 @@ void complete_v3(
     assert(completed && canonical_local_goose_dialogue_v3_success(*completed));
 }
 
-LocalGooseDialogueResponderLease make_lease()
+LocalGooseDialogueCompletionEvent append_completed(
+    LocalGooseDialogueCompletionFeedStore& completion_store,
+    gaudere::work::TaskStore& task_store,
+    const std::string& task_id,
+    const std::uint64_t revision,
+    const std::int64_t observed_at_ms)
 {
-    LocalGooseDialogueResponderLease lease;
-    lease.lease_id = "lease-responder-test";
-    lease.thread_alias = "main";
-    lease.speaker_id = "sol";
-    lease.allowed_message_kinds =
-        local_goose_dialogue_responder_message_feedback
-        | local_goose_dialogue_responder_message_intervention;
-    lease.purpose = "Bounded responder dispatcher integration proof";
-    lease.max_system_turns = 4;
-    lease.issued_at_ms = 1000;
-    lease.expires_at_ms = 100000;
-    lease.min_interval_ms = 0;
-    lease.next_eligible_at_ms = lease.issued_at_ms;
-    return lease;
+    const auto task = task_store.find(task_id);
+    assert(task);
+    const auto event = make_local_goose_dialogue_completion_event(
+        "main", revision, *task, observed_at_ms);
+    const auto write = completion_store.append_for_revision(event);
+    assert(write.result == LocalGooseDialogueCompletionFeedResult::accepted);
+    assert(write.event);
+    return *write.event;
+}
+
+void structurally_retire_system(
+    LocalGooseDialogueCompletionFeedStore& completion_store,
+    LocalGooseDialogueResponderStore& responder_store,
+    const std::string& consumer_id,
+    const LocalGooseDialogueCompletionEvent& event,
+    const std::int64_t now)
+{
+    assert(event.speaker_kind == "system");
+    const auto disposition = make_local_goose_dialogue_responder_disposition(
+        consumer_id,
+        event.thread_alias,
+        event.sequence,
+        event.event_id,
+        event.result_sha256,
+        event.thread_revision,
+        event.task_id,
+        event.speaker_kind,
+        event.speaker_id,
+        LocalGooseDialogueResponderDispositionKind::structural_skip_system,
+        "observer-policy-v1",
+        now);
+    const auto prepared = responder_store.prepare_disposition(disposition);
+    assert(prepared.result == LocalGooseDialogueResponderStoreResult::accepted);
+    const auto ack = completion_store.acknowledge(consumer_id, event.sequence);
+    assert(ack.result == LocalGooseDialogueCompletionFeedResult::accepted);
+    const auto reconciled = responder_store.acknowledge_disposition(
+        disposition.disposition_id, now);
+    assert(reconciled.result == LocalGooseDialogueResponderStoreResult::accepted);
 }
 
 } // namespace
@@ -128,90 +156,140 @@ int main()
         make_local_goose_dialogue_v2_root_task(
             "responder-root", "Bonjour.", model),
         "Bonjour.");
-    const auto initial_head_task = succeed_v2(
+    const auto initial_human = succeed_v2(
         make_local_goose_dialogue_v2_successor_task(
             "responder-head", "Continue.", model, root),
         "Je continue.");
-
     task_store.save(root);
-    task_store.save(initial_head_task);
+    task_store.save(initial_human);
 
     const LocalGooseDialogueThreadHead initial_head{
-        "main", 0, root.id, initial_head_task.id};
+        "main", 0, root.id, initial_human.id};
     assert(thread_store.seed(initial_head).result
         == LocalGooseDialogueThreadStoreResult::accepted);
 
-    const auto first_event = make_local_goose_dialogue_completion_event(
-        "main", 0, initial_head_task, 1000);
-    const auto first_append = completion_store.append_for_revision(first_event);
-    assert(first_append.result
-        == LocalGooseDialogueCompletionFeedResult::accepted);
-    assert(first_append.event && first_append.event->sequence == 1);
-
-    const auto lease = make_lease();
-    assert(responder_store.create_lease(lease).result
-        == LocalGooseDialogueResponderStoreResult::accepted);
+    const auto first_event = append_completed(
+        completion_store, task_store, initial_human.id, 0, 1000);
+    assert(first_event.sequence == 1);
+    assert(first_event.speaker_kind == "human");
 
     std::int64_t now = 2000;
     LocalGooseDialogueResponderDispatcher dispatcher(
         runtime, task_store, thread_store, completion_store, responder_store,
         model, "responder-test", [&now] { return now; });
 
+    const auto lease_result = dispatcher.create_lease(
+        "lease-responder-two-turn", "main", "sol", "feedback",
+        "Two explicit human interventions only", 2, 10000, 100);
+    assert(lease_result.result
+        == LocalGooseDialogueResponderDispatchCode::accepted);
+    assert(lease_result.lease);
+    const auto lease_id = lease_result.lease->lease_id;
+
     const auto prepared1 = dispatcher.prepare(
-        lease.lease_id, 1, "feedback", "Première intervention.", 5000);
+        lease_id, first_event.sequence,
+        "feedback", "Première intervention explicite.", 5000);
     assert(prepared1.result
         == LocalGooseDialogueResponderDispatchCode::accepted);
     assert(prepared1.intent);
-    assert(prepared1.intent->state
-        == LocalGooseDialogueResponderIntentState::prepared);
-    assert(prepared1.consumer_last_sequence == 0);
-    const auto head_before_dispatch = thread_store.find("main");
-    assert(head_before_dispatch && head_before_dispatch->revision == 0);
+    const auto first_disposition = responder_store.find_disposition_for_event(
+        "responder-test", first_event.event_id);
+    assert(first_disposition);
+    assert(first_disposition->kind
+        == LocalGooseDialogueResponderDispositionKind::intervention);
+    assert(first_disposition->state
+        == LocalGooseDialogueResponderDispositionState::intervention_bound);
+    assert(first_disposition->intent_id
+        == std::optional<std::string>{prepared1.intent->intent_id});
     assert(completion_store.consumer_last_sequence("responder-test")
         == std::optional<std::uint64_t>{0});
 
     const auto dispatched1 = dispatcher.dispatch(prepared1.intent->intent_id);
     assert(dispatched1.result
         == LocalGooseDialogueResponderDispatchCode::accepted);
-    assert(dispatched1.intent
-        && dispatched1.intent->state
-            == LocalGooseDialogueResponderIntentState::completed);
     assert(dispatched1.task && dispatched1.head);
-    assert(dispatched1.head->revision == 1);
-    assert(dispatched1.head->head_task_id == dispatched1.task->id);
     assert(dispatched1.consumer_last_sequence == 1);
-    const auto lease_after1 = responder_store.find_lease(lease.lease_id);
-    assert(lease_after1 && lease_after1->turns_committed == 1);
+    assert(responder_store.find_lease(lease_id)->turns_committed == 1);
+    const auto completed_disposition1 =
+        responder_store.find_disposition_for_event(
+            "responder-test", first_event.event_id);
+    assert(completed_disposition1);
+    assert(completed_disposition1->state
+        == LocalGooseDialogueResponderDispositionState::completed);
 
     const auto replay1 = dispatcher.dispatch(prepared1.intent->intent_id);
     assert(replay1.result
         == LocalGooseDialogueResponderDispatchCode::duplicate);
-    const auto lease_after_replay = responder_store.find_lease(lease.lease_id);
-    assert(lease_after_replay && lease_after_replay->turns_committed == 1);
-    assert(completion_store.consumer_last_sequence("responder-test")
-        == std::optional<std::uint64_t>{1});
+    assert(responder_store.find_lease(lease_id)->turns_committed == 1);
 
+    now = 2010;
     complete_v3(
         runtime, task_store, dispatched1.task->id,
-        "Réponse à la première intervention.");
-    const auto completed1 = task_store.find(dispatched1.task->id);
-    assert(completed1);
-    const auto second_event = make_local_goose_dialogue_completion_event(
-        "main", 1, *completed1, 2100);
-    const auto second_append = completion_store.append_for_revision(second_event);
-    assert(second_append.result
-        == LocalGooseDialogueCompletionFeedResult::accepted);
-    assert(second_append.event && second_append.event->sequence == 2);
+        "Réponse système à la première intervention.");
+    const auto first_system_event = append_completed(
+        completion_store, task_store, dispatched1.task->id, 1, now);
+    assert(first_system_event.sequence == 2);
+    assert(first_system_event.speaker_kind == "system");
 
-    now = 2200;
+    now = 2020;
+    const auto forbidden_self_chain = dispatcher.prepare(
+        lease_id, first_system_event.sequence,
+        "feedback", "Ceci ne doit jamais être admis.", 5000);
+    assert(forbidden_self_chain.result
+        == LocalGooseDialogueResponderDispatchCode::conflict);
+    assert(!forbidden_self_chain.intent);
+    assert(!responder_store.find_disposition_for_event(
+        "responder-test", first_system_event.event_id));
+    assert(responder_store.find_lease(lease_id)->turns_committed == 1);
+
+    structurally_retire_system(
+        completion_store, responder_store, "responder-test",
+        first_system_event, now);
+    assert(completion_store.consumer_last_sequence("responder-test")
+        == std::optional<std::uint64_t>{2});
+
+    const auto human2 = submit_local_goose_dialogue_v3_preferred(
+        runtime, task_store, thread_store, model,
+        "human-turn-two", "main", 1,
+        "human", "bertrand", "dialogue", "Deuxième tour humain.");
+    assert(human2.result
+        == LocalGooseDialoguePreferredSubmitResultCode::accepted);
+    assert(human2.task && human2.head && human2.head->revision == 2);
+    now = 2030;
+    complete_v3(runtime, task_store, human2.task->id, "Deuxième message humain.");
+    const auto second_human_event = append_completed(
+        completion_store, task_store, human2.task->id, 2, now);
+    assert(second_human_event.sequence == 3);
+    assert(second_human_event.speaker_kind == "human");
+
+    now = 2050;
+    const auto too_early = dispatcher.prepare(
+        lease_id, second_human_event.sequence,
+        "feedback", "Trop tôt pour l'intervalle.", 5000);
+    assert(too_early.result
+        == LocalGooseDialogueResponderDispatchCode::conflict);
+    assert(!too_early.intent);
+    assert(!responder_store.find_disposition_for_event(
+        "responder-test", second_human_event.event_id));
+    assert(completion_store.consumer_last_sequence("responder-test")
+        == std::optional<std::uint64_t>{2});
+
+    now = 2100;
     const auto prepared2 = dispatcher.prepare(
-        lease.lease_id, 2, "intervention",
-        "Intervention à reprendre après crash.", 5000);
+        lease_id, second_human_event.sequence,
+        "feedback", "Seconde intervention explicite.", 5000);
     assert(prepared2.result
         == LocalGooseDialogueResponderDispatchCode::accepted);
     assert(prepared2.intent);
+    const auto bound2 = responder_store.find_disposition_for_event(
+        "responder-test", second_human_event.event_id);
+    assert(bound2);
+    assert(bound2->state
+        == LocalGooseDialogueResponderDispositionState::intervention_bound);
+    assert(bound2->intent_id
+        == std::optional<std::string>{prepared2.intent->intent_id});
 
-    const auto submitted_outside_accounting =
+    const auto submitted_before_accounting =
         submit_local_goose_dialogue_v3_preferred(
             runtime, task_store, thread_store, model,
             prepared2.intent->request_id,
@@ -221,187 +299,87 @@ int main()
             prepared2.intent->speaker_id,
             prepared2.intent->message_kind,
             prepared2.intent->message);
-    assert(submitted_outside_accounting.result
+    assert(submitted_before_accounting.result
         == LocalGooseDialoguePreferredSubmitResultCode::accepted);
-    assert(submitted_outside_accounting.task
-        && submitted_outside_accounting.head
-        && submitted_outside_accounting.head->revision == 2);
-    const auto still_prepared =
-        responder_store.find_intent(prepared2.intent->intent_id);
-    assert(still_prepared
-        && still_prepared->state
-            == LocalGooseDialogueResponderIntentState::prepared);
-    assert(responder_store.find_lease(lease.lease_id)->turns_committed == 1);
+    assert(submitted_before_accounting.task
+        && submitted_before_accounting.head
+        && submitted_before_accounting.head->revision == 3);
+    assert(responder_store.find_lease(lease_id)->turns_committed == 1);
     assert(completion_store.consumer_last_sequence("responder-test")
-        == std::optional<std::uint64_t>{1});
+        == std::optional<std::uint64_t>{2});
 
-    now = 2300;
+    now = 2101;
     const auto recovered2 = dispatcher.dispatch(prepared2.intent->intent_id);
     assert(recovered2.result
         == LocalGooseDialogueResponderDispatchCode::accepted);
-    assert(recovered2.intent
-        && recovered2.intent->state
-            == LocalGooseDialogueResponderIntentState::completed);
-    assert(recovered2.consumer_last_sequence == 2);
-    const auto lease_after2 = responder_store.find_lease(lease.lease_id);
-    assert(lease_after2 && lease_after2->turns_committed == 2);
-    assert(thread_store.find("main")->revision == 2);
+    assert(recovered2.task && recovered2.head);
+    assert(recovered2.consumer_last_sequence == 3);
+    const auto exhausted = responder_store.find_lease(lease_id);
+    assert(exhausted);
+    assert(exhausted->turns_committed == 2);
+    assert(exhausted->state
+        == LocalGooseDialogueResponderLeaseState::exhausted);
+    assert(exhausted->terminal_reason == "quota_exhausted");
+    const auto completed_disposition2 =
+        responder_store.find_disposition_for_event(
+            "responder-test", second_human_event.event_id);
+    assert(completed_disposition2);
+    assert(completed_disposition2->state
+        == LocalGooseDialogueResponderDispositionState::completed);
 
     const auto replay2 = dispatcher.dispatch(prepared2.intent->intent_id);
     assert(replay2.result
         == LocalGooseDialogueResponderDispatchCode::duplicate);
-    assert(responder_store.find_lease(lease.lease_id)->turns_committed == 2);
+    assert(responder_store.find_lease(lease_id)->turns_committed == 2);
 
+    now = 2110;
     complete_v3(
         runtime, task_store, recovered2.task->id,
-        "Réponse à la seconde intervention.");
-    const auto completed2 = task_store.find(recovered2.task->id);
-    assert(completed2);
-    const auto third_event = make_local_goose_dialogue_completion_event(
-        "main", 2, *completed2, 2400);
-    const auto third_append = completion_store.append_for_revision(third_event);
-    assert(third_append.result
-        == LocalGooseDialogueCompletionFeedResult::accepted);
-    assert(third_append.event && third_append.event->sequence == 3);
+        "Réponse système à la seconde intervention.");
+    const auto second_system_event = append_completed(
+        completion_store, task_store, recovered2.task->id, 3, now);
+    assert(second_system_event.sequence == 4);
+    assert(second_system_event.speaker_kind == "system");
+    structurally_retire_system(
+        completion_store, responder_store, "responder-test",
+        second_system_event, now);
+    assert(completion_store.consumer_last_sequence("responder-test")
+        == std::optional<std::uint64_t>{4});
 
-    now = 2500;
-    const auto prepared3 = dispatcher.prepare(
-        lease.lease_id, 3, "feedback",
-        "Cette intervention doit devenir stale.", 5000);
-    assert(prepared3.result
-        == LocalGooseDialogueResponderDispatchCode::accepted);
-    assert(prepared3.intent);
-
-    const auto competing = submit_local_goose_dialogue_v3_preferred(
+    const auto human3 = submit_local_goose_dialogue_v3_preferred(
         runtime, task_store, thread_store, model,
-        "competing-human-turn", "main", 2,
-        "human", "bertrand", "dialogue", "Le tour humain gagne.");
-    assert(competing.result
+        "human-turn-three", "main", 3,
+        "human", "bertrand", "dialogue", "Troisième tour humain.");
+    assert(human3.result
         == LocalGooseDialoguePreferredSubmitResultCode::accepted);
-    assert(competing.head && competing.head->revision == 3);
+    assert(human3.task && human3.head && human3.head->revision == 4);
+    now = 2120;
+    complete_v3(runtime, task_store, human3.task->id, "Troisième message humain.");
+    const auto third_human_event = append_completed(
+        completion_store, task_store, human3.task->id, 4, now);
+    assert(third_human_event.sequence == 5);
+    assert(third_human_event.speaker_kind == "human");
 
-    now = 2600;
-    const auto stale3 = dispatcher.dispatch(prepared3.intent->intent_id);
-    assert(stale3.result
+    const auto after_quota = dispatcher.prepare(
+        lease_id, third_human_event.sequence,
+        "feedback", "Aucune troisième intervention.", 5000);
+    assert(after_quota.result
         == LocalGooseDialogueResponderDispatchCode::conflict);
-    const auto terminal3 =
-        responder_store.find_intent(prepared3.intent->intent_id);
-    assert(terminal3
-        && terminal3->state
-            == LocalGooseDialogueResponderIntentState::conflict);
+    assert(!after_quota.intent);
+    assert(!responder_store.find_disposition_for_event(
+        "responder-test", third_human_event.event_id));
     assert(completion_store.consumer_last_sequence("responder-test")
-        == std::optional<std::uint64_t>{2});
-    assert(responder_store.find_lease(lease.lease_id)->turns_committed == 2);
-    assert(thread_store.find("main")->head_task_id == competing.task->id);
+        == std::optional<std::uint64_t>{4});
+    assert(!responder_store.find_active_lease("main"));
 
-    now = 100001;
-    const auto replacement_lease = dispatcher.create_lease(
-        "lease-responder-replacement", "main", "sol", "feedback",
-        "Replacement after finite expiry", 1, 5000, 0);
-    assert(replacement_lease.result
-        == LocalGooseDialogueResponderDispatchCode::accepted);
-    assert(replacement_lease.lease
-        && replacement_lease.lease->state
-            == LocalGooseDialogueResponderLeaseState::active);
-    const auto expired_original =
-        responder_store.find_lease(lease.lease_id);
-    assert(expired_original
-        && expired_original->state
-            == LocalGooseDialogueResponderLeaseState::expired);
-    assert(expired_original->terminal_reason == "lease_expired");
+    const auto prepared_dispositions = responder_store.dispositions_in_state(
+        LocalGooseDialogueResponderDispositionState::prepared);
+    const auto bound_dispositions = responder_store.dispositions_in_state(
+        LocalGooseDialogueResponderDispositionState::intervention_bound);
+    assert(prepared_dispositions.empty());
+    assert(bound_dispositions.empty());
 
-    const auto external_ack3 =
-        completion_store.acknowledge("responder-test", 3);
-    assert(external_ack3.result
-        == LocalGooseDialogueCompletionFeedResult::accepted);
-    assert(external_ack3.last_sequence == 3);
-
-    complete_v3(
-        runtime, task_store, competing.task->id,
-        "Réponse au tour humain concurrent.");
-    const auto completed_competing = task_store.find(competing.task->id);
-    assert(completed_competing);
-    const auto fourth_event = make_local_goose_dialogue_completion_event(
-        "main", 3, *completed_competing, 100001);
-    const auto fourth_append =
-        completion_store.append_for_revision(fourth_event);
-    assert(fourth_append.result
-        == LocalGooseDialogueCompletionFeedResult::accepted);
-    assert(fourth_append.event && fourth_append.event->sequence == 4);
-
-    now = 100002;
-    const auto prepared_after_replacement = dispatcher.prepare(
-        replacement_lease.lease->lease_id, 4, "feedback",
-        "Effet durable avant expiration.", 5000);
-    assert(prepared_after_replacement.result
-        == LocalGooseDialogueResponderDispatchCode::accepted);
-    assert(prepared_after_replacement.intent);
-
-    const auto durable_before_expiry =
-        submit_local_goose_dialogue_v3_preferred(
-            runtime, task_store, thread_store, model,
-            prepared_after_replacement.intent->request_id,
-            prepared_after_replacement.intent->thread_alias,
-            prepared_after_replacement.intent->expected_thread_revision,
-            prepared_after_replacement.intent->speaker_kind,
-            prepared_after_replacement.intent->speaker_id,
-            prepared_after_replacement.intent->message_kind,
-            prepared_after_replacement.intent->message);
-    assert(durable_before_expiry.result
-        == LocalGooseDialoguePreferredSubmitResultCode::accepted);
-    assert(durable_before_expiry.head
-        && durable_before_expiry.head->revision == 4);
-    assert(responder_store.find_lease(
-        replacement_lease.lease->lease_id)->turns_committed == 0);
-    assert(completion_store.consumer_last_sequence("responder-test")
-        == std::optional<std::uint64_t>{3});
-
-    now = 105002;
-    const auto after_authority_expiry = dispatcher.dispatch(
-        prepared_after_replacement.intent->intent_id);
-    assert(after_authority_expiry.result
-        == LocalGooseDialogueResponderDispatchCode::conflict);
-    const auto review_after_expiry = responder_store.find_intent(
-        prepared_after_replacement.intent->intent_id);
-    assert(review_after_expiry
-        && review_after_expiry->state
-            == LocalGooseDialogueResponderIntentState::manual_review);
-    assert(review_after_expiry->terminal_reason
-        == "durable_submission_with_ineligible_lease");
-    const auto expired_replacement = responder_store.find_lease(
-        replacement_lease.lease->lease_id);
-    assert(expired_replacement
-        && expired_replacement->state
-            == LocalGooseDialogueResponderLeaseState::expired);
-    assert(expired_replacement->turns_committed == 0);
-    assert(completion_store.consumer_last_sequence("responder-test")
-        == std::optional<std::uint64_t>{3});
-
-    const auto identity_a = make_local_goose_dialogue_responder_intent(
-        "identity-lease", "main", 7,
-        std::string{local_goose_dialogue_completion_event_prefix}
-            + std::string(64, '1'),
-        std::string(64, '2'),
-        std::string{local_goose_dialogue_v3_task_prefix}
-            + std::string(64, '3'),
-        6,
-        std::string{local_goose_dialogue_v3_task_prefix}
-            + std::string(64, '3'),
-        "sol", "feedback", "Identité stable.", 100, 200);
-    const auto identity_b = make_local_goose_dialogue_responder_intent(
-        "identity-lease", "main", 7,
-        std::string{local_goose_dialogue_completion_event_prefix}
-            + std::string(64, '1'),
-        std::string(64, '2'),
-        std::string{local_goose_dialogue_v3_task_prefix}
-            + std::string(64, '3'),
-        6,
-        std::string{local_goose_dialogue_v3_task_prefix}
-            + std::string(64, '3'),
-        "sol", "feedback", "Identité stable.", 101, 201);
-    assert(identity_a.intent_id == identity_b.intent_id);
-    assert(identity_a.request_id == identity_b.request_id);
-
-    std::cout << "local_goose_dialogue_responder_dispatcher_test: PASS\n";
+    std::cout
+        << "local_goose_dialogue_responder_dispatcher_test: PASS\n";
     return 0;
 }
