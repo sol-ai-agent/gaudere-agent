@@ -1,0 +1,157 @@
+name: Dialogue responder observer code production gate
+
+on:
+  pull_request:
+    paths:
+      - Containerfile
+      - src/local_goose_dialogue_responder_observer_main.cpp
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - scripts/deploy-local-goose-dialogue-responder-observer-code-production.sh
+      - .github/workflows/dialogue-responder-observer-code-production.yml
+  push:
+    branches: [main]
+    paths:
+      - Containerfile
+      - src/local_goose_dialogue_responder_observer_main.cpp
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - scripts/deploy-local-goose-dialogue-responder-observer-code-production.sh
+      - .github/workflows/dialogue-responder-observer-code-production.yml
+
+permissions:
+  contents: read
+
+jobs:
+  authority-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove code-only production boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          observer=src/local_goose_dialogue_responder_observer_main.cpp
+          container=Containerfile
+          deploy=scripts/deploy-local-goose-dialogue-responder-observer-code-production.sh
+
+          grep -Fq 'constexpr const char* consumer_id = "system-responder-v1";' "$observer"
+          grep -Fq 'constexpr const char* thread_alias = "main";' "$observer"
+          grep -Fq 'constexpr const char* authority_source = "observer-policy-v1";' "$observer"
+          grep -Fq 'options.command != "status" && options.command != "step"' "$observer"
+          grep -Fq -- '--expected-sequence' "$observer"
+          grep -Fq -- '--expected-event-id' "$observer"
+          grep -Fq -- '--expected-result-sha256' "$observer"
+          grep -Fq -- '--authorize-structural-retirement' "$observer"
+          grep -Fq 'config.observation_armed = options.command == "step";' "$observer"
+          grep -Fq 'observer.step()' "$observer"
+          grep -Fq 'after != options.expected_sequence' "$observer"
+
+          # Production observer owns only bounded structural retirement. Schema
+          # migration, current-human decline and responder intervention authority
+          # remain separate future gates.
+          ! grep -Fq 'allow_schema_upgrade' "$observer"
+          ! grep -Fq '.decline(' "$observer"
+          ! grep -Eq 'create_lease|close_lease|prepare_intent|commit_submission|complete_intent' "$observer"
+          ! grep -Eq 'TaskExecutor|TaskDispatcher|Provider|OpenAI|LocalGooseCycle|Stimulus|Wake|Curl|Http|Secret' "$observer"
+          ! grep -Eq '(^|[^[:alnum:]_])(system|popen|execl|execv|execve)[[:space:]]*\(' "$observer"
+
+          grep -Fq 'src/local_goose_dialogue_responder_observer_main.cpp' "$container"
+          grep -Fq 'gaudere-local-goose-dialogue-responder-observer' "$container"
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-agent"]' "$container"
+
+          sh -n "$deploy"
+          grep -Fq 'AUTHORIZED_DIALOGUE_RESPONDER_OBSERVER_CODE_DEPLOY' "$deploy"
+          grep -Fq '7335c2a921a46de854748b9b613f5aea74f16cbb73193643d08bf80b5c59ccd7' "$deploy"
+          grep -Fq 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=3' "$deploy"
+          grep -Fq 'DIALOGUE_RESPONDER_OBSERVER_ARMED=no' "$deploy"
+          grep -Fq 'DIALOGUE_RESPONDER_SCHEMA=%s' "$deploy"
+          grep -Fq 'dialogue responder sidecar schema is not exactly v1' "$deploy"
+          grep -Fq 'observer code deploy attempted a mutation beyond Image=' "$deploy"
+          grep -Fq 'observer is unexpectedly invoked by production profile' "$deploy"
+          grep -Fq 'observer became active in production profile' "$deploy"
+          grep -Fq 'observer --help changed responder state' "$deploy"
+          ! grep -Fq 'allow_schema_upgrade' "$deploy"
+          ! grep -Fq 'PRAGMA user_version=2' "$deploy"
+          ! grep -Eq '\$observer_binary.*[[:space:]]step([[:space:]]|$)' "$deploy"
+
+  fedora-44-observer-command:
+    needs: authority-guard
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2
+          make install
+
+      - name: Compile bounded production observer command
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+          libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -Iagent/src \
+            agent/src/local_goose_dialogue_responder_observer_main.cpp \
+            agent/src/LocalGooseDialogueResponderObserver.cpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp \
+            agent/src/LocalGooseDialogueThreadStore.cpp \
+            agent/src/LocalGooseDialogueV2.cpp \
+            agent/src/LocalGooseDialogueV3.cpp \
+            agent/src/Sha256.cpp \
+            -o observer-command \
+            $libs -lsqlite3
+
+      - name: Verify bounded command surface
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          help=$(./observer-command --help)
+          printf '%s\n' "$help"
+          printf '%s\n' "$help" | grep -F ' status '
+          printf '%s\n' "$help" | grep -F ' step '
+          printf '%s\n' "$help" | grep -F -- '--expected-sequence'
+          printf '%s\n' "$help" | grep -F -- '--authorize-structural-retirement'
+          ! printf '%s\n' "$help" | grep -Eq 'migrate|decline|lease|intent|dispatch|provider'
