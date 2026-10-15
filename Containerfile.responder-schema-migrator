@@ -1,0 +1,42 @@
+FROM registry.fedoraproject.org/fedora:44 AS builder
+
+RUN dnf install -y \
+        gcc-c++ \
+        json-devel \
+        sqlite-devel \
+    && dnf clean all
+
+WORKDIR /src
+COPY src/local_goose_dialogue_responder_schema_migrator_main.cpp src/
+COPY src/LocalGooseDialogueResponderStore.cpp src/LocalGooseDialogueResponderStore.hpp src/
+COPY src/LocalGooseDialogueResponder.cpp src/LocalGooseDialogueResponder.hpp src/
+COPY src/Sha256.cpp src/Sha256.hpp src/
+
+RUN g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+        -Isrc \
+        src/local_goose_dialogue_responder_schema_migrator_main.cpp \
+        src/LocalGooseDialogueResponderStore.cpp \
+        src/LocalGooseDialogueResponder.cpp \
+        src/Sha256.cpp \
+        -o /usr/local/bin/gaudere-local-goose-dialogue-responder-schema-migrator \
+        -lsqlite3
+
+FROM registry.fedoraproject.org/fedora:44
+ARG GAUDERE_AGENT_REF
+LABEL org.opencontainers.image.source="https://github.com/sol-ai-agent/gaudere-agent" \
+      org.opencontainers.image.revision="${GAUDERE_AGENT_REF}" \
+      io.gaudere.agent.revision="${GAUDERE_AGENT_REF}" \
+      io.gaudere.role="dialogue-responder-schema-migrator-v1-to-v2"
+
+RUN dnf install -y libstdc++ sqlite-libs \
+    && dnf clean all \
+    && useradd --uid 1000 --create-home --shell /sbin/nologin gaudere
+
+COPY --from=builder \
+    /usr/local/bin/gaudere-local-goose-dialogue-responder-schema-migrator \
+    /usr/local/bin/gaudere-local-goose-dialogue-responder-schema-migrator
+
+RUN test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-schema-migrator
+
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/gaudere-local-goose-dialogue-responder-schema-migrator"]
