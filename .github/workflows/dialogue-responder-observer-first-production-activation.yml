@@ -1,0 +1,164 @@
+name: Dialogue responder observer first production activation gate
+
+on:
+  pull_request:
+    paths:
+      - src/local_goose_dialogue_responder_schema_migrator_main.cpp
+      - Containerfile.responder-schema-migrator
+      - scripts/first-production-dialogue-responder-observer-activation.sh
+      - .github/workflows/dialogue-responder-observer-first-production-activation.yml
+  push:
+    branches: [main]
+    paths:
+      - src/local_goose_dialogue_responder_schema_migrator_main.cpp
+      - Containerfile.responder-schema-migrator
+      - scripts/first-production-dialogue-responder-observer-activation.sh
+      - .github/workflows/dialogue-responder-observer-first-production-activation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  authority-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove explicit one-shot activation boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          migrator=src/local_goose_dialogue_responder_schema_migrator_main.cpp
+          container=Containerfile.responder-schema-migrator
+          activation=scripts/first-production-dialogue-responder-observer-activation.sh
+
+          sh -n "$activation"
+          grep -Fq 'AUTHORIZED_FIRST_PRODUCTION_DIALOGUE_RESPONDER_OBSERVER' "$activation"
+          grep -Fq 'ef14db77fa3b3d21ff3fed9b37ead611ca8bf533cff424da810ac6ac4d1a77eb' "$activation"
+          grep -Fq '77ed92357b6c7535cacf19af134bbba083e962bbd6324fadc6a5e77bf4e8d943' "$activation"
+          grep -Fq -- '--authorize-v1-to-v2' "$activation"
+          grep -Fq -- '--authorize-structural-retirement' "$activation"
+          grep -Fq -- '--network none' "$activation"
+          grep -Fq -- '--userns keep-id' "$activation"
+          grep -Fq 'label=disable' "$activation"
+          grep -Fq 'backup-state.sh' "$activation"
+          grep -Fq 'completion_sequence=3 AND kind=0 AND state=1' "$activation"
+          grep -Fq 'DIALOGUE_RESPONDER_NEXT_PENDING_SEQUENCE=4' "$activation"
+          grep -Fq 'DIALOGUE_RESPONDER_NEXT_CLASSIFICATION=current_human' "$activation"
+          grep -Fq 'DIALOGUE_RESPONDER_OBSERVER_ARMED=no' "$activation"
+          grep -Fq 'FEDORA_GAUDERE_DIALOGUE_RESPONDER_OBSERVER_FIRST_PRODUCTION_ACTIVATION=PASS' "$activation"
+          ! grep -Fq 'build-image.sh' "$activation"
+          ! grep -Fq 'daemon-reload' "$activation"
+          ! grep -Fq 'target_quadlet' "$activation"
+          ! grep -Eq 'lease-create|dialogue-responder-prepare|dialogue-responder-dispatch' "$activation"
+
+          python3 - "$activation" <<'PY'
+          from pathlib import Path
+          import sys
+          text = Path(sys.argv[1]).read_text()
+          markers = [
+              "=== STOP AND BACK UP PRODUCTION STATE ===",
+              "state_mutated=1\nmigration_output=",
+              "=== RETIRE EXACT SYSTEM COMPLETION SEQUENCE 3 ===",
+              "=== RESTART PRODUCTION AND VERIFY HUMAN HOLD ===",
+          ]
+          positions = [text.index(marker) for marker in markers]
+          if positions != sorted(positions):
+              raise SystemExit("production mutation ordering changed")
+          if text.count('run_observer "$state_directory" step') != 1:
+              raise SystemExit("production observer step must occur exactly once")
+          PY
+
+          grep -Fq 'allow_schema_upgrade' "$migrator"
+          grep -Fq 'before != 1' "$migrator"
+          grep -Fq 'after != 2' "$migrator"
+          grep -Fq 'explicit v1-to-v2 schema authorization is required' "$migrator"
+          ! grep -Eq 'create_lease|prepare_intent|commit_submission|complete_intent|acknowledge\(' "$migrator"
+          ! grep -Eq 'TaskStore|Runtime|Provider|OpenAI|LocalGooseCycle|Stimulus|Wake|Curl|Http|system\(|popen\(' "$migrator"
+
+          grep -Fq 'io.gaudere.role="dialogue-responder-schema-migrator-v1-to-v2"' "$container"
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-local-goose-dialogue-responder-schema-migrator"]' "$container"
+
+  fedora-44-migrator:
+    needs: authority-guard
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y gcc-c++ json-devel sqlite sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Compile migration-only helper with Werror
+        run: |
+          set -eu
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Isrc \
+            src/local_goose_dialogue_responder_schema_migrator_main.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/Sha256.cpp \
+            -o responder-schema-migrator \
+            -lsqlite3
+      - name: Prove exact v1 to v2 surface
+        run: |
+          set -eu
+          help=$(./responder-schema-migrator --help)
+          printf '%s\n' "$help" | grep -F 'migrate --responder-sidecar PATH --authorize-v1-to-v2'
+          ! printf '%s\n' "$help" | grep -Eq 'lease|intent|dispatch|provider|task|network|shell'
+
+          db="$RUNNER_TEMP/responder-v1.db"
+          sqlite3 "$db" <<'SQL'
+          PRAGMA foreign_keys=ON;
+          CREATE TABLE local_goose_dialogue_responder_lease(
+            lease_id TEXT PRIMARY KEY NOT NULL,
+            thread_alias TEXT NOT NULL,
+            state INTEGER NOT NULL CHECK(state BETWEEN 0 AND 4),
+            turns_committed INTEGER NOT NULL CHECK(turns_committed >= 0),
+            document TEXT NOT NULL);
+          CREATE UNIQUE INDEX local_goose_dialogue_responder_one_active
+            ON local_goose_dialogue_responder_lease(thread_alias) WHERE state=0;
+          CREATE TABLE local_goose_dialogue_responder_intent(
+            intent_id TEXT PRIMARY KEY NOT NULL,
+            lease_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            request_id TEXT NOT NULL UNIQUE,
+            state INTEGER NOT NULL CHECK(state BETWEEN 0 AND 5),
+            created_at_ms INTEGER NOT NULL CHECK(created_at_ms >= 0),
+            document TEXT NOT NULL,
+            UNIQUE(lease_id,event_id),
+            FOREIGN KEY(lease_id) REFERENCES local_goose_dialogue_responder_lease(lease_id));
+          PRAGMA user_version=1;
+          SQL
+          chmod 600 "$db"
+
+          if ./responder-schema-migrator migrate --responder-sidecar "$db"; then
+            echo 'unauthorized migration unexpectedly succeeded' >&2
+            false
+          fi
+          output=$(./responder-schema-migrator migrate --responder-sidecar "$db" --authorize-v1-to-v2)
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -F 'RESPONDER_SCHEMA_BEFORE=1'
+          printf '%s\n' "$output" | grep -F 'RESPONDER_SCHEMA_AFTER=2'
+          test "$(sqlite3 "$db" 'PRAGMA user_version;')" = 2
+          test "$(sqlite3 "$db" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='local_goose_dialogue_responder_disposition';")" = 1
+          if ./responder-schema-migrator migrate --responder-sidecar "$db" --authorize-v1-to-v2; then
+            echo 'schema-v2 retry unexpectedly succeeded as a new migration' >&2
+            false
+          fi
+
+  helper-image:
+    needs: authority-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and inspect migration-only image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker build \
+            --build-arg GAUDERE_AGENT_REF="$GITHUB_SHA" \
+            --tag gaudere-responder-schema-migrator:test \
+            --file Containerfile.responder-schema-migrator .
+          test "$(docker image inspect gaudere-responder-schema-migrator:test --format '{{index .Config.Labels "io.gaudere.agent.revision"}}')" = "$GITHUB_SHA"
+          help=$(docker run --rm --network none --read-only gaudere-responder-schema-migrator:test --help)
+          printf '%s\n' "$help" | grep -F 'migrate --responder-sidecar PATH --authorize-v1-to-v2'
