@@ -57,6 +57,29 @@ RUN cd /src/gaudere-agent \
        make --jobs=2 check \
     && make install
 
+# The observer is intentionally packaged as a separate bounded one-shot binary.
+# Merely shipping it grants no observation authority: the production service
+# does not invoke it, and the binary has no schema-upgrade, decline, lease,
+# intent, Task, provider, cycle, stimulus, wake, shell or network surface.
+RUN cd /src/gaudere-agent \
+    && export PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+    && export LD_LIBRARY_PATH=/opt/gaudere/lib \
+    && cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)" \
+    && libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)" \
+    && g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+       ${cflags} -Isrc \
+       src/local_goose_dialogue_responder_observer_main.cpp \
+       src/LocalGooseDialogueResponderObserver.cpp \
+       src/LocalGooseDialogueResponderStore.cpp \
+       src/LocalGooseDialogueResponder.cpp \
+       src/LocalGooseDialogueCompletionFeed.cpp \
+       src/LocalGooseDialogueThreadStore.cpp \
+       src/LocalGooseDialogueV2.cpp \
+       src/LocalGooseDialogueV3.cpp \
+       src/Sha256.cpp \
+       -o /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-observer \
+       ${libs} -lsqlite3
+
 RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp -a /opt/gaudere/lib/libgaudere.so* /opt/runtime/lib/ \
     && cp -a /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /opt/runtime/lib/ \
@@ -79,6 +102,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-v2-proof /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-v3-proof /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-proof /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-observer /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-seed /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-activate /opt/runtime/bin/ \
     && test -x /opt/runtime/bin/gaudere-chat \
@@ -98,6 +122,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-v2-proof \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-v3-proof \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-responder-proof \
+    && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-responder-observer \
     && test -x /opt/runtime/bin/gaudere-local-goose-cycle-seed \
     && test -x /opt/runtime/bin/gaudere-local-goose-cycle-activate
 
@@ -156,6 +181,7 @@ RUN test -x /usr/local/bin/gaudere-chat \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-v2-proof \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-v3-proof \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-proof \
+    && test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-observer \
     && test -x /usr/local/bin/gaudere-local-goose-cycle-seed \
     && test -x /usr/local/bin/gaudere-local-goose-cycle-activate \
     && test -x /usr/local/bin/goose \
