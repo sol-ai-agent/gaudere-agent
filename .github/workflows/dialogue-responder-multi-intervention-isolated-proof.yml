@@ -1,0 +1,182 @@
+name: Dialogue responder multi-intervention isolated proof gate
+
+on:
+  pull_request:
+    paths:
+      - Containerfile
+      - src/LocalGooseDialogueResponderDispatcher.cpp
+      - src/LocalGooseDialogueResponderDispatcher.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - src/local_goose_dialogue_responder_multi_intervention_proof_main.cpp
+      - tests/local_goose_dialogue_responder_dispatcher_test.cpp
+      - scripts/prove-local-goose-dialogue-responder-multi-intervention-fedora.sh
+      - .github/workflows/dialogue-responder-multi-intervention-isolated-proof.yml
+  push:
+    branches: [main]
+    paths:
+      - Containerfile
+      - src/LocalGooseDialogueResponderDispatcher.cpp
+      - src/LocalGooseDialogueResponderDispatcher.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - src/LocalGooseDialogueResponderObserver.cpp
+      - src/LocalGooseDialogueResponderObserver.hpp
+      - src/local_goose_dialogue_responder_multi_intervention_proof_main.cpp
+      - tests/local_goose_dialogue_responder_dispatcher_test.cpp
+      - scripts/prove-local-goose-dialogue-responder-multi-intervention-fedora.sh
+      - .github/workflows/dialogue-responder-multi-intervention-isolated-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  authority-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove durable intervention and isolated Fedora boundaries
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dispatcher=src/LocalGooseDialogueResponderDispatcher.cpp
+          proof=src/local_goose_dialogue_responder_multi_intervention_proof_main.cpp
+          script=scripts/prove-local-goose-dialogue-responder-multi-intervention-fedora.sh
+          test_cpp=tests/local_goose_dialogue_responder_dispatcher_test.cpp
+
+          sh -n "$script"
+          grep -Fq 'only a current human completion can authorize intervention' "$dispatcher"
+          grep -Fq 'explicit-intervention-intent-v1' "$dispatcher"
+          grep -Fq 'prepare_disposition' "$dispatcher"
+          grep -Fq 'bind_disposition_intent' "$dispatcher"
+          grep -Fq 'complete_disposition' "$dispatcher"
+          grep -Fq 'responder dispatch requires an exact bound intervention disposition' "$dispatcher"
+
+          grep -Fq 'max_system_turns' src/LocalGooseDialogueResponderStore.cpp
+          grep -Fq 'quota_exhausted' src/LocalGooseDialogueResponderStore.cpp
+          grep -Fq 'structural_skip_system' "$test_cpp"
+          grep -Fq 'intervention_bound' "$test_cpp"
+          grep -Fq 'Two explicit human interventions only' "$test_cpp"
+          grep -Fq 'turns_committed == 2' "$test_cpp"
+          grep -Fq 'too_early' "$test_cpp"
+
+          grep -Fq 'LocalGooseDialogueResponderObserver' "$proof"
+          grep -Fq 'LocalGooseDialogueResponderDispatcher' "$proof"
+          grep -Fq 'multi-intervention-proof-lease-v1' "$proof"
+          grep -Fq 'SELF_CHAIN=blocked' "$proof"
+          grep -Fq 'AUTO_RENEW=blocked' "$proof"
+          grep -Fq 'MIN_INTERVAL=fail-closed' "$proof"
+          grep -Fq 'CRASH_RETRY=idempotent' "$proof"
+          grep -Fq 'FINAL_RESPONDER_CURSOR=7' "$proof"
+
+          grep -Fq 'sqlite3.connect(f"file:{source}?mode=ro", uri=True)' "$script"
+          grep -Fq 'src.backup(dst)' "$script"
+          grep -Fq 'production_before' "$script"
+          grep -Fq 'production_after' "$script"
+          grep -Fq 'FEDORA_GAUDERE_DIALOGUE_RESPONDER_MULTI_INTERVENTION_ISOLATED=PASS' "$script"
+          grep -Fq "info --format '{{.Host.Security.Rootless}}'" "$script"
+          grep -Fq -- '--user 0:0' "$script"
+          grep -Fq '"$podman_command" run --rm --network none' "$script"
+          grep -Fq -- '--read-only --read-only-tmpfs' "$script"
+          grep -Fq -- '--security-opt no-new-privileges --cap-drop all' "$script"
+
+          # Host Fedora only reads live state and copies it with SQLite backup.
+          # No production DB path is mounted into any proof container and no
+          # service/container lifecycle operation is allowed in this proof.
+          ! grep -Eq 'systemctl[^\n]*(start|stop|restart|enable|disable)' "$script"
+          ! grep -Eq '\$podman_command"[[:space:]]+(exec|stop|start|restart)' "$script"
+          ! grep -Eq -- '-v "\$(state_directory|state_database|cycle_sidecar|stimulus_sidecar|thread_sidecar|completion_sidecar|responder_sidecar)' "$script"
+          ! grep -Eq 'curl[[:space:]]|wget[[:space:]]|ssh[[:space:]]|scp[[:space:]]' "$script"
+          ! grep -Fq -- '--userns keep-id' "$script"
+          ! grep -Eq 'for command .*g\+\+|for command .*pkg-config' "$script"
+          ! grep -Eq '^[[:space:]]*dnf[[:space:]]' "$script"
+
+          # The proof-only helper never becomes a production binary or service.
+          ! grep -Fq 'local_goose_dialogue_responder_multi_intervention_proof_main.cpp' src/Makefile.am
+          ! grep -Fq 'local_goose_dialogue_responder_multi_intervention_proof_main.cpp' Containerfile
+          ! grep -Fq 'multi-intervention-proof' src/main.cpp
+
+  fedora-44-build-and-test:
+    needs: authority-guard
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 30
+    steps:
+      - name: Install build dependencies inside CI container
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          curl-devel
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Build and run Agent tests with durable intervention contract
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+
+      - name: Compile isolated multi-intervention proof helper with Werror
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+          libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -Iagent/src \
+            agent/src/local_goose_dialogue_responder_multi_intervention_proof_main.cpp \
+            agent/src/LocalGooseDialogueResponderObserver.cpp \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp \
+            agent/src/LocalGooseDialoguePreferredSubmitter.cpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp \
+            agent/src/LocalGooseDialogueThreadStore.cpp \
+            agent/src/LocalGooseDialogueV2.cpp \
+            agent/src/LocalGooseDialogueV3.cpp \
+            agent/src/Sha256.cpp \
+            -o multi-intervention-proof \
+            $libs -lsqlite3
+          ./multi-intervention-proof --help | grep -Fq \
+            -- '--state PATH --thread-sidecar PATH'
