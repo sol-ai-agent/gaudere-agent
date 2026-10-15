@@ -1,0 +1,132 @@
+name: Dialogue responder terminal disposition reconciliation
+
+on:
+  pull_request:
+    paths:
+      - src/LocalGooseDialogueResponderDispatcher.cpp
+      - src/LocalGooseDialogueResponderDispatcher.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - tests/local_goose_dialogue_responder_terminal_reconciliation_test.cpp
+      - .github/workflows/dialogue-responder-terminal-reconciliation.yml
+  push:
+    branches: [main]
+    paths:
+      - src/LocalGooseDialogueResponderDispatcher.cpp
+      - src/LocalGooseDialogueResponderDispatcher.hpp
+      - src/LocalGooseDialogueResponderStore.cpp
+      - src/LocalGooseDialogueResponderStore.hpp
+      - tests/local_goose_dialogue_responder_terminal_reconciliation_test.cpp
+      - .github/workflows/dialogue-responder-terminal-reconciliation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  authority-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove terminal reconciliation remains fail-closed
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dispatcher=src/LocalGooseDialogueResponderDispatcher.cpp
+          test_cpp=tests/local_goose_dialogue_responder_terminal_reconciliation_test.cpp
+
+          grep -Fq 'terminalize_intervention' "$dispatcher"
+          grep -Fq 'reconcile_terminal_intervention_disposition' "$dispatcher"
+          grep -Fq 'terminal responder intent/disposition reconciled' "$dispatcher"
+          grep -Fq 'simulated_crash_after_intent_terminal' "$test_cpp"
+          grep -Fq 'lease_or_intent_expired' "$test_cpp"
+          grep -Fq 'turns_committed == 0' "$test_cpp"
+          grep -Fq 'consumer_last_sequence(consumer_id)' "$test_cpp"
+
+          # Terminal reconciliation only closes already-durable responder state.
+          # It must not gain provider, observer, cycle, wake, stimulus, shell or
+          # network authority and must never synthesize a replacement lease.
+          ! grep -Eq 'Provider|OpenAI|LocalGooseCycle|Stimulus|Wake|curl|system\(' "$test_cpp"
+          ! grep -Eq 'create_lease\([^\n]*replacement|auto.?renew' "$dispatcher" "$test_cpp"
+          ! grep -Eq 'dialogue-feed-ack|gaudere-control|systemctl|podman' "$test_cpp"
+
+  fedora-44-build-and-test:
+    needs: authority-guard
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 30
+    steps:
+      - name: Install build dependencies inside CI container
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          curl-devel
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Build and run full Agent test suite
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+
+      - name: Compile and run terminal reconciliation proof
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+          libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -Iagent/src \
+            agent/tests/local_goose_dialogue_responder_terminal_reconciliation_test.cpp \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp \
+            agent/src/LocalGooseDialoguePreferredSubmitter.cpp \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueThreadStore.cpp \
+            agent/src/LocalGooseDialogueV2.cpp \
+            agent/src/LocalGooseDialogueV3.cpp \
+            agent/src/Sha256.cpp \
+            -o responder-terminal-reconciliation-test \
+            $libs -lsqlite3
+          ./responder-terminal-reconciliation-test | grep -Fq \
+            'local_goose_dialogue_responder_terminal_reconciliation_test: PASS'
