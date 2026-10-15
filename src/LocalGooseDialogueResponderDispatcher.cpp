@@ -12,6 +12,8 @@ namespace gaudere_agent {
 namespace {
 
 constexpr std::int64_t max_intent_ttl_ms = 24LL * 60 * 60 * 1000;
+constexpr const char* intervention_authority_source =
+    "explicit-intervention-intent-v1";
 
 bool safe_identifier(const std::string& value) noexcept
 {
@@ -51,6 +53,50 @@ bool same_submitted_task(
         && inspected.speaker_id == intent.speaker_id
         && inspected.message_kind == intent.message_kind
         && inspected.message == intent.message;
+}
+
+bool same_intervention_disposition_identity(
+    const LocalGooseDialogueResponderDisposition& disposition,
+    const LocalGooseDialogueResponderDisposition& candidate) noexcept
+{
+    return disposition.disposition_id == candidate.disposition_id
+        && disposition.consumer_id == candidate.consumer_id
+        && disposition.thread_alias == candidate.thread_alias
+        && disposition.completion_sequence == candidate.completion_sequence
+        && disposition.event_id == candidate.event_id
+        && disposition.result_sha256 == candidate.result_sha256
+        && disposition.thread_revision == candidate.thread_revision
+        && disposition.task_id == candidate.task_id
+        && disposition.speaker_kind == candidate.speaker_kind
+        && disposition.speaker_id == candidate.speaker_id
+        && disposition.kind == candidate.kind
+        && disposition.authority_source == candidate.authority_source
+        && disposition.created_at_ms == candidate.created_at_ms;
+}
+
+bool bound_intervention_matches_intent(
+    const LocalGooseDialogueResponderDisposition& disposition,
+    const LocalGooseDialogueResponderIntent& intent,
+    const std::string& consumer_id) noexcept
+{
+    using Kind = LocalGooseDialogueResponderDispositionKind;
+    using State = LocalGooseDialogueResponderDispositionState;
+    return disposition.consumer_id == consumer_id
+        && disposition.thread_alias == intent.thread_alias
+        && disposition.completion_sequence == intent.completion_sequence
+        && disposition.event_id == intent.event_id
+        && disposition.result_sha256 == intent.result_sha256
+        && disposition.thread_revision == intent.expected_thread_revision
+        && disposition.task_id == intent.triggering_task_id
+        && disposition.task_id == intent.expected_head_task_id
+        && disposition.speaker_kind == "human"
+        && disposition.kind == Kind::intervention
+        && disposition.authority_source == intervention_authority_source
+        && (disposition.state == State::intervention_bound
+            || disposition.state == State::completed)
+        && disposition.intent_id
+            == std::optional<std::string>{intent.intent_id}
+        && disposition.bound_at_ms.has_value();
 }
 
 LocalGooseDialogueResponderDispatchCode map_store_result(
@@ -308,6 +354,11 @@ LocalGooseDialogueResponderDispatcher::prepare(
         out.detail = "requested completion is not the responder consumer next event";
         return out;
     }
+    if (event->speaker_kind != "human") {
+        out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+        out.detail = "only a current human completion can authorize intervention";
+        return out;
+    }
     const auto head = thread_store_.find(lease->thread_alias);
     if (!head) {
         out.result = LocalGooseDialogueResponderDispatchCode::conflict;
@@ -347,10 +398,106 @@ LocalGooseDialogueResponderDispatcher::prepare(
         now,
         expiry);
 
-    const auto write = responder_store_.prepare_intent(candidate);
-    out.result = map_store_result(write.result);
-    out.intent = write.intent;
-    out.detail = write.detail;
+    const auto intent_write = responder_store_.prepare_intent(candidate);
+    out.intent = intent_write.intent;
+    if ((intent_write.result
+            != LocalGooseDialogueResponderStoreResult::accepted
+         && intent_write.result
+            != LocalGooseDialogueResponderStoreResult::duplicate)
+        || !intent_write.intent) {
+        out.result = map_store_result(intent_write.result);
+        out.detail = intent_write.detail;
+        attach_cursor(out, completion_store_, consumer_id_);
+        return out;
+    }
+    if (intent_write.intent->state
+        != LocalGooseDialogueResponderIntentState::prepared) {
+        out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+        out.detail = "responder intent is no longer in prepared state";
+        attach_cursor(out, completion_store_, consumer_id_);
+        return out;
+    }
+
+    const auto disposition_candidate =
+        make_local_goose_dialogue_responder_disposition(
+            consumer_id_, event->thread_alias, event->sequence,
+            event->event_id, event->result_sha256,
+            event->thread_revision, event->task_id,
+            event->speaker_kind, event->speaker_id,
+            LocalGooseDialogueResponderDispositionKind::intervention,
+            intervention_authority_source,
+            intent_write.intent->created_at_ms);
+
+    bool changed =
+        intent_write.result == LocalGooseDialogueResponderStoreResult::accepted;
+    auto disposition = responder_store_.find_disposition_for_event(
+        consumer_id_, event->event_id);
+    if (!disposition) {
+        const auto prepared =
+            responder_store_.prepare_disposition(disposition_candidate);
+        if ((prepared.result
+                != LocalGooseDialogueResponderStoreResult::accepted
+             && prepared.result
+                != LocalGooseDialogueResponderStoreResult::duplicate)
+            || !prepared.disposition) {
+            out.result = map_store_result(prepared.result);
+            out.detail = "intervention disposition prepare failed: "
+                + prepared.detail;
+            attach_cursor(out, completion_store_, consumer_id_);
+            return out;
+        }
+        changed = changed
+            || prepared.result == LocalGooseDialogueResponderStoreResult::accepted;
+        disposition = prepared.disposition;
+    }
+
+    if (!disposition
+        || !same_intervention_disposition_identity(
+            *disposition, disposition_candidate)) {
+        out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+        out.detail = "completion event has a conflicting responder disposition";
+        attach_cursor(out, completion_store_, consumer_id_);
+        return out;
+    }
+
+    using DispositionState = LocalGooseDialogueResponderDispositionState;
+    if (disposition->state == DispositionState::prepared) {
+        const auto bound = responder_store_.bind_disposition_intent(
+            disposition->disposition_id,
+            intent_write.intent->intent_id,
+            now);
+        if ((bound.result
+                != LocalGooseDialogueResponderStoreResult::accepted
+             && bound.result
+                != LocalGooseDialogueResponderStoreResult::duplicate)
+            || !bound.disposition) {
+            out.result = map_store_result(bound.result);
+            out.detail = "intervention disposition binding failed: "
+                + bound.detail;
+            attach_cursor(out, completion_store_, consumer_id_);
+            return out;
+        }
+        changed = changed
+            || bound.result == LocalGooseDialogueResponderStoreResult::accepted;
+        disposition = bound.disposition;
+    }
+
+    if (!disposition
+        || disposition->state != DispositionState::intervention_bound
+        || !bound_intervention_matches_intent(
+            *disposition, *intent_write.intent, consumer_id_)) {
+        out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+        out.detail = "intervention disposition is not bound to the exact intent";
+        attach_cursor(out, completion_store_, consumer_id_);
+        return out;
+    }
+
+    out.result = changed
+        ? LocalGooseDialogueResponderDispatchCode::accepted
+        : LocalGooseDialogueResponderDispatchCode::duplicate;
+    out.detail = changed
+        ? "dialogue responder intent and intervention disposition prepared"
+        : "dialogue responder intent and intervention disposition already prepared";
     attach_cursor(out, completion_store_, consumer_id_);
     return out;
 }
@@ -371,9 +518,48 @@ LocalGooseDialogueResponderDispatcher::dispatch(
     out.intent = stored_intent;
 
     using IntentState = LocalGooseDialogueResponderIntentState;
+    using DispositionState = LocalGooseDialogueResponderDispositionState;
+    auto disposition = responder_store_.find_disposition_for_event(
+        consumer_id_, stored_intent->event_id);
+
     if (stored_intent->state == IntentState::completed) {
+        if (!disposition) {
+            out.result = LocalGooseDialogueResponderDispatchCode::duplicate;
+            out.detail =
+                "legacy completed responder intent has no historical disposition";
+            return out;
+        }
+        if (!bound_intervention_matches_intent(
+                *disposition, *stored_intent, consumer_id_)) {
+            out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+            out.detail = "completed responder intent disposition conflicts";
+            return out;
+        }
+        if (disposition->state == DispositionState::completed) {
+            out.result = LocalGooseDialogueResponderDispatchCode::duplicate;
+            out.detail = "dialogue responder intervention already completed";
+            return out;
+        }
+        const auto now = clock_();
+        if (now < 0) {
+            out.result = LocalGooseDialogueResponderDispatchCode::unavailable;
+            out.detail = "dialogue responder clock is invalid";
+            return out;
+        }
+        const auto completed_disposition =
+            responder_store_.complete_disposition(
+                disposition->disposition_id, now);
+        if (completed_disposition.result
+                != LocalGooseDialogueResponderStoreResult::accepted
+            && completed_disposition.result
+                != LocalGooseDialogueResponderStoreResult::duplicate) {
+            out.result = map_store_result(completed_disposition.result);
+            out.detail = "completed responder disposition reconciliation failed: "
+                + completed_disposition.detail;
+            return out;
+        }
         out.result = LocalGooseDialogueResponderDispatchCode::duplicate;
-        out.detail = "dialogue responder intent already completed";
+        out.detail = "dialogue responder intervention completion reconciled";
         return out;
     }
     if (stored_intent->state == IntentState::conflict
@@ -381,6 +567,16 @@ LocalGooseDialogueResponderDispatcher::dispatch(
         || stored_intent->state == IntentState::manual_review) {
         out.result = LocalGooseDialogueResponderDispatchCode::conflict;
         out.detail = "dialogue responder intent is terminal";
+        return out;
+    }
+
+    if (!disposition
+        || disposition->state != DispositionState::intervention_bound
+        || !bound_intervention_matches_intent(
+            *disposition, *stored_intent, consumer_id_)) {
+        out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+        out.detail =
+            "responder dispatch requires an exact bound intervention disposition";
         return out;
     }
 
@@ -573,6 +769,18 @@ LocalGooseDialogueResponderDispatcher::dispatch(
         return out;
     }
 
+    disposition = responder_store_.find_disposition_for_event(
+        consumer_id_, intent.event_id);
+    if (!disposition
+        || disposition->state != DispositionState::intervention_bound
+        || !bound_intervention_matches_intent(
+            *disposition, intent, consumer_id_)) {
+        out.result = LocalGooseDialogueResponderDispatchCode::conflict;
+        out.detail =
+            "bound intervention disposition was lost before trigger ACK";
+        return out;
+    }
+
     const auto task = task_store_.find(intent.submitted_task_id);
     const auto head = thread_store_.find(intent.thread_alias);
     out.task = task;
@@ -644,12 +852,35 @@ LocalGooseDialogueResponderDispatcher::dispatch(
 
     const auto completed =
         responder_store_.complete_intent(intent.intent_id, now);
-    out.result = map_store_result(completed.result);
-    out.intent = completed.intent;
-    out.detail = completed.detail;
-    if (completed.result == LocalGooseDialogueResponderStoreResult::duplicate) {
-        out.result = LocalGooseDialogueResponderDispatchCode::duplicate;
+    if ((completed.result
+            != LocalGooseDialogueResponderStoreResult::accepted
+         && completed.result
+            != LocalGooseDialogueResponderStoreResult::duplicate)
+        || !completed.intent) {
+        out.result = map_store_result(completed.result);
+        out.intent = completed.intent;
+        out.detail = "responder intent completion failed: " + completed.detail;
+        return out;
     }
+    out.intent = completed.intent;
+
+    const auto completed_disposition = responder_store_.complete_disposition(
+        disposition->disposition_id, now);
+    if (completed_disposition.result
+            != LocalGooseDialogueResponderStoreResult::accepted
+        && completed_disposition.result
+            != LocalGooseDialogueResponderStoreResult::duplicate) {
+        out.result = map_store_result(completed_disposition.result);
+        out.detail = "responder intervention disposition completion failed: "
+            + completed_disposition.detail;
+        return out;
+    }
+
+    out.result = completed.result
+        == LocalGooseDialogueResponderStoreResult::duplicate
+        ? LocalGooseDialogueResponderDispatchCode::duplicate
+        : LocalGooseDialogueResponderDispatchCode::accepted;
+    out.detail = "dialogue responder intervention completed";
     return out;
 }
 
