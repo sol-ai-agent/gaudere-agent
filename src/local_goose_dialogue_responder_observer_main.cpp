@@ -18,6 +18,7 @@ namespace {
 
 using Action = gaudere_agent::LocalGooseDialogueResponderObserverAction;
 using Classification = gaudere_agent::LocalGooseDialogueResponderObserverClassification;
+using Disposition = gaudere_agent::LocalGooseDialogueResponderDisposition;
 using DispositionKind = gaudere_agent::LocalGooseDialogueResponderDispositionKind;
 using DispositionState = gaudere_agent::LocalGooseDialogueResponderDispositionState;
 
@@ -236,23 +237,28 @@ bool exact_expected_event(
         && event.thread_alias == thread_alias;
 }
 
-bool prepared_expected_disposition(
+bool earliest_prepared_matches_expected(
     gaudere_agent::LocalGooseDialogueResponderStore& store,
     const Options& options)
 {
     const auto prepared = store.dispositions_in_state(
         DispositionState::prepared, 1024);
+    const Disposition* earliest = nullptr;
     for (const auto& disposition : prepared) {
-        if (disposition.consumer_id == consumer_id
-            && disposition.completion_sequence == options.expected_sequence
-            && disposition.event_id == options.expected_event_id
-            && disposition.result_sha256 == options.expected_result_sha256
-            && disposition.thread_alias == thread_alias
-            && disposition.kind != DispositionKind::intervention) {
-            return true;
+        if (disposition.consumer_id != consumer_id) continue;
+        if (!earliest
+            || disposition.completion_sequence < earliest->completion_sequence
+            || (disposition.completion_sequence == earliest->completion_sequence
+                && disposition.disposition_id < earliest->disposition_id)) {
+            earliest = &disposition;
         }
     }
-    return false;
+    if (!earliest) return false;
+    return earliest->completion_sequence == options.expected_sequence
+        && earliest->event_id == options.expected_event_id
+        && earliest->result_sha256 == options.expected_result_sha256
+        && earliest->thread_alias == thread_alias
+        && earliest->kind != DispositionKind::intervention;
 }
 
 std::int64_t now_ms()
@@ -298,9 +304,9 @@ int main(int argc, char* argv[])
         const auto cursor = completion_store.consumer_last_sequence(consumer_id)
             .value_or(0);
         if (cursor == options.expected_sequence) {
-            if (!prepared_expected_disposition(responder_store, options)) {
+            if (!earliest_prepared_matches_expected(responder_store, options)) {
                 throw std::runtime_error(
-                    "cursor reached expected sequence without matching prepared disposition");
+                    "cursor reached expected sequence without exact earliest prepared disposition");
             }
         } else {
             if (cursor == std::numeric_limits<std::uint64_t>::max()
