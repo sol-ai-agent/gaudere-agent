@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -74,13 +75,11 @@ bool same_intervention_disposition_identity(
         && disposition.created_at_ms == candidate.created_at_ms;
 }
 
-bool bound_intervention_matches_intent(
+bool intervention_disposition_matches_intent(
     const LocalGooseDialogueResponderDisposition& disposition,
     const LocalGooseDialogueResponderIntent& intent,
     const std::string& consumer_id) noexcept
 {
-    using Kind = LocalGooseDialogueResponderDispositionKind;
-    using State = LocalGooseDialogueResponderDispositionState;
     return disposition.consumer_id == consumer_id
         && disposition.thread_alias == intent.thread_alias
         && disposition.completion_sequence == intent.completion_sequence
@@ -90,13 +89,24 @@ bool bound_intervention_matches_intent(
         && disposition.task_id == intent.triggering_task_id
         && disposition.task_id == intent.expected_head_task_id
         && disposition.speaker_kind == "human"
-        && disposition.kind == Kind::intervention
+        && disposition.kind
+            == LocalGooseDialogueResponderDispositionKind::intervention
         && disposition.authority_source == intervention_authority_source
-        && (disposition.state == State::intervention_bound
-            || disposition.state == State::completed)
         && disposition.intent_id
             == std::optional<std::string>{intent.intent_id}
         && disposition.bound_at_ms.has_value();
+}
+
+bool bound_intervention_matches_intent(
+    const LocalGooseDialogueResponderDisposition& disposition,
+    const LocalGooseDialogueResponderIntent& intent,
+    const std::string& consumer_id) noexcept
+{
+    using State = LocalGooseDialogueResponderDispositionState;
+    return intervention_disposition_matches_intent(
+               disposition, intent, consumer_id)
+        && (disposition.state == State::intervention_bound
+            || disposition.state == State::completed);
 }
 
 LocalGooseDialogueResponderDispatchCode map_store_result(
@@ -133,6 +143,123 @@ LocalGooseDialogueResponderDispatchCode map_submit_result(
         return LocalGooseDialogueResponderDispatchCode::unavailable;
     }
     return LocalGooseDialogueResponderDispatchCode::unavailable;
+}
+
+struct TerminalInterventionResult {
+    LocalGooseDialogueResponderStoreResult result =
+        LocalGooseDialogueResponderStoreResult::unavailable;
+    std::optional<LocalGooseDialogueResponderIntent> intent;
+    std::optional<LocalGooseDialogueResponderDisposition> disposition;
+    std::string detail;
+};
+
+bool terminal_intent_state(
+    const LocalGooseDialogueResponderIntentState state) noexcept
+{
+    using State = LocalGooseDialogueResponderIntentState;
+    return state == State::conflict
+        || state == State::expired
+        || state == State::manual_review;
+}
+
+TerminalInterventionResult reconcile_terminal_intervention_disposition(
+    LocalGooseDialogueResponderStore& responder_store,
+    const std::string& consumer_id,
+    const LocalGooseDialogueResponderIntent& intent,
+    const std::int64_t terminal_at_ms)
+{
+    TerminalInterventionResult out;
+    out.intent = intent;
+    if (!terminal_intent_state(intent.state)
+        || intent.terminal_reason.empty()
+        || terminal_at_ms < 0) {
+        out.result = LocalGooseDialogueResponderStoreResult::invalid;
+        out.detail = "invalid terminal responder intervention reconciliation";
+        return out;
+    }
+
+    auto disposition = responder_store.find_disposition_for_event(
+        consumer_id, intent.event_id);
+    out.disposition = disposition;
+    if (!disposition) {
+        out.result = LocalGooseDialogueResponderStoreResult::conflict;
+        out.detail = "terminal responder intent has no durable disposition";
+        return out;
+    }
+    if (!intervention_disposition_matches_intent(
+            *disposition, intent, consumer_id)) {
+        out.result = LocalGooseDialogueResponderStoreResult::conflict;
+        out.detail = "terminal responder intent disposition conflicts";
+        return out;
+    }
+
+    using DState = LocalGooseDialogueResponderDispositionState;
+    if (disposition->state == DState::manual_review) {
+        if (disposition->terminal_reason != intent.terminal_reason) {
+            out.result = LocalGooseDialogueResponderStoreResult::conflict;
+            out.detail = "terminal responder intent/disposition reasons differ";
+            return out;
+        }
+        out.result = LocalGooseDialogueResponderStoreResult::duplicate;
+        out.detail = "terminal responder disposition already reconciled";
+        return out;
+    }
+    if (disposition->state != DState::intervention_bound) {
+        out.result = LocalGooseDialogueResponderStoreResult::conflict;
+        out.detail = "terminal responder disposition is in an incompatible state";
+        return out;
+    }
+
+    const auto terminal = responder_store.terminalize_disposition(
+        disposition->disposition_id,
+        intent.terminal_reason,
+        terminal_at_ms);
+    out.result = terminal.result;
+    out.disposition = terminal.disposition;
+    out.detail = terminal.detail;
+    return out;
+}
+
+TerminalInterventionResult terminalize_intervention(
+    LocalGooseDialogueResponderStore& responder_store,
+    const std::string& consumer_id,
+    const LocalGooseDialogueResponderIntent& intent,
+    const LocalGooseDialogueResponderIntentState terminal_state,
+    const std::string& reason,
+    const std::int64_t terminal_at_ms)
+{
+    TerminalInterventionResult out;
+    const auto terminal_intent = responder_store.terminalize_intent(
+        intent.intent_id, terminal_state, reason);
+    out.result = terminal_intent.result;
+    out.intent = terminal_intent.intent;
+    out.detail = terminal_intent.detail;
+    if ((terminal_intent.result
+            != LocalGooseDialogueResponderStoreResult::accepted
+         && terminal_intent.result
+            != LocalGooseDialogueResponderStoreResult::duplicate)
+        || !terminal_intent.intent) {
+        return out;
+    }
+
+    auto disposition = reconcile_terminal_intervention_disposition(
+        responder_store, consumer_id, *terminal_intent.intent,
+        terminal_at_ms);
+    disposition.intent = terminal_intent.intent;
+    if (disposition.result
+            != LocalGooseDialogueResponderStoreResult::accepted
+        && disposition.result
+            != LocalGooseDialogueResponderStoreResult::duplicate) {
+        return disposition;
+    }
+    disposition.result =
+        terminal_intent.result == LocalGooseDialogueResponderStoreResult::accepted
+            || disposition.result
+                == LocalGooseDialogueResponderStoreResult::accepted
+        ? LocalGooseDialogueResponderStoreResult::accepted
+        : LocalGooseDialogueResponderStoreResult::duplicate;
+    disposition.detail = "terminal responder intent/disposition reconciled";
+    return disposition;
 }
 
 void attach_cursor(
@@ -562,11 +689,29 @@ LocalGooseDialogueResponderDispatcher::dispatch(
         out.detail = "dialogue responder intervention completion reconciled";
         return out;
     }
-    if (stored_intent->state == IntentState::conflict
-        || stored_intent->state == IntentState::expired
-        || stored_intent->state == IntentState::manual_review) {
+    if (terminal_intent_state(stored_intent->state)) {
+        const auto now = clock_();
+        if (now < 0) {
+            out.result = LocalGooseDialogueResponderDispatchCode::unavailable;
+            out.detail = "dialogue responder clock is invalid";
+            return out;
+        }
+        const auto reconciled = reconcile_terminal_intervention_disposition(
+            responder_store_, consumer_id_, *stored_intent, now);
+        if (reconciled.result
+                != LocalGooseDialogueResponderStoreResult::accepted
+            && reconciled.result
+                != LocalGooseDialogueResponderStoreResult::duplicate) {
+            out.result = map_store_result(reconciled.result);
+            out.detail = "terminal responder disposition reconciliation failed: "
+                + reconciled.detail;
+            return out;
+        }
         out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-        out.detail = "dialogue responder intent is terminal";
+        out.detail = reconciled.result
+                == LocalGooseDialogueResponderStoreResult::accepted
+            ? "terminal responder disposition reconciled"
+            : "dialogue responder intent and disposition are terminal";
         return out;
     }
 
@@ -587,6 +732,25 @@ LocalGooseDialogueResponderDispatcher::dispatch(
         out.detail = "dialogue responder clock is invalid";
         return out;
     }
+
+    const auto terminalize = [this, now, &out](
+        const LocalGooseDialogueResponderIntent& source,
+        const IntentState state,
+        const std::string& reason) {
+        const auto terminal = terminalize_intervention(
+            responder_store_, consumer_id_, source, state, reason, now);
+        if (terminal.intent) out.intent = terminal.intent;
+        if (terminal.result
+                != LocalGooseDialogueResponderStoreResult::accepted
+            && terminal.result
+                != LocalGooseDialogueResponderStoreResult::duplicate) {
+            out.result = map_store_result(terminal.result);
+            out.detail = "terminal responder intervention reconciliation failed: "
+                + terminal.detail;
+            return false;
+        }
+        return true;
+    };
 
     if (intent.state == IntentState::prepared) {
         auto lease = responder_store_.find_lease(intent.lease_id);
@@ -650,13 +814,13 @@ LocalGooseDialogueResponderDispatcher::dispatch(
                 if (observed.result
                         == LocalGooseDialoguePreferredSubmitResultCode::duplicate
                     || observed.task) {
-                    const auto terminal = responder_store_.terminalize_intent(
-                        intent.intent_id, IntentState::manual_review,
-                        "durable_submission_with_ineligible_lease");
+                    if (!terminalize(
+                            intent, IntentState::manual_review,
+                            "durable_submission_with_ineligible_lease")) {
+                        return out;
+                    }
                     out.result =
                         LocalGooseDialogueResponderDispatchCode::conflict;
-                    out.intent =
-                        terminal.intent ? terminal.intent : out.intent;
                     out.detail =
                         "durable responder submission exists but lease authority "
                         "cannot be proven current; manual review required";
@@ -669,14 +833,15 @@ LocalGooseDialogueResponderDispatcher::dispatch(
                 || (lease
                     && lease->state
                         == LocalGooseDialogueResponderLeaseState::expired);
-            const auto terminal = responder_store_.terminalize_intent(
-                intent.intent_id,
-                expired ? IntentState::expired : IntentState::conflict,
-                expired
-                    ? "lease_or_intent_expired"
-                    : "lease_not_eligible");
+            if (!terminalize(
+                    intent,
+                    expired ? IntentState::expired : IntentState::conflict,
+                    expired
+                        ? "lease_or_intent_expired"
+                        : "lease_not_eligible")) {
+                return out;
+            }
             out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-            out.intent = terminal.intent ? terminal.intent : out.intent;
             out.detail = expired
                 ? "responder intent or lease expired"
                 : "responder lease is no longer eligible";
@@ -685,11 +850,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
 
         if (!trigger_still_next
             || (!original_head && !possible_idempotent_retry)) {
-            const auto terminal = responder_store_.terminalize_intent(
-                intent.intent_id, IntentState::conflict,
-                "trigger_or_preferred_head_changed");
+            if (!terminalize(
+                    intent, IntentState::conflict,
+                    "trigger_or_preferred_head_changed")) {
+                return out;
+            }
             out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-            out.intent = terminal.intent ? terminal.intent : out.intent;
             out.detail = "responder trigger/head evidence is stale";
             return out;
         }
@@ -713,13 +879,14 @@ LocalGooseDialogueResponderDispatcher::dispatch(
                     == LocalGooseDialoguePreferredSubmitResultCode::unavailable)
                 ? IntentState::manual_review
                 : IntentState::conflict;
-            const auto terminal = responder_store_.terminalize_intent(
-                intent.intent_id, terminal_state,
-                terminal_state == IntentState::manual_review
-                    ? "preferred_submit_ambiguous"
-                    : "preferred_submit_rejected");
+            if (!terminalize(
+                    intent, terminal_state,
+                    terminal_state == IntentState::manual_review
+                        ? "preferred_submit_ambiguous"
+                        : "preferred_submit_rejected")) {
+                return out;
+            }
             out.result = map_submit_result(submit.result);
-            out.intent = terminal.intent ? terminal.intent : out.intent;
             out.detail = submit.detail;
             return out;
         }
@@ -727,11 +894,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
         if (!submit.task || !submit.head
             || submit.head->revision != intent.expected_thread_revision + 1
             || submit.head->head_task_id != submit.task->id) {
-            const auto terminal = responder_store_.terminalize_intent(
-                intent.intent_id, IntentState::manual_review,
-                "preferred_submit_result_incoherent");
+            if (!terminalize(
+                    intent, IntentState::manual_review,
+                    "preferred_submit_result_incoherent")) {
+                return out;
+            }
             out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-            out.intent = terminal.intent ? terminal.intent : out.intent;
             out.detail = "preferred responder submission result is incoherent";
             return out;
         }
@@ -742,11 +910,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
                 != LocalGooseDialogueResponderStoreResult::accepted
             && committed.result
                 != LocalGooseDialogueResponderStoreResult::duplicate) {
-            const auto terminal = responder_store_.terminalize_intent(
-                intent.intent_id, IntentState::manual_review,
-                "submission_accounting_conflict");
+            if (!terminalize(
+                    intent, IntentState::manual_review,
+                    "submission_accounting_conflict")) {
+                return out;
+            }
             out.result = map_store_result(committed.result);
-            out.intent = terminal.intent ? terminal.intent : committed.intent;
             out.detail = "responder submission accounting failed: "
                 + committed.detail;
             return out;
@@ -789,11 +958,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
         || !head
         || head->revision != *intent.submitted_thread_revision
         || head->head_task_id != intent.submitted_task_id) {
-        const auto terminal = responder_store_.terminalize_intent(
-            intent.intent_id, IntentState::manual_review,
-            "submitted_task_or_head_mismatch");
+        if (!terminalize(
+                intent, IntentState::manual_review,
+                "submitted_task_or_head_mismatch")) {
+            return out;
+        }
         out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-        out.intent = terminal.intent ? terminal.intent : out.intent;
         out.detail = "submitted responder Task/head cannot be reconciled";
         return out;
     }
@@ -808,11 +978,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
     out.consumer_last_sequence = *cursor;
 
     if (*cursor > intent.completion_sequence) {
-        const auto terminal = responder_store_.terminalize_intent(
-            intent.intent_id, IntentState::manual_review,
-            "consumer_cursor_advanced_past_trigger");
+        if (!terminalize(
+                intent, IntentState::manual_review,
+                "consumer_cursor_advanced_past_trigger")) {
+            return out;
+        }
         out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-        out.intent = terminal.intent ? terminal.intent : out.intent;
         out.detail = "responder consumer cursor advanced past trigger";
         return out;
     }
@@ -820,11 +991,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
     if (*cursor < intent.completion_sequence) {
         const auto event = completion_store_.next_for_consumer(consumer_id_);
         if (!event || !same_trigger(*event, intent)) {
-            const auto terminal = responder_store_.terminalize_intent(
-                intent.intent_id, IntentState::manual_review,
-                "trigger_not_next_before_ack");
+            if (!terminalize(
+                    intent, IntentState::manual_review,
+                    "trigger_not_next_before_ack")) {
+                return out;
+            }
             out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-            out.intent = terminal.intent ? terminal.intent : out.intent;
             out.detail = "responder trigger is no longer next before ACK";
             return out;
         }
@@ -839,11 +1011,12 @@ LocalGooseDialogueResponderDispatcher::dispatch(
             out.detail = "responder trigger ACK unavailable: " + ack.detail;
             return out;
         }
-        const auto terminal = responder_store_.terminalize_intent(
-            intent.intent_id, IntentState::manual_review,
-            "trigger_ack_conflict");
+        if (!terminalize(
+                intent, IntentState::manual_review,
+                "trigger_ack_conflict")) {
+            return out;
+        }
         out.result = LocalGooseDialogueResponderDispatchCode::conflict;
-        out.intent = terminal.intent ? terminal.intent : out.intent;
         out.consumer_last_sequence = ack.last_sequence;
         out.detail = "responder trigger ACK failed: " + ack.detail;
         return out;
