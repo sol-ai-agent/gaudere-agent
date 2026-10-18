@@ -67,7 +67,7 @@ jobs:
     container: fedora:44
     steps:
       - name: Install build dependencies
-        run: dnf install -y gcc-c++ json-devel sqlite-devel
+        run: dnf install -y gcc-c++ json-devel sqlite sqlite-devel
 
       - uses: actions/checkout@v4
 
