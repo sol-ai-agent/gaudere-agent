@@ -1,0 +1,133 @@
+name: Dialogue responder decision-authority production migration
+
+on:
+  pull_request:
+    paths:
+      - 'Containerfile.responder-schema-migrator'
+      - 'src/local_goose_dialogue_responder_schema_migrator_main.cpp'
+      - 'src/LocalGooseDialogueResponderAuthorityStore.cpp'
+      - 'src/LocalGooseDialogueResponderAuthorityStore.hpp'
+      - 'src/LocalGooseDialogueResponderAuthority.cpp'
+      - 'src/LocalGooseDialogueResponderAuthority.hpp'
+      - 'src/LocalGooseDialogueResponderStore.cpp'
+      - 'src/LocalGooseDialogueResponderStore.hpp'
+      - 'scripts/migrate-local-goose-dialogue-responder-decision-authority-production.sh'
+      - '.github/workflows/dialogue-responder-decision-authority-production-migration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authority-migration-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove schema migration is explicit and effect-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          migrator=src/local_goose_dialogue_responder_schema_migrator_main.cpp
+          containerfile=Containerfile.responder-schema-migrator
+          script=scripts/migrate-local-goose-dialogue-responder-decision-authority-production.sh
+
+          grep -Fq 'migrate --responder-sidecar PATH --authorize-v1-to-v2' "$migrator"
+          grep -Fq 'migrate --responder-sidecar PATH --authorize-v2-to-v3' "$migrator"
+          grep -Fq 'LocalGooseDialogueResponderAuthorityStoreOpenMode::' "$migrator"
+          grep -Fq 'allow_schema_upgrade' "$migrator"
+          grep -Fq 'RESPONDER_AUTHORITY_GRANTS=' "$migrator"
+          grep -Fq 'RESPONDER_AUTHORITY_DECISIONS=' "$migrator"
+          grep -Fq 'src/LocalGooseDialogueResponderAuthorityStore.cpp' "$containerfile"
+          grep -Fq 'src/LocalGooseDialogueResponderAuthority.cpp' "$containerfile"
+          grep -Fq 'dialogue-responder-schema-migrator-v1-to-v3' "$containerfile"
+
+          grep -Fq 'AUTHORIZED_DIALOGUE_RESPONDER_AUTHORITY_SCHEMA3_MIGRATION' "$script"
+          grep -Fq '=== REHEARSE V2 -> V3 MIGRATION ON COPY ===' "$script"
+          grep -Fq '=== STOP / BACKUP PRODUCTION BEFORE SCHEMA MIGRATION ===' "$script"
+          grep -Fq '=== MIGRATE ONLY RESPONDER SIDECAR V2 -> V3 ===' "$script"
+          grep -Fq '=== RESTART SAME DORMANT-AUTHORITY IMAGE ===' "$script"
+          grep -Fq 'FEDORA_GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_SCHEMA3_MIGRATION=PASS' "$script"
+          grep -Fq 'PRODUCTION_NEXT_PENDING_SEQUENCE=4' "$script"
+          grep -Fq 'AUTHORITY_MODE=disabled-unwired' "$script"
+          grep -Fq 'src.backup(dst)' "$script"
+          grep -Fq 'backup-state.sh' "$script"
+          grep -Fq 'failed-state' "$script"
+          grep -Fq -- '--network none' "$script"
+          grep -Fq -- '--authorize-v2-to-v3' "$script"
+
+          ! grep -Eq -- 'target_quadlet|candidate_quadlet|^Image=|daemon-reload' "$script"
+          ! grep -Eq -- 'prepare_grant|activate_grant|prepare_decision|bind_decision|dialogue-responder-(lease|prepare|dispatch)|authorize-structural-retirement' "$script"
+          ! grep -Eq -- 'observer_binary.*step|[[:space:]]step[[:space:]]+--expected-sequence' "$script"
+          ! grep -Eq -- '--openai-model|--autonomous-pulse-provider|--wake-intents' "$script"
+          sh -n "$script"
+
+  fedora-44-migrator-build-and-test:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y gcc-c++ json-devel sqlite sqlite-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build and exercise migration-only CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Isrc \
+            src/local_goose_dialogue_responder_schema_migrator_main.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/Sha256.cpp \
+            -o /tmp/responder-schema-migrator \
+            -lsqlite3
+
+          help_output=$(/tmp/responder-schema-migrator --help)
+          printf '%s\n' "$help_output"
+          printf '%s\n' "$help_output" | grep -Fq 'migrate --responder-sidecar PATH --authorize-v1-to-v2'
+          printf '%s\n' "$help_output" | grep -Fq 'migrate --responder-sidecar PATH --authorize-v2-to-v3'
+
+          cat >/tmp/create-v2.cpp <<'CPP'
+          #include "LocalGooseDialogueResponderStore.hpp"
+          #include <string>
+          int main(int argc, char** argv)
+          {
+              if (argc != 2) return 2;
+              gaudere_agent::LocalGooseDialogueResponderStore store{std::string{argv[1]}};
+              (void)store;
+              return 0;
+          }
+          CPP
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Isrc /tmp/create-v2.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/Sha256.cpp \
+            -o /tmp/create-v2 -lsqlite3
+
+          fixture=/tmp/responder-v2.db
+          rm -f "$fixture"
+          /tmp/create-v2 "$fixture"
+          test "$(sqlite3 -readonly "$fixture" 'PRAGMA user_version;')" = 2
+          output=$(/tmp/responder-schema-migrator migrate \
+            --responder-sidecar "$fixture" --authorize-v2-to-v3)
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -Fq 'RESPONDER_SCHEMA_BEFORE=2'
+          printf '%s\n' "$output" | grep -Fq 'RESPONDER_SCHEMA_AFTER=3'
+          printf '%s\n' "$output" | grep -Fq 'RESPONDER_SCHEMA_MIGRATION=v2-to-v3'
+          printf '%s\n' "$output" | grep -Fq 'RESPONDER_AUTHORITY_GRANTS=0'
+          printf '%s\n' "$output" | grep -Fq 'RESPONDER_AUTHORITY_DECISIONS=0'
+          test "$(sqlite3 -readonly "$fixture" 'PRAGMA user_version;')" = 3
+          test "$(sqlite3 -readonly "$fixture" 'SELECT COUNT(*) FROM local_goose_dialogue_responder_grant;')" = 0
+          test "$(sqlite3 -readonly "$fixture" 'SELECT COUNT(*) FROM local_goose_dialogue_responder_decision;')" = 0
+
+          if /tmp/responder-schema-migrator migrate \
+            --responder-sidecar "$fixture" --authorize-v2-to-v3; then
+            echo 'unexpected repeated migration success' >&2
+            false
+          fi
+          sh -n scripts/migrate-local-goose-dialogue-responder-decision-authority-production.sh
