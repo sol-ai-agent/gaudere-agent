@@ -86,18 +86,6 @@ void bind_int64(sqlite3* database,
     }
 }
 
-void bind_uint64(sqlite3* database,
-                 sqlite3_stmt* statement,
-                 const int index,
-                 const std::uint64_t value)
-{
-    if (value > static_cast<std::uint64_t>(
-            std::numeric_limits<std::int64_t>::max())) {
-        throw std::runtime_error("responder authority value exceeds SQLite range");
-    }
-    bind_int64(database, statement, index, static_cast<std::int64_t>(value));
-}
-
 std::string text(sqlite3_stmt* statement, const int column)
 {
     const auto* value = sqlite3_column_text(statement, column);
