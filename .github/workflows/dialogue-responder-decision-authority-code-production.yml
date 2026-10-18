@@ -1,0 +1,150 @@
+name: Dialogue responder decision-authority code production
+
+on:
+  pull_request:
+    paths:
+      - 'Containerfile'
+      - 'src/local_goose_dialogue_responder_authority_capability_main.cpp'
+      - 'src/LocalGooseDialogueResponderAuthority.cpp'
+      - 'src/LocalGooseDialogueResponderAuthority.hpp'
+      - 'src/LocalGooseDialogueResponderAuthorityStore.cpp'
+      - 'src/LocalGooseDialogueResponderAuthorityStore.hpp'
+      - 'src/LocalGooseDialogueResponderAuthorityService.cpp'
+      - 'src/LocalGooseDialogueResponderAuthorityService.hpp'
+      - 'src/main.cpp'
+      - 'src/control_main.cpp'
+      - 'src/LiveControl.cpp'
+      - 'src/LiveControl.hpp'
+      - 'src/LiveControlProcessor.cpp'
+      - 'src/LiveControlProcessor.hpp'
+      - 'src/LocalGooseDialogueResponderObserver.cpp'
+      - 'src/LocalGooseDialogueResponderObserver.hpp'
+      - 'src/local_goose_dialogue_responder_observer_main.cpp'
+      - 'scripts/deploy-local-goose-dialogue-responder-decision-authority-code-production.sh'
+      - '.github/workflows/dialogue-responder-decision-authority-code-production.yml'
+      - 'gaudere.ref'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authority-code-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove capability stays dormant and unwired
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe=src/local_goose_dialogue_responder_authority_capability_main.cpp
+          deploy=scripts/deploy-local-goose-dialogue-responder-decision-authority-code-production.sh
+
+          grep -Fq 'authority_enabled = false' src/LocalGooseDialogueResponderAuthorityService.hpp
+          grep -Fq 'MUTATION_SURFACE=absent' "$probe"
+          grep -Fq 'STATE_ACCESS=absent' "$probe"
+          grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_CAPABILITY=PASS' "$probe"
+          ! grep -Eq -- '--state|--sidecar|sqlite3|AuthorityStore\(' "$probe"
+
+          for runtime in \
+            src/main.cpp \
+            src/control_main.cpp \
+            src/LiveControl.cpp \
+            src/LiveControl.hpp \
+            src/LiveControlProcessor.cpp \
+            src/LiveControlProcessor.hpp \
+            src/LocalGooseDialogueResponderObserver.cpp \
+            src/LocalGooseDialogueResponderObserver.hpp \
+            src/local_goose_dialogue_responder_observer_main.cpp; do
+            ! grep -Fq 'LocalGooseDialogueResponderAuthority' "$runtime"
+          done
+          ! grep -Eq -- 'decision-authority|responder-authority|authority-grant|authority-decision' src/main.cpp
+          ! grep -Eq -- 'dialogue-responder-(authority|grant|decision)' src/control_main.cpp src/LiveControl.cpp src/LiveControl.hpp src/LiveControlProcessor.cpp src/LiveControlProcessor.hpp
+
+          grep -Fq 'src/LocalGooseDialogueResponderAuthorityService.cpp' Containerfile
+          grep -Fq 'src/LocalGooseDialogueResponderAuthorityStore.cpp' Containerfile
+          grep -Fq 'src/LocalGooseDialogueResponderAuthority.cpp' Containerfile
+          grep -Fq 'gaudere-local-goose-dialogue-responder-authority-capability' Containerfile
+          grep -Fq 'MUTATION_SURFACE=absent' "$deploy"
+          grep -Fq 'PRODUCTION_RESPONDER_SCHEMA=%s' "$deploy"
+          grep -Fq 'PRODUCTION_NEXT_PENDING_SEQUENCE=4' "$deploy"
+          grep -Fq 'AUTHORITY_MODE=disabled-unwired' "$deploy"
+          grep -Fq 'FEDORA_GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_CODE_PRODUCTION=PASS' "$deploy"
+          grep -Fq 'authorization token is required' "$deploy"
+          grep -Fq 'production sequence 4 already has responder disposition' "$deploy"
+          grep -Fq 'authority code deploy attempted a mutation beyond Image=' "$deploy"
+          ! grep -Eq -- 'allow_schema_upgrade|PRAGMA user_version[[:space:]]*=|CREATE TABLE|INSERT INTO local_goose_dialogue_responder_(grant|decision)' "$deploy"
+          ! grep -Eq -- '--openai-model|--autonomous-pulse-provider|--wake-intents' "$probe"
+          sh -n "$deploy"
+
+  fedora-44-build-and-test:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y \
+            autoconf automake diffutils gcc-c++ git json-devel libcurl-devel \
+            libtool make pkgconf-pkg-config sqlite-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build pinned Gaudere core
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/opt/gaudere CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+
+      - name: Build agent and passive authority capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          autoreconf --install --force
+          mkdir build
+          cd build
+          PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+          LD_LIBRARY_PATH=/opt/gaudere/lib \
+            ../configure --prefix=/opt/gaudere-agent \
+              CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+          LD_LIBRARY_PATH=/opt/gaudere/lib \
+            make --jobs=2 check
+          cd ..
+          export PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig
+          export LD_LIBRARY_PATH=/opt/gaudere/lib
+          cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+          libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -Isrc \
+            src/local_goose_dialogue_responder_authority_capability_main.cpp \
+            src/LocalGooseDialogueResponderAuthorityService.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderDispatcher.cpp \
+            src/LocalGooseDialoguePreferredSubmitter.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/responder-authority-capability \
+            $libs -lsqlite3
+          output=$(/tmp/responder-authority-capability --check)
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -Fq 'AUTHORITY_DEFAULT=disabled'
+          printf '%s\n' "$output" | grep -Fq 'STATE_ACCESS=absent'
+          printf '%s\n' "$output" | grep -Fq 'MUTATION_SURFACE=absent'
+          printf '%s\n' "$output" | grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_CAPABILITY=PASS'
+          sh -n scripts/deploy-local-goose-dialogue-responder-decision-authority-code-production.sh

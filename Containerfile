@@ -80,6 +80,35 @@ RUN cd /src/gaudere-agent \
        -o /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-observer \
        ${libs} -lsqlite3
 
+# Decision-authority v1 is shipped only as a dormant compile/link capability.
+# The probe has no state path, sidecar path or mutation argument and constructs
+# no authority service. main/LiveControl remain unwired, so merely deploying
+# this image cannot create a grant, lease, decision, intent, Task or ACK.
+RUN cd /src/gaudere-agent \
+    && export PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+    && export LD_LIBRARY_PATH=/opt/gaudere/lib \
+    && cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)" \
+    && libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)" \
+    && g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+       ${cflags} -Isrc \
+       src/local_goose_dialogue_responder_authority_capability_main.cpp \
+       src/LocalGooseDialogueResponderAuthorityService.cpp \
+       src/LocalGooseDialogueResponderAuthorityStore.cpp \
+       src/LocalGooseDialogueResponderAuthority.cpp \
+       src/LocalGooseDialogueResponderDispatcher.cpp \
+       src/LocalGooseDialoguePreferredSubmitter.cpp \
+       src/LocalGooseDialogueResponderStore.cpp \
+       src/LocalGooseDialogueResponder.cpp \
+       src/LocalGooseDialogueCompletionFeed.cpp \
+       src/LocalGooseDialogueThreadStore.cpp \
+       src/LocalGooseDialogueV2.cpp \
+       src/LocalGooseDialogueV3.cpp \
+       src/Sha256.cpp \
+       -o /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-authority-capability \
+       ${libs} -lsqlite3 \
+    && /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-authority-capability --check \
+       | grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_CAPABILITY=PASS'
+
 RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp -a /opt/gaudere/lib/libgaudere.so* /opt/runtime/lib/ \
     && cp -a /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /opt/runtime/lib/ \
@@ -103,6 +132,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-v3-proof /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-proof /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-observer /opt/runtime/bin/ \
+    && cp /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-authority-capability /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-seed /opt/runtime/bin/ \
     && cp /opt/gaudere-agent/bin/gaudere-local-goose-cycle-activate /opt/runtime/bin/ \
     && test -x /opt/runtime/bin/gaudere-chat \
@@ -123,6 +153,7 @@ RUN mkdir -p /opt/runtime/bin /opt/runtime/lib \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-v3-proof \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-responder-proof \
     && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-responder-observer \
+    && test -x /opt/runtime/bin/gaudere-local-goose-dialogue-responder-authority-capability \
     && test -x /opt/runtime/bin/gaudere-local-goose-cycle-seed \
     && test -x /opt/runtime/bin/gaudere-local-goose-cycle-activate
 
@@ -182,9 +213,13 @@ RUN test -x /usr/local/bin/gaudere-chat \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-v3-proof \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-proof \
     && test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-observer \
+    && test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-authority-capability \
     && test -x /usr/local/bin/gaudere-local-goose-cycle-seed \
     && test -x /usr/local/bin/gaudere-local-goose-cycle-activate \
     && test -x /usr/local/bin/goose \
+    && LD_LIBRARY_PATH=/usr/local/lib \
+       /usr/local/bin/gaudere-local-goose-dialogue-responder-authority-capability --check \
+       | grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_CAPABILITY=PASS' \
     && /usr/local/bin/goose --version \
     && echo /usr/local/lib > /etc/ld.so.conf.d/gaudere.conf \
     && ldconfig
