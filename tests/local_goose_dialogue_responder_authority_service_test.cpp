@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -195,7 +196,8 @@ int main()
     assert(authority_store.grants_in_state(
         LocalGooseDialogueResponderGrantState::prepared).empty());
     assert(!responder_store.find_active_lease("main"));
-    assert(!completion_store.consumer_last_sequence("system-responder-v1"));
+    assert(completion_store.consumer_last_sequence("system-responder-v1")
+        == std::optional<std::uint64_t>{0});
 
     LocalGooseDialogueResponderAuthorityServiceConfig enabled_config;
     enabled_config.authority_enabled = true;
@@ -219,7 +221,8 @@ int main()
         && status_prepared.prepared_grant->grant_id == grant.grant_id);
     assert(!status_prepared.active_lease);
     assert(!status_prepared.event_decision);
-    assert(!completion_store.consumer_last_sequence("system-responder-v1"));
+    assert(completion_store.consumer_last_sequence("system-responder-v1")
+        == std::optional<std::uint64_t>{0});
 
     // Reconstructing the service does not activate a prepared grant.
     LocalGooseDialogueResponderAuthorityService restarted_before_activation(
@@ -273,7 +276,8 @@ int main()
         + std::string(64, '0')));
     assert(!responder_store.find_disposition_for_event(
         "system-responder-v1", event.event_id));
-    assert(!completion_store.consumer_last_sequence("system-responder-v1"));
+    assert(completion_store.consumer_last_sequence("system-responder-v1")
+        == std::optional<std::uint64_t>{0});
     assert(thread_store.find("main")->revision == 1);
 
     now = 5250;
@@ -301,7 +305,8 @@ int main()
     assert(disposition->intent_id == bound.decision->intent_id);
 
     // Binding is not dispatch: no trigger ACK, no head movement and no lease turn.
-    assert(!completion_store.consumer_last_sequence("system-responder-v1"));
+    assert(completion_store.consumer_last_sequence("system-responder-v1")
+        == std::optional<std::uint64_t>{0});
     assert(thread_store.find("main")->revision == 1);
     assert(responder_store.find_lease(lease.lease_id)->turns_committed == 0);
 
@@ -311,7 +316,8 @@ int main()
         == LocalGooseDialogueResponderAuthorityServiceCode::duplicate);
     assert(bind_retry.intent
         && bind_retry.intent->intent_id == bound.intent->intent_id);
-    assert(!completion_store.consumer_last_sequence("system-responder-v1"));
+    assert(completion_store.consumer_last_sequence("system-responder-v1")
+        == std::optional<std::uint64_t>{0});
 
     // Restart never auto-dispatches an intent-bound decision.
     LocalGooseDialogueResponderAuthorityService restarted_after_bind(
@@ -321,13 +327,15 @@ int main()
     assert(bound_status.event_decision
         && bound_status.event_decision->state
             == LocalGooseDialogueResponderDecisionState::intent_bound);
-    assert(!completion_store.consumer_last_sequence("system-responder-v1"));
+    assert(completion_store.consumer_last_sequence("system-responder-v1")
+        == std::optional<std::uint64_t>{0});
     assert(thread_store.find("main")->revision == 1);
     assert(responder_store.find_lease(lease.lease_id)->turns_committed == 0);
 
     assert(disabled.bind_decision(decision.decision_id).result
         == LocalGooseDialogueResponderAuthorityServiceCode::disabled);
-    assert(!completion_store.consumer_last_sequence("system-responder-v1"));
+    assert(completion_store.consumer_last_sequence("system-responder-v1")
+        == std::optional<std::uint64_t>{0});
 
     std::cout << "local_goose_dialogue_responder_authority_service_test: PASS\n";
     return 0;
