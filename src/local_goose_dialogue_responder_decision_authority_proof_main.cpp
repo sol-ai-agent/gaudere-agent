@@ -11,7 +11,9 @@
 #include <gaudere/persistence/sqlite/TaskStore.hpp>
 #include <gaudere/work/Runtime.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -339,7 +341,7 @@ int main(int argc, char* argv[])
                 "activated finite lease differs");
         require_cursor(completion_store, 3);
 
-        auto request1 = exact_request(
+        const auto request1 = exact_request(
             "decision-authority-proof-decision-1",
             "Première intervention explicitement décidée.",
             grant, lease, event4, *head0);
@@ -378,9 +380,9 @@ int main(int argc, char* argv[])
         LocalGooseDialogueResponderAuthorityService restarted_before_bind(
             completion_store, thread_store, responder_store, authority_store,
             dispatcher, config, [&now] { return now; });
-        require(restarted_before_bind.inspect(thread_alias).event_decision
-                    && restarted_before_bind.inspect(thread_alias)
-                           .event_decision->state
+        const auto before_bind_status = restarted_before_bind.inspect(thread_alias);
+        require(before_bind_status.event_decision
+                    && before_bind_status.event_decision->state
                         == LocalGooseDialogueResponderDecisionState::prepared,
                 "service reconstruction mutated prepared decision");
         require_cursor(completion_store, 3);
@@ -449,12 +451,14 @@ int main(int argc, char* argv[])
         const auto head5 = thread_store.find(thread_alias);
         require(head5 && head5->head_task_id == event5.task_id,
                 "system completion is not current preferred head");
+        const auto lease_after_first = responder_store.find_lease(lease.lease_id);
+        require(lease_after_first.has_value(),
+                "finite authority lease missing after first intervention");
 
         const auto system_decision = authority.prepare_decision(exact_request(
             "decision-authority-proof-system-decision",
             "Une complétion système ne doit jamais se décider elle-même.",
-            grant, *responder_store.find_lease(lease.lease_id),
-            event5, *head5));
+            grant, *lease_after_first, event5, *head5));
         require(system_decision.result
                     == LocalGooseDialogueResponderAuthorityServiceCode::conflict
                     && !system_decision.decision,
@@ -495,15 +499,15 @@ int main(int argc, char* argv[])
                 "previous intervention synthesized the next human decision");
 
         now += 200;
-        const auto lease_after_first = responder_store.find_lease(lease.lease_id);
+        const auto lease_before_second = responder_store.find_lease(lease.lease_id);
         const auto head6 = thread_store.find(thread_alias);
-        require(lease_after_first && head6
+        require(lease_before_second && head6
                     && head6->head_task_id == event6.task_id,
                 "second human exact evidence is unavailable");
         const auto decision2_write = authority.prepare_decision(exact_request(
             "decision-authority-proof-decision-2",
             "Seconde intervention avec décision fraîche distincte.",
-            grant, *lease_after_first, event6, *head6));
+            grant, *lease_before_second, event6, *head6));
         require(decision2_write.result
                     == LocalGooseDialogueResponderAuthorityServiceCode::accepted
                     && decision2_write.decision,
@@ -540,6 +544,8 @@ int main(int argc, char* argv[])
         reconcile_feed(feed_service, 1);
         const auto event7 = next_event(
             completion_store, consumer_id, 7, "system");
+        require(event7.task_id == dispatched2.task->id,
+                "second system completion event task differs");
         const auto skip7 = observer.step();
         require(skip7.action
                     == LocalGooseDialogueResponderObserverAction::acknowledged,
