@@ -812,6 +812,16 @@ LocalGooseDialogueResponderStore::LocalGooseDialogueResponderStore(
                      "local_goose_dialogue_responder_disposition"})) {
                 throw std::runtime_error("dialogue responder v2 table set differs");
             }
+        } else if (schema == 3) {
+            if (!exact_table_set(
+                    database_,
+                    {"local_goose_dialogue_responder_lease",
+                     "local_goose_dialogue_responder_intent",
+                     "local_goose_dialogue_responder_disposition",
+                     "local_goose_dialogue_responder_grant",
+                     "local_goose_dialogue_responder_decision"})) {
+                throw std::runtime_error("dialogue responder v3 table set differs");
+            }
         }
         execute(database_, "COMMIT;");
     } catch (...) {
