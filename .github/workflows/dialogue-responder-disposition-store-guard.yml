@@ -39,7 +39,8 @@ jobs:
           runtime_main=src/main.cpp
           test_cpp=tests/local_goose_dialogue_responder_store_test.cpp
 
-          grep -Fq 'local_goose_dialogue_responder_sidecar_schema = 2' "$header"
+          grep -Fq 'local_goose_dialogue_responder_owned_sidecar_schema = 2' "$header"
+          grep -Fq 'local_goose_dialogue_responder_sidecar_schema = 3' "$header"
           grep -Fq 'responder-disposition.v1:' "$header"
           grep -Fq 'struct LocalGooseDialogueResponderDisposition' "$header"
           grep -Fq 'LocalGooseDialogueResponderDispositionKind' "$header"
@@ -47,9 +48,14 @@ jobs:
 
           grep -Fq 'CREATE TABLE local_goose_dialogue_responder_disposition' "$store_cpp"
           grep -Fq 'PRAGMA user_version=2;' "$store_cpp"
+          ! grep -Fq 'PRAGMA user_version=3;' "$store_cpp"
           grep -Fq 'schema == 1' "$store_cpp"
+          grep -Fq 'schema == 3' "$store_cpp"
           grep -Fq 'dialogue responder v1 table set differs' "$store_cpp"
           grep -Fq 'dialogue responder v2 table set differs' "$store_cpp"
+          grep -Fq 'dialogue responder v3 table set differs' "$store_cpp"
+          ! grep -Fq 'CREATE TABLE local_goose_dialogue_responder_grant' "$store_cpp"
+          ! grep -Fq 'CREATE TABLE local_goose_dialogue_responder_decision' "$store_cpp"
           grep -Fq 'UNIQUE(consumer_id,completion_sequence)' "$store_cpp"
           grep -Fq 'UNIQUE(consumer_id,event_id)' "$store_cpp"
           grep -Fq 'LocalGooseDialogueResponderStoreOpenMode' "$store_h"
@@ -62,8 +68,9 @@ jobs:
           grep -Fq 'acknowledge_disposition' "$store_h"
           grep -Fq 'This method itself has no feed ACK' "$store_h"
 
-          # Code presence and ordinary service startup must preserve an existing
-          # v1 responder sidecar. Production runtime is not an upgrade gate.
+          # Code presence and ordinary service startup must not become a schema
+          # migration gate. Only the separately authorized AuthorityStore owns
+          # the v2 -> v3 extension.
           ! grep -Fq 'allow_schema_upgrade' "$runtime_main"
 
           # The ledger may record external reconciliation, but it must not own
