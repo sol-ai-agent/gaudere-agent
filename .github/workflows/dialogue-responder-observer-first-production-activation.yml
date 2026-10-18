@@ -69,13 +69,14 @@ jobs:
           PY
 
           grep -Fq 'allow_schema_upgrade' "$migrator"
-          grep -Fq 'before != 1' "$migrator"
-          grep -Fq 'after != 2' "$migrator"
-          grep -Fq 'explicit v1-to-v2 schema authorization is required' "$migrator"
+          grep -Fq 'Migration::v1_to_v2' "$migrator"
+          grep -Fq 'schema v1 before v1-to-v2 migration' "$migrator"
+          grep -Fq 'did not reach exactly schema v2' "$migrator"
+          grep -Fq 'migrate --responder-sidecar PATH --authorize-v1-to-v2' "$migrator"
           ! grep -Eq 'create_lease|prepare_intent|commit_submission|complete_intent|acknowledge\(' "$migrator"
           ! grep -Eq 'TaskStore|Runtime|Provider|OpenAI|LocalGooseCycle|Stimulus|Wake|Curl|Http|system\(|popen\(' "$migrator"
 
-          grep -Fq 'io.gaudere.role="dialogue-responder-schema-migrator-v1-to-v2"' "$container"
+          grep -Fq 'io.gaudere.role="dialogue-responder-schema-migrator-v1-to-v3"' "$container"
           grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-local-goose-dialogue-responder-schema-migrator"]' "$container"
 
   fedora-44-migrator:
@@ -93,6 +94,8 @@ jobs:
           g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
             -Isrc \
             src/local_goose_dialogue_responder_schema_migrator_main.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
             src/LocalGooseDialogueResponderStore.cpp \
             src/LocalGooseDialogueResponder.cpp \
             src/Sha256.cpp \
