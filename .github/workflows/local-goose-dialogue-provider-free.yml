@@ -245,8 +245,16 @@ jobs:
           grep -q '^[[:space:]]*local_goose_dialogue_responder_dispatcher_test \\' agent/tests/Makefile.am
           grep -q 'LocalGooseDialogueResponderStore.cpp' agent/tests/Makefile.am
           grep -q 'LocalGooseDialogueResponderDispatcher.cpp' agent/tests/Makefile.am
-          grep -q 'local_goose_dialogue_responder_sidecar_schema = 2' \
+          grep -q 'local_goose_dialogue_responder_owned_sidecar_schema = 2' \
             agent/src/LocalGooseDialogueResponder.hpp
+          grep -q 'local_goose_dialogue_responder_sidecar_schema = 3' \
+            agent/src/LocalGooseDialogueResponder.hpp
+          grep -q 'PRAGMA user_version=2;' \
+            agent/src/LocalGooseDialogueResponderStore.cpp
+          ! grep -q 'PRAGMA user_version=3;' \
+            agent/src/LocalGooseDialogueResponderStore.cpp
+          ! grep -Eq 'CREATE TABLE local_goose_dialogue_responder_(grant|decision)' \
+            agent/src/LocalGooseDialogueResponderStore.cpp
           grep -q 'local_goose_dialogue_responder_disposition' \
             agent/src/LocalGooseDialogueResponderStore.cpp
           grep -q 'UNIQUE(consumer_id,completion_sequence)' \
