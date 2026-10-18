@@ -7,7 +7,11 @@
 
 namespace gaudere_agent {
 
-inline constexpr int local_goose_dialogue_responder_sidecar_schema = 2;
+// The base responder store owns and creates schema v2. Schema v3 is an
+// authority-store extension layered on the same sidecar; base responder
+// operations may reopen it but never create or migrate the authority tables.
+inline constexpr int local_goose_dialogue_responder_owned_sidecar_schema = 2;
+inline constexpr int local_goose_dialogue_responder_sidecar_schema = 3;
 inline constexpr std::uint32_t local_goose_dialogue_responder_message_dialogue = 1u << 0;
 inline constexpr std::uint32_t local_goose_dialogue_responder_message_feedback = 1u << 1;
 inline constexpr std::uint32_t local_goose_dialogue_responder_message_intervention = 1u << 2;
