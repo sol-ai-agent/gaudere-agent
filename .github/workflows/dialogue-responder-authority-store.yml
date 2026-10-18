@@ -1,0 +1,91 @@
+name: Dialogue responder authority store v3 gate
+
+on:
+  pull_request:
+    paths:
+      - src/LocalGooseDialogueResponderAuthority.hpp
+      - src/LocalGooseDialogueResponderAuthority.cpp
+      - src/LocalGooseDialogueResponderAuthorityStore.hpp
+      - src/LocalGooseDialogueResponderAuthorityStore.cpp
+      - tests/local_goose_dialogue_responder_authority_store_test.cpp
+      - .github/workflows/dialogue-responder-authority-store.yml
+  push:
+    branches: [main]
+    paths:
+      - src/LocalGooseDialogueResponderAuthority.hpp
+      - src/LocalGooseDialogueResponderAuthority.cpp
+      - src/LocalGooseDialogueResponderAuthorityStore.hpp
+      - src/LocalGooseDialogueResponderAuthorityStore.cpp
+      - tests/local_goose_dialogue_responder_authority_store_test.cpp
+      - .github/workflows/dialogue-responder-authority-store.yml
+
+permissions:
+  contents: read
+
+jobs:
+  authority-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove store-only authority boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          store=src/LocalGooseDialogueResponderAuthorityStore.cpp
+          contract=src/LocalGooseDialogueResponderAuthority.hpp
+          test_cpp=tests/local_goose_dialogue_responder_authority_store_test.cpp
+
+          grep -Fq 'local_goose_dialogue_responder_authority_sidecar_schema = 3' "$contract"
+          grep -Fq 'allow_schema_upgrade' "$store"
+          grep -Fq 'PRAGMA user_version=3;' "$store"
+          grep -Fq 'schema == 2' "$store"
+          grep -Fq 'local_goose_dialogue_responder_grant' "$store"
+          grep -Fq 'local_goose_dialogue_responder_decision' "$store"
+          grep -Fq 'grant request id conflicts' "$store"
+          grep -Fq 'decision request id conflicts' "$store"
+          grep -Fq 'responder consumer event already has a decision' "$store"
+
+          # This tranche is deliberately not wired into runtime/production.
+          ! grep -Fq 'LocalGooseDialogueResponderAuthorityStore' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderAuthorityStore' Containerfile
+          ! grep -Fq 'LocalGooseDialogueResponderAuthorityStore' src/Makefile.am
+          grep -Fq 'inline constexpr int local_goose_dialogue_responder_sidecar_schema = 2;' \
+            src/LocalGooseDialogueResponder.hpp
+
+          # Store operations have no Task/feed/provider/observer authority.
+          ! grep -Eq 'CompletionFeed|PreferredSubmit|Runtime|provider|OpenAI|stimulus|wake|systemctl|podman' "$store"
+          ! grep -Eq 'acknowledge\(|dispatch\(|submit\(' "$store"
+
+          # Adversarial coverage must prove preserve-by-default and explicit migration.
+          grep -Fq 'preserved.schema_version() == 2' "$test_cpp"
+          grep -Fq 'table_count(path) == 3' "$test_cpp"
+          grep -Fq 'authority.schema_version() == 3' "$test_cpp"
+          grep -Fq 'table_count(path) == 5' "$test_cpp"
+          grep -Fq 'grant_replay.grant_id == grant.grant_id' "$test_cpp"
+          grep -Fq 'decision_replay.decision_id == decision.decision_id' "$test_cpp"
+          grep -Fq 'rejected_future' "$test_cpp"
+
+  fedora-44-werror:
+    needs: authority-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y gcc-c++ json-devel sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Compile authority store contract with Werror
+        run: |
+          set -eu
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Isrc \
+            tests/local_goose_dialogue_responder_authority_store_test.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/Sha256.cpp \
+            -lsqlite3 \
+            -o responder-authority-store-test
+      - name: Run migration and adversarial store tests
+        run: ./responder-authority-store-test
