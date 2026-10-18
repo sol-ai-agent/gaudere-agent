@@ -8,6 +8,8 @@ RUN dnf install -y \
 
 WORKDIR /src
 COPY src/local_goose_dialogue_responder_schema_migrator_main.cpp src/
+COPY src/LocalGooseDialogueResponderAuthorityStore.cpp src/LocalGooseDialogueResponderAuthorityStore.hpp src/
+COPY src/LocalGooseDialogueResponderAuthority.cpp src/LocalGooseDialogueResponderAuthority.hpp src/
 COPY src/LocalGooseDialogueResponderStore.cpp src/LocalGooseDialogueResponderStore.hpp src/
 COPY src/LocalGooseDialogueResponder.cpp src/LocalGooseDialogueResponder.hpp src/
 COPY src/Sha256.cpp src/Sha256.hpp src/
@@ -15,6 +17,8 @@ COPY src/Sha256.cpp src/Sha256.hpp src/
 RUN g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
         -Isrc \
         src/local_goose_dialogue_responder_schema_migrator_main.cpp \
+        src/LocalGooseDialogueResponderAuthorityStore.cpp \
+        src/LocalGooseDialogueResponderAuthority.cpp \
         src/LocalGooseDialogueResponderStore.cpp \
         src/LocalGooseDialogueResponder.cpp \
         src/Sha256.cpp \
@@ -26,7 +30,7 @@ ARG GAUDERE_AGENT_REF
 LABEL org.opencontainers.image.source="https://github.com/sol-ai-agent/gaudere-agent" \
       org.opencontainers.image.revision="${GAUDERE_AGENT_REF}" \
       io.gaudere.agent.revision="${GAUDERE_AGENT_REF}" \
-      io.gaudere.role="dialogue-responder-schema-migrator-v1-to-v2"
+      io.gaudere.role="dialogue-responder-schema-migrator-v1-to-v3"
 
 RUN dnf install -y libstdc++ sqlite-libs \
     && dnf clean all \
