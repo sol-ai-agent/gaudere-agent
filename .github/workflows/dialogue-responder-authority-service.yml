@@ -1,0 +1,140 @@
+name: Dialogue responder authority typed service gate
+
+on:
+  pull_request:
+    paths:
+      - src/LocalGooseDialogueResponderAuthorityService.hpp
+      - src/LocalGooseDialogueResponderAuthorityService.cpp
+      - tests/local_goose_dialogue_responder_authority_service_test.cpp
+      - .github/workflows/dialogue-responder-authority-service.yml
+  push:
+    branches: [main]
+    paths:
+      - src/LocalGooseDialogueResponderAuthorityService.hpp
+      - src/LocalGooseDialogueResponderAuthorityService.cpp
+      - tests/local_goose_dialogue_responder_authority_service_test.cpp
+      - .github/workflows/dialogue-responder-authority-service.yml
+
+permissions:
+  contents: read
+
+jobs:
+  authority-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove explicit disabled-by-default authority boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          header=src/LocalGooseDialogueResponderAuthorityService.hpp
+          source=src/LocalGooseDialogueResponderAuthorityService.cpp
+          test_cpp=tests/local_goose_dialogue_responder_authority_service_test.cpp
+
+          grep -Fq 'bool authority_enabled = false;' "$header"
+          grep -Fq 'local-typed-operator-v1' "$header"
+          grep -Fq 'system-responder-v1' "$header"
+          grep -Fq 'prepare_grant' "$header"
+          grep -Fq 'activate_grant' "$header"
+          grep -Fq 'prepare_decision' "$header"
+          grep -Fq 'bind_decision' "$header"
+          ! grep -Fq 'dispatch(' "$header"
+
+          grep -Fq 'deterministic_lease_id' "$source"
+          grep -Fq 'responder_store_.create_lease' "$source"
+          grep -Fq 'dispatcher_.prepare' "$source"
+          ! grep -Fq 'dispatcher_.dispatch' "$source"
+          ! grep -Fq 'completion_store_.acknowledge' "$source"
+          ! grep -Eq 'provider|OpenAI|stimulus|wake|systemctl|podman|curl|exec\(' "$source"
+
+          # No runtime/service wiring or production packaging in this tranche.
+          ! grep -Fq 'LocalGooseDialogueResponderAuthorityService' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderAuthorityService' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderAuthorityService' Containerfile
+
+          # Tests prove separation of preparation, activation, decision and bind.
+          grep -Fq 'disabled.prepare_grant' "$test_cpp"
+          grep -Fq 'assert(!responder_store.find_active_lease("main"))' "$test_cpp"
+          grep -Fq 'restarted_before_activation' "$test_cpp"
+          grep -Fq 'activation_retry.result' "$test_cpp"
+          grep -Fq 'tampered.result_sha256' "$test_cpp"
+          grep -Fq 'bound.intent->state == LocalGooseDialogueResponderIntentState::prepared' "$test_cpp"
+          grep -Fq 'Binding is not dispatch' "$test_cpp"
+          grep -Fq 'restarted_after_bind' "$test_cpp"
+          grep -Fq 'turns_committed == 0' "$test_cpp"
+
+  fedora-44-werror:
+    needs: authority-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 30
+    steps:
+      - name: Install build dependencies
+        run: >
+          dnf install -y
+          autoconf
+          automake
+          curl-devel
+          gcc-c++
+          git
+          json-devel
+          libtool
+          make
+          pkgconf-pkg-config
+          sqlite-devel
+
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+
+      - name: Build pinned Gaudere core
+        run: |
+          set -eu
+          gaudere_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$gaudere_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 check
+          make install
+
+      - name: Compile typed authority service with Werror
+        run: |
+          set -eu
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cflags=$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)
+          libs=$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            $cflags -Iagent/src \
+            agent/tests/local_goose_dialogue_responder_authority_service_test.cpp \
+            agent/src/LocalGooseDialogueResponderAuthorityService.cpp \
+            agent/src/LocalGooseDialogueResponderAuthority.cpp \
+            agent/src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            agent/src/LocalGooseDialogueResponderDispatcher.cpp \
+            agent/src/LocalGooseDialoguePreferredSubmitter.cpp \
+            agent/src/LocalGooseDialogueResponderStore.cpp \
+            agent/src/LocalGooseDialogueResponder.cpp \
+            agent/src/LocalGooseDialogueCompletionFeed.cpp \
+            agent/src/LocalGooseDialogueThreadStore.cpp \
+            agent/src/LocalGooseDialogueV2.cpp \
+            agent/src/LocalGooseDialogueV3.cpp \
+            agent/src/Sha256.cpp \
+            -o responder-authority-service-test \
+            $libs -lsqlite3
+
+      - name: Run explicit authority service contract test
+        run: |
+          set -eu
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          ./responder-authority-service-test
