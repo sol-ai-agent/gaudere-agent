@@ -3,20 +3,24 @@ name: Dialogue responder authority store v3 gate
 on:
   pull_request:
     paths:
+      - src/LocalGooseDialogueResponder.hpp
       - src/LocalGooseDialogueResponderAuthority.hpp
       - src/LocalGooseDialogueResponderAuthority.cpp
       - src/LocalGooseDialogueResponderAuthorityStore.hpp
       - src/LocalGooseDialogueResponderAuthorityStore.cpp
       - tests/local_goose_dialogue_responder_authority_store_test.cpp
+      - tests/local_goose_dialogue_responder_schema3_reopen_test.cpp
       - .github/workflows/dialogue-responder-authority-store.yml
   push:
     branches: [main]
     paths:
+      - src/LocalGooseDialogueResponder.hpp
       - src/LocalGooseDialogueResponderAuthority.hpp
       - src/LocalGooseDialogueResponderAuthority.cpp
       - src/LocalGooseDialogueResponderAuthorityStore.hpp
       - src/LocalGooseDialogueResponderAuthorityStore.cpp
       - tests/local_goose_dialogue_responder_authority_store_test.cpp
+      - tests/local_goose_dialogue_responder_schema3_reopen_test.cpp
       - .github/workflows/dialogue-responder-authority-store.yml
 
 permissions:
@@ -33,7 +37,9 @@ jobs:
           set -euxo pipefail
           store=src/LocalGooseDialogueResponderAuthorityStore.cpp
           contract=src/LocalGooseDialogueResponderAuthority.hpp
+          responder=src/LocalGooseDialogueResponder.hpp
           test_cpp=tests/local_goose_dialogue_responder_authority_store_test.cpp
+          reopen_test=tests/local_goose_dialogue_responder_schema3_reopen_test.cpp
 
           grep -Fq 'local_goose_dialogue_responder_authority_sidecar_schema = 3' "$contract"
           grep -Fq 'allow_schema_upgrade' "$store"
@@ -45,12 +51,19 @@ jobs:
           grep -Fq 'decision request id conflicts' "$store"
           grep -Fq 'responder consumer event already has a decision' "$store"
 
+          # Base responder store owns v2 creation while tolerating an explicitly
+          # migrated v3 extension on restart. It still has no v3 migration code.
+          grep -Fq 'local_goose_dialogue_responder_owned_sidecar_schema = 2' "$responder"
+          grep -Fq 'local_goose_dialogue_responder_sidecar_schema = 3' "$responder"
+          grep -Fq 'PRAGMA user_version=2;' src/LocalGooseDialogueResponderStore.cpp
+          ! grep -Fq 'PRAGMA user_version=3;' src/LocalGooseDialogueResponderStore.cpp
+          ! grep -Fq 'local_goose_dialogue_responder_grant' src/LocalGooseDialogueResponderStore.cpp
+          ! grep -Fq 'local_goose_dialogue_responder_decision' src/LocalGooseDialogueResponderStore.cpp
+
           # This tranche is deliberately not wired into runtime/production.
           ! grep -Fq 'LocalGooseDialogueResponderAuthorityStore' src/main.cpp
           ! grep -Fq 'LocalGooseDialogueResponderAuthorityStore' Containerfile
           ! grep -Fq 'LocalGooseDialogueResponderAuthorityStore' src/Makefile.am
-          grep -Fq 'inline constexpr int local_goose_dialogue_responder_sidecar_schema = 2;' \
-            src/LocalGooseDialogueResponder.hpp
 
           # Store operations have no Task/feed/provider/observer authority.
           ! grep -Eq 'CompletionFeed|PreferredSubmit|Runtime|provider|OpenAI|stimulus|wake|systemctl|podman' "$store"
@@ -64,6 +77,15 @@ jobs:
           grep -Fq 'grant_replay.grant_id == grant.grant_id' "$test_cpp"
           grep -Fq 'decision_replay.decision_id == decision.decision_id' "$test_cpp"
           grep -Fq 'rejected_future' "$test_cpp"
+
+          # Reopen coverage proves the base store never creates v3 but can
+          # continue base lease/intent/disposition operation after AuthorityStore
+          # performed the explicit migration.
+          grep -Fq 'LocalGooseDialogueResponderStore reopened(path)' "$reopen_test"
+          grep -Fq 'PRAGMA user_version' "$reopen_test"
+          grep -Fq 'local_goose_dialogue_responder_owned_sidecar_schema == 2' "$reopen_test"
+          grep -Fq 'local_goose_dialogue_responder_sidecar_schema == 3' "$reopen_test"
+          grep -Fq 'future_rejected' "$reopen_test"
 
   fedora-44-werror:
     needs: authority-boundary
@@ -87,5 +109,18 @@ jobs:
             src/Sha256.cpp \
             -lsqlite3 \
             -o responder-authority-store-test
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Isrc \
+            tests/local_goose_dialogue_responder_schema3_reopen_test.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/Sha256.cpp \
+            -lsqlite3 \
+            -o responder-schema3-reopen-test
       - name: Run migration and adversarial store tests
-        run: ./responder-authority-store-test
+        run: |
+          set -eu
+          ./responder-authority-store-test
+          ./responder-schema3-reopen-test
