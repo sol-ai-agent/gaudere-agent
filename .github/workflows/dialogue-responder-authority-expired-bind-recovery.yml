@@ -1,0 +1,163 @@
+name: Dialogue responder authority expired bind recovery
+
+on:
+  pull_request:
+    paths:
+      - 'src/local_goose_dialogue_responder_authority_expired_bind_recovery_main.cpp'
+      - 'tests/local_goose_dialogue_responder_bound_decision_expiry_test.cpp'
+      - 'Containerfile.responder-authority-expired-bind-recovery'
+      - '.github/workflows/dialogue-responder-authority-expired-bind-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  expired-bind-recovery-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove recovery surface cannot create or dispatch new authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=src/local_goose_dialogue_responder_authority_expired_bind_recovery_main.cpp
+          test_file=tests/local_goose_dialogue_responder_bound_decision_expiry_test.cpp
+          containerfile=Containerfile.responder-authority-expired-bind-recovery
+
+          grep -Fq 'f82c3df882b60babea7d88a36589aad57d1f7b0b2b9ec4d208e8be8d01b71fae' "$helper"
+          grep -Fq '5e8bfd1668346f209eaec91f5888a3a9532a5bf5677674d4c2001f499e924153' "$helper"
+          grep -Fq '72741315708884592db29c29c4e6c9d750b6e49f3b15a1bd1b61f9c1e618236b' "$helper"
+          grep -Fq '<inspect|recover-expired-bind>' "$helper"
+          grep -Fq 'dispatcher.dispatch(expected_intent_id)' "$helper"
+          grep -Fq 'bound_intent_expired_before_dispatch' "$helper"
+          grep -Fq 'lease_or_intent_expired' "$helper"
+          grep -Fq 'lease_expired' "$helper"
+          grep -Fq 'expected_submission_idempotency_key()' "$helper"
+          grep -Fq 'SUBMISSION_TASK=absent' "$helper"
+          grep -Fq 'SEQUENCE4_ACK=no' "$helper"
+          grep -Fq 'HEAD_REVISION=3' "$helper"
+          grep -Fq 'LEASE_TURNS_COMMITTED=0' "$helper"
+          grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_EXPIRED_BIND_RECOVERY=PASS' "$helper"
+          grep -Fq 'authority_store.terminalize_decision(' "$helper"
+
+          ! grep -Fq 'prepare_grant(' "$helper"
+          ! grep -Fq 'activate_grant(' "$helper"
+          ! grep -Fq 'prepare_decision(' "$helper"
+          ! grep -Fq 'bind_decision(' "$helper"
+          ! grep -Fq 'bind_decision_intent(' "$helper"
+          ! grep -Fq 'create_lease(' "$helper"
+          ! grep -Fq 'revoke_lease(' "$helper"
+          ! grep -Fq 'dispatcher.prepare(' "$helper"
+          ! grep -Fq 'runtime.submit(' "$helper"
+          ! grep -Fq '.acknowledge(' "$helper"
+          ! grep -Fq 'commit_submission(' "$helper"
+          ! grep -Fq 'complete_intent(' "$helper"
+          ! grep -Fq 'complete_disposition(' "$helper"
+          ! grep -Fq 'complete_decision(' "$helper"
+
+          grep -Fq 'bound_intent_expired_before_dispatch' "$test_file"
+          grep -Fq 'LocalGooseDialogueResponderDecisionState::intent_bound' "$test_file"
+          grep -Fq 'LocalGooseDialogueResponderDecisionState::expired' "$test_file"
+          grep -Fq 'io.gaudere.role="dialogue-responder-authority-expired-bind-recovery-v1"' "$containerfile"
+          grep -Fq '<inspect|recover-expired-bind>' "$containerfile"
+
+  fedora-44-recovery-build-and-tests:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: >-
+          dnf install -y autoconf automake diffutils gcc-c++ git json-devel
+          libcurl-devel libtool make pkgconf-pkg-config sqlite-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build pinned core
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/tmp/gaudere-install CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+
+      - name: Compile and run terminal responder reconciliation proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            tests/local_goose_dialogue_responder_terminal_reconciliation_test.cpp \
+            src/LocalGooseDialogueResponderDispatcher.cpp \
+            src/LocalGooseDialoguePreferredSubmitter.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/terminal-reconciliation-test \
+            ${libs} -lsqlite3
+          /tmp/terminal-reconciliation-test
+
+      - name: Compile and run bound authority decision expiry proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            tests/local_goose_dialogue_responder_bound_decision_expiry_test.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/Sha256.cpp \
+            -o /tmp/bound-decision-expiry-test \
+            ${libs} -lsqlite3
+          /tmp/bound-decision-expiry-test
+
+      - name: Compile confined expired-bind recovery helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            src/local_goose_dialogue_responder_authority_expired_bind_recovery_main.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderDispatcher.cpp \
+            src/LocalGooseDialoguePreferredSubmitter.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/expired-bind-recovery \
+            ${libs} -lsqlite3
+          help_output=$(/tmp/expired-bind-recovery --help)
+          printf '%s\n' "$help_output"
+          printf '%s\n' "$help_output" | grep -Fq '<inspect|recover-expired-bind>'
+          ! printf '%s\n' "$help_output" | grep -Eq 'prepare|grant|activate|dispatch-intent|ack'
