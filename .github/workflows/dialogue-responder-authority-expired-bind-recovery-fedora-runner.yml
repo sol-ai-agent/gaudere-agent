@@ -40,6 +40,8 @@ jobs:
           grep -Fq 'HEAD_REVISION=3' "$runner"
           grep -Fq 'SUBMISSION_TASK=absent' "$runner"
           grep -Fq 'LEASE_TURNS_COMMITTED=0' "$runner"
+          grep -Fq 'provider.call:openai.responses' "$runner"
+          grep -Fq 'expected_provider_total=${GAUDERE_EXPECTED_PROVIDER_TOTAL:-10}' "$runner"
           grep -Fq 'production Task/provider DB changed during recovery commit' "$runner"
           grep -Fq 'production dialogue thread DB changed during recovery commit' "$runner"
           grep -Fq 'production completion/ACK DB changed during recovery commit' "$runner"
@@ -55,7 +57,6 @@ jobs:
           ! grep -Fq 'create-lease' "$runner"
           ! grep -Fq 'revoke-lease' "$runner"
           ! grep -Fq 'ack-prepared' "$runner"
-          ! grep -Fq 'provider.call:openai.responses' "$runner" || true
 
       - name: Prove only the responder authority sidecar is committed
         shell: bash
