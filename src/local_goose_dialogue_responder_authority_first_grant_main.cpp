@@ -291,7 +291,9 @@ int main(int argc, char* argv[])
     try {
         const auto options = parse_options(argc, argv);
         gaudere::persistence::sqlite::TaskStore task_store(options.state);
-        gaudere::work::Runtime runtime(task_store);
+        gaudere::work::Runtime runtime(
+            task_store,
+            [] { return std::chrono::system_clock::now(); });
         LocalGooseDialogueThreadStore thread_store(options.thread_sidecar);
         LocalGooseDialogueCompletionFeedStore completion_store(
             options.completion_sidecar);
