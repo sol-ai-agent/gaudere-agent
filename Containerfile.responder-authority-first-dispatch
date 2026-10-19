@@ -1,0 +1,65 @@
+ARG BUILDER_IMAGE
+FROM ${BUILDER_IMAGE} AS helper-builder
+
+ARG GAUDERE_AGENT_REF
+ARG GAUDERE_REF
+
+RUN test -n "${GAUDERE_AGENT_REF}" \
+    && test "${#GAUDERE_AGENT_REF}" -eq 40 \
+    && test -z "$(printf '%s' "${GAUDERE_AGENT_REF}" | tr -d '0-9a-f')" \
+    && test -n "${GAUDERE_REF}" \
+    && test "${#GAUDERE_REF}" -eq 40 \
+    && test -z "$(printf '%s' "${GAUDERE_REF}" | tr -d '0-9a-f')"
+
+RUN cd /src/gaudere-agent \
+    && export PKG_CONFIG_PATH=/opt/gaudere/lib/pkgconfig \
+    && export LD_LIBRARY_PATH=/opt/gaudere/lib \
+    && cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)" \
+    && libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)" \
+    && g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+       ${cflags} -Isrc \
+       src/local_goose_dialogue_responder_authority_first_dispatch_main.cpp \
+       src/LocalGooseDialogueResponderAuthorityStore.cpp \
+       src/LocalGooseDialogueResponderAuthority.cpp \
+       src/LocalGooseDialogueResponderDispatcher.cpp \
+       src/LocalGooseDialoguePreferredSubmitter.cpp \
+       src/LocalGooseDialogueResponderStore.cpp \
+       src/LocalGooseDialogueResponder.cpp \
+       src/LocalGooseDialogueCompletionFeed.cpp \
+       src/LocalGooseDialogueThreadStore.cpp \
+       src/LocalGooseDialogueV2.cpp \
+       src/LocalGooseDialogueV3.cpp \
+       src/Sha256.cpp \
+       -o /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-authority-first-dispatch \
+       ${libs} -lsqlite3 \
+    && /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-authority-first-dispatch --help \
+       | grep -Fq '<inspect|dispatch-intent>'
+
+FROM registry.fedoraproject.org/fedora:44
+ARG GAUDERE_AGENT_REF
+ARG GAUDERE_REF
+
+LABEL org.opencontainers.image.source="https://github.com/sol-ai-agent/gaudere-agent" \
+      org.opencontainers.image.revision="${GAUDERE_AGENT_REF}" \
+      io.gaudere.agent.revision="${GAUDERE_AGENT_REF}" \
+      io.gaudere.core.revision="${GAUDERE_REF}" \
+      io.gaudere.role="dialogue-responder-authority-first-dispatch-v1"
+
+RUN dnf install -y libcurl libstdc++ sqlite-libs \
+    && dnf clean all \
+    && useradd --uid 1000 --create-home --shell /sbin/nologin gaudere
+
+COPY --from=helper-builder /opt/gaudere/lib/libgaudere.so* /usr/local/lib/
+COPY --from=helper-builder /opt/gaudere/lib/libgaudere-persistence-sqlite.so* /usr/local/lib/
+COPY --from=helper-builder \
+    /opt/gaudere-agent/bin/gaudere-local-goose-dialogue-responder-authority-first-dispatch \
+    /usr/local/bin/gaudere-local-goose-dialogue-responder-authority-first-dispatch
+
+RUN test -x /usr/local/bin/gaudere-local-goose-dialogue-responder-authority-first-dispatch \
+    && LD_LIBRARY_PATH=/usr/local/lib \
+       /usr/local/bin/gaudere-local-goose-dialogue-responder-authority-first-dispatch --help \
+       | grep -Fq '<inspect|dispatch-intent>'
+
+USER 1000:1000
+ENV LD_LIBRARY_PATH=/usr/local/lib
+ENTRYPOINT ["/usr/local/bin/gaudere-local-goose-dialogue-responder-authority-first-dispatch"]
