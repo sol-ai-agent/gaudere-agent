@@ -99,7 +99,7 @@ int main()
         lease.lease_id, "main", 4,
         completion_id('1'), std::string(64, '2'), v3_id('3'),
         3, v3_id('3'), "sol", "intervention", "Recovery proof message.",
-        1300, 8000);
+        1300, 6000);
     assert(responder.prepare_intent(intent).result
         == LocalGooseDialogueResponderStoreResult::accepted);
 
