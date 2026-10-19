@@ -101,9 +101,8 @@ verify_exact_sequence_four()
         || fail "sequence 4 already has responder disposition"
 }
 
-verify_common_state()
+verify_persistent_state()
 {
-    [ "$(network_mode)" = "none" ] || fail "production network is not none"
     [ "$(provider_total)" = "$expected_provider_total" ] || fail "provider total differs"
     [ "$(sqlite3 -readonly "$stimulus_sidecar" 'SELECT COUNT(*) FROM local_goose_cycle_stimuli;')" = "0" ] \
         || fail "stimulus ledger is not empty"
@@ -116,14 +115,14 @@ verify_common_state()
 
 verify_prestate()
 {
-    verify_common_state
+    verify_persistent_state
     [ "$(grant_count)" = "0" ] || fail "authority grants already exist"
     [ "$(active_lease_count)" = "0" ] || fail "active responder lease already exists"
 }
 
 verify_prepared_state()
 {
-    verify_common_state
+    verify_persistent_state
     [ "$(grant_count)" = "1" ] || fail "prepared authority grant count is not exactly one"
     [ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_grant WHERE request_id='$expected_grant_request_id' AND state=0 AND lease_id IS NULL;")" = "1" ] \
         || fail "first authority grant is not durably prepared"
@@ -132,7 +131,7 @@ verify_prepared_state()
 
 verify_activated_state()
 {
-    verify_common_state
+    verify_persistent_state
     [ "$(grant_count)" = "1" ] || fail "activated authority grant count is not exactly one"
     [ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_grant WHERE request_id='$expected_grant_request_id' AND state=1 AND lease_id IS NOT NULL;")" = "1" ] \
         || fail "first authority grant is not durably activated"
@@ -191,6 +190,13 @@ verify_dormant_runtime_surface()
         || fail "production capability unexpectedly gained mutation surface"
 }
 
+verify_active_runtime()
+{
+    [ "$(service_state)" = "active" ] || fail "production service is not active"
+    [ "$(running_image)" = "$expected_image" ] || fail "production image differs"
+    [ "$(network_mode)" = "none" ] || fail "production network is not none"
+}
+
 [ "$authorization" = "AUTHORIZED_DIALOGUE_RESPONDER_AUTHORITY_FIRST_GRANT" ] \
     || fail "explicit first authority grant production authorization token is required"
 
@@ -219,8 +225,7 @@ case "$core_ref" in *[!0-9a-f]*|'') fail "Core ref is not one lowercase hexadeci
 [ "${#core_ref}" -eq 40 ] || fail "Core ref is not 40 characters"
 
 printf '=== VERIFY FIRST AUTHORITY GRANT PRESTATE ===\n'
-[ "$(service_state)" = "active" ] || fail "production service must be active before grant gate"
-[ "$(running_image)" = "$expected_image" ] || fail "production image differs from expected dormant-authority image"
+verify_active_runtime
 verify_prestate
 verify_observer_holds_sequence_four
 verify_dormant_runtime_surface
@@ -382,10 +387,8 @@ verify_prepared_state
 printf '=== RESTART PRODUCTION TO PROVE PREPARED GRANT DOES NOT SELF-ACTIVATE ===\n'
 "$systemctl_command" --user start "$service_name"
 service_stopped=0
-[ "$(service_state)" = "active" ] || fail "production service did not become active after grant preparation"
 sleep 3
-[ "$(service_state)" = "active" ] || fail "production service did not remain active after grant preparation"
-[ "$(running_image)" = "$expected_image" ] || fail "production image changed after grant preparation"
+verify_active_runtime
 verify_prepared_state
 verify_observer_holds_sequence_four
 verify_dormant_runtime_surface
@@ -415,10 +418,8 @@ verify_activated_state
 printf '=== RESTART SAME DORMANT-AUTHORITY PRODUCTION IMAGE ===\n'
 "$systemctl_command" --user start "$service_name"
 service_stopped=0
-[ "$(service_state)" = "active" ] || fail "production service did not become active after grant activation"
 sleep 3
-[ "$(service_state)" = "active" ] || fail "production service did not remain active after grant activation"
-[ "$(running_image)" = "$expected_image" ] || fail "production image changed during first authority grant gate"
+verify_active_runtime
 verify_activated_state
 verify_observer_holds_sequence_four
 verify_dormant_runtime_surface
