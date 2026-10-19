@@ -1,0 +1,123 @@
+name: Dialogue responder authority first grant activation
+
+on:
+  pull_request:
+    paths:
+      - 'src/local_goose_dialogue_responder_authority_first_grant_main.cpp'
+      - 'Containerfile.responder-authority-first-grant'
+      - 'scripts/first-production-dialogue-responder-authority-grant-activation.sh'
+      - '.github/workflows/dialogue-responder-authority-first-grant-activation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authority-first-grant-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove the first grant surface is bounded and pre-decision
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=src/local_goose_dialogue_responder_authority_first_grant_main.cpp
+          containerfile=Containerfile.responder-authority-first-grant
+          script=scripts/first-production-dialogue-responder-authority-grant-activation.sh
+
+          grep -Fq 'first-production-responder-authority-grant-v1' "$helper"
+          grep -Fq 'constexpr std::uint64_t max_system_turns = 1;' "$helper"
+          grep -Fq 'local_goose_dialogue_responder_message_intervention' "$helper"
+          grep -Fq 'responder_speaker_id = "sol"' "$helper"
+          grep -Fq 'expected_sequence = 4' "$helper"
+          grep -Fq '7297b1ad75c62c19a46780ab8cce874353d7fe95b260c504c844878a9d8db844' "$helper"
+          grep -Fq '4fa4966a87986dd6d1a163c1a35d577f78cd0f2f08409acca431a6a97fc29935' "$helper"
+          grep -Fq '<inspect|prepare-grant|activate-grant>' "$helper"
+          grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_FIRST_GRANT_PREPARE=PASS' "$helper"
+          grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_FIRST_GRANT_ACTIVATE=PASS' "$helper"
+
+          ! grep -Fq 'prepare_decision(' "$helper"
+          ! grep -Fq 'bind_decision(' "$helper"
+          ! grep -Fq '.dispatch(' "$helper"
+          ! grep -Fq 'acknowledge_disposition' "$helper"
+          ! grep -Fq 'commit_submission' "$helper"
+          ! grep -Fq 'complete_disposition' "$helper"
+
+          grep -Fq 'io.gaudere.role="dialogue-responder-authority-first-grant-v1"' "$containerfile"
+          grep -Fq '<inspect|prepare-grant|activate-grant>' "$containerfile"
+
+          grep -Fq 'AUTHORIZED_DIALOGUE_RESPONDER_AUTHORITY_FIRST_GRANT' "$script"
+          grep -Fq '=== REHEARSE PREPARE / REOPEN / ACTIVATE ON COPIED STATE ===' "$script"
+          grep -Fq '=== PREPARE FIRST DURABLE AUTHORITY GRANT ONLY ===' "$script"
+          grep -Fq '=== RESTART PRODUCTION TO PROVE PREPARED GRANT DOES NOT SELF-ACTIVATE ===' "$script"
+          grep -Fq '=== STOP / EXPLICITLY ACTIVATE FIRST AUTHORITY GRANT ===' "$script"
+          grep -Fq 'SEQUENCE4_ACK=no' "$script"
+          grep -Fq 'PRODUCTION_AUTHORITY_DECISIONS=0' "$script"
+          grep -Fq 'PRODUCTION_PREPARED_INTENTS=0' "$script"
+          grep -Fq 'FEDORA_GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_FIRST_GRANT_ACTIVATION=PASS' "$script"
+          grep -Fq 'backup-state.sh' "$script"
+          grep -Fq 'failed-state' "$script"
+          grep -Fq -- '--network none' "$script"
+
+          ! grep -Eq -- 'target_quadlet|candidate_quadlet|daemon-reload|^Image=' "$script"
+          ! grep -Eq -- 'prepare-decision|bind-decision|dispatch|authorize-structural-retirement' "$script"
+          ! grep -Eq -- 'observer_binary.*step|[[:space:]]step[[:space:]]+--expected-sequence' "$script"
+          ! grep -Eq -- '--openai-model|--autonomous-pulse-provider|--wake-intents' "$script"
+          sh -n "$script"
+
+  fedora-44-helper-build:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: >-
+          dnf install -y autoconf automake diffutils gcc-c++ git json-devel
+          libcurl-devel libtool make pkgconf-pkg-config sqlite-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build pinned core
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/tmp/gaudere-install CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+
+      - name: Compile confined first-grant helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            src/local_goose_dialogue_responder_authority_first_grant_main.cpp \
+            src/LocalGooseDialogueResponderAuthorityService.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderDispatcher.cpp \
+            src/LocalGooseDialoguePreferredSubmitter.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/authority-first-grant \
+            ${libs} -lsqlite3
+          help_output=$(/tmp/authority-first-grant --help)
+          printf '%s\n' "$help_output"
+          printf '%s\n' "$help_output" | grep -Fq '<inspect|prepare-grant|activate-grant>'
+          ! printf '%s\n' "$help_output" | grep -Eq 'decision|bind|dispatch|ack'
