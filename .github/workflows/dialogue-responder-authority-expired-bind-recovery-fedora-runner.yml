@@ -1,0 +1,71 @@
+name: Dialogue responder authority expired bind recovery Fedora runner
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/recover-first-production-dialogue-responder-authority-expired-bind.sh'
+      - '.github/workflows/dialogue-responder-authority-expired-bind-recovery-fedora-runner.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  expired-bind-recovery-fedora-runner-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove runner stays inside the recovery-only production gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner=scripts/recover-first-production-dialogue-responder-authority-expired-bind.sh
+
+          sh -n "$runner"
+          grep -Fq 'AUTHORIZED_DIALOGUE_RESPONDER_AUTHORITY_EXPIRED_BIND_RECOVERY' "$runner"
+          grep -Fq '93811d1e201641ccfe0a31bc5ebb53458e7794fd2f727f18ff91b7ff246ba071' "$runner"
+          grep -Fq '1316cf68db93e4c91a7bd79fbd289b8f382f8659' "$runner"
+          grep -Fq 'Containerfile.responder-authority-expired-bind-recovery' "$runner"
+          grep -Fq '<inspect|recover-expired-bind>' "$runner"
+          grep -Fq 'recover-expired-bind' "$runner"
+          grep -Fq 'backup-state.sh' "$runner"
+          grep -Fq -- '--network none' "$runner"
+          grep -Fq 'classification=intervention_owned' "$runner"
+          grep -Fq 'verify_observer_state 2' "$runner"
+          grep -Fq 'verify_observer_state 4' "$runner"
+          grep -Fq 'RESPONDER_CURSOR=3' "$runner"
+          grep -Fq 'NEXT_SEQUENCE=4' "$runner"
+          grep -Fq 'SEQUENCE4_ACK=no' "$runner"
+          grep -Fq 'HEAD_REVISION=3' "$runner"
+          grep -Fq 'SUBMISSION_TASK=absent' "$runner"
+          grep -Fq 'LEASE_TURNS_COMMITTED=0' "$runner"
+          grep -Fq 'production Task/provider DB changed during recovery commit' "$runner"
+          grep -Fq 'production dialogue thread DB changed during recovery commit' "$runner"
+          grep -Fq 'production completion/ACK DB changed during recovery commit' "$runner"
+          grep -Fq 'production responder sidecar differs from proven recovery copy' "$runner"
+          grep -Fq 'stopped_after_committed_recovery_verification_failure' "$runner"
+          grep -Fq 'FEDORA_GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_EXPIRED_BIND_RECOVERY=PASS' "$runner"
+
+          ! grep -Fq 'prepare-grant' "$runner"
+          ! grep -Fq 'activate-grant' "$runner"
+          ! grep -Fq 'prepare-decision' "$runner"
+          ! grep -Fq 'bind-decision' "$runner"
+          ! grep -Fq 'dispatch-intent' "$runner"
+          ! grep -Fq 'create-lease' "$runner"
+          ! grep -Fq 'revoke-lease' "$runner"
+          ! grep -Fq 'ack-prepared' "$runner"
+          ! grep -Fq 'provider.call:openai.responses' "$runner" || true
+
+      - name: Prove only the responder authority sidecar is committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner=scripts/recover-first-production-dialogue-responder-authority-expired-bind.sh
+          grep -Fq 'src.backup(dst)' "$runner"
+          grep -Fq 'rehearsal/local-goose-dialogue-responder.db' "$runner"
+          grep -Fq '"$responder_sidecar"' "$runner"
+          grep -Fq 'responder_sha_recovered' "$runner"
+          grep -Fq 'state_sha_before' "$runner"
+          grep -Fq 'thread_sha_before' "$runner"
+          grep -Fq 'completion_sha_before' "$runner"
