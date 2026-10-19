@@ -139,7 +139,7 @@ verify_activated_state()
     [ "$(active_lease_count)" = "1" ] || fail "first authority grant does not have exactly one active lease"
     lease_id=$(sqlite3 -readonly "$responder_sidecar" "SELECT lease_id FROM local_goose_dialogue_responder_grant WHERE request_id='$expected_grant_request_id';")
     [ -n "$lease_id" ] || fail "activated authority grant has no lease id"
-    [ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_lease WHERE lease_id='$lease_id' AND state=0 AND thread_alias='$thread_alias' AND speaker_kind='system' AND speaker_id='$expected_grant_speaker_id' AND max_system_turns=$expected_grant_turns AND turns_committed=0;")" = "1" ] \
+    [ "$(sqlite3 -readonly "$responder_sidecar" "SELECT COUNT(*) FROM local_goose_dialogue_responder_lease WHERE lease_id='$lease_id' AND state=0 AND thread_alias='$thread_alias' AND turns_committed=0 AND json_extract(document,'$.speaker_kind')='system' AND json_extract(document,'$.speaker_id')='$expected_grant_speaker_id' AND json_extract(document,'$.max_system_turns')=$expected_grant_turns;")" = "1" ] \
         || fail "activated authority lease envelope differs"
 }
 
@@ -433,7 +433,7 @@ trap - EXIT HUP INT TERM
 
 lease_id=$(sqlite3 -readonly "$responder_sidecar" "SELECT lease_id FROM local_goose_dialogue_responder_grant WHERE request_id='$expected_grant_request_id';")
 grant_id=$(sqlite3 -readonly "$responder_sidecar" "SELECT grant_id FROM local_goose_dialogue_responder_grant WHERE request_id='$expected_grant_request_id';")
-lease_expires_at_ms=$(sqlite3 -readonly "$responder_sidecar" "SELECT expires_at_ms FROM local_goose_dialogue_responder_lease WHERE lease_id='$lease_id';")
+lease_expires_at_ms=$(sqlite3 -readonly "$responder_sidecar" "SELECT json_extract(document,'$.expires_at_ms') FROM local_goose_dialogue_responder_lease WHERE lease_id='$lease_id';")
 printf 'AGENT_REF=%s\n' "$agent_ref"
 printf 'CORE_REF=%s\n' "$core_ref"
 printf 'PRODUCTION_IMAGE=%s\n' "$expected_image"
