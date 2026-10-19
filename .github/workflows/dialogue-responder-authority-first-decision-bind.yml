@@ -1,0 +1,107 @@
+name: Dialogue responder authority first decision bind
+
+on:
+  pull_request:
+    paths:
+      - 'src/local_goose_dialogue_responder_authority_first_decision_bind_main.cpp'
+      - 'Containerfile.responder-authority-first-decision-bind'
+      - '.github/workflows/dialogue-responder-authority-first-decision-bind.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authority-first-decision-bind-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove first decision bind surface stops before dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=src/local_goose_dialogue_responder_authority_first_decision_bind_main.cpp
+          containerfile=Containerfile.responder-authority-first-decision-bind
+
+          grep -Fq '5e8bfd1668346f209eaec91f5888a3a9532a5bf5677674d4c2001f499e924153' "$helper"
+          grep -Fq 'minimum_remaining_lease_ms = 5LL * 60 * 1000' "$helper"
+          grep -Fq 'Sol reprend le dialogue depuis le point de continuite valide.' "$helper"
+          grep -Fq '<inspect|bind-decision>' "$helper"
+          grep -Fq 'authority.bind_decision(expected_decision_id)' "$helper"
+          grep -Fq 'DECISION_STATE=intent_bound' "$helper"
+          grep -Fq 'INTENT_STATE=prepared' "$helper"
+          grep -Fq 'INTENT_SUBMITTED_TASK_ID=none' "$helper"
+          grep -Fq 'SEQUENCE4_DISPOSITION=intervention_bound' "$helper"
+          grep -Fq 'LEASE_TURNS_COMMITTED=0' "$helper"
+          grep -Fq 'SEQUENCE4_ACK=no' "$helper"
+          grep -Fq 'GAUDERE_DIALOGUE_RESPONDER_AUTHORITY_FIRST_DECISION_BIND=PASS' "$helper"
+
+          ! grep -Fq 'prepare_decision(' "$helper"
+          ! grep -Fq 'prepare_grant(' "$helper"
+          ! grep -Fq 'activate_grant(' "$helper"
+          ! grep -Fq 'dispatcher.prepare(' "$helper"
+          ! grep -Fq 'dispatcher.dispatch(' "$helper"
+          ! grep -Fq '.dispatch(' "$helper"
+          ! grep -Fq 'acknowledge_disposition' "$helper"
+          ! grep -Fq 'commit_submission' "$helper"
+          ! grep -Fq 'complete_disposition' "$helper"
+
+          grep -Fq 'io.gaudere.role="dialogue-responder-authority-first-decision-bind-v1"' "$containerfile"
+          grep -Fq '<inspect|bind-decision>' "$containerfile"
+
+  fedora-44-helper-build:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install build dependencies
+        run: >-
+          dnf install -y autoconf automake diffutils gcc-c++ git json-devel
+          libcurl-devel libtool make pkgconf-pkg-config sqlite-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build pinned core
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/tmp/gaudere-install CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+
+      - name: Compile confined first-decision bind helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            src/local_goose_dialogue_responder_authority_first_decision_bind_main.cpp \
+            src/LocalGooseDialogueResponderAuthorityService.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderDispatcher.cpp \
+            src/LocalGooseDialoguePreferredSubmitter.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/authority-first-decision-bind \
+            ${libs} -lsqlite3
+          help_output=$(/tmp/authority-first-decision-bind --help)
+          printf '%s\n' "$help_output"
+          printf '%s\n' "$help_output" | grep -Fq '<inspect|bind-decision>'
+          ! printf '%s\n' "$help_output" | grep -Eq 'prepare-decision|grant|dispatch|ack'
