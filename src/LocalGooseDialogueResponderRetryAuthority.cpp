@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 
 namespace gaudere_agent {
 namespace {
@@ -57,6 +58,11 @@ bool prefixed_sha256(const std::string& value, const char* prefix) noexcept
 bool bounded_reason(const std::string& value) noexcept
 {
     return !value.empty() && value.size() <= max_reason_bytes;
+}
+
+bool bounded_optional_reason(const std::string& value) noexcept
+{
+    return value.size() <= max_reason_bytes;
 }
 
 void append(std::string& out, const std::string& value)
@@ -189,7 +195,7 @@ bool valid_local_goose_dialogue_responder_retry_lineage(
         || !prefixed_sha256(lineage.historical_intent_id, intent_prefix)
         || !prefixed_sha256(
             lineage.historical_disposition_id, disposition_prefix)
-        || !bounded_reason(lineage.historical_grant_terminal_reason)
+        || !bounded_optional_reason(lineage.historical_grant_terminal_reason)
         || !bounded_reason(lineage.historical_lease_terminal_reason)
         || !bounded_reason(lineage.historical_decision_terminal_reason)
         || !bounded_reason(lineage.historical_intent_terminal_reason)
