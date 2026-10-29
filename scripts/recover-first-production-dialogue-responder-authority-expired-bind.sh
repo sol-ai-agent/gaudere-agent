@@ -195,7 +195,7 @@ verify_recovered_output()
 
 [ "$authorization" = "AUTHORIZED_DIALOGUE_RESPONDER_AUTHORITY_EXPIRED_BIND_RECOVERY" ] || fail "explicit expired-bind recovery production authorization token is required"
 
-for command in "$podman_command" "$systemctl_command" git python3 sqlite3 mktemp mkdir chmod sha256sum awk sed id sleep grep tr; do
+for command in "$podman_command" "$systemctl_command" git python3 sqlite3 mktemp mkdir chmod sha256sum awk sed id sleep grep tr sh; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
 for file in "$backup_script" "$helper_containerfile" "$main_containerfile" "$state_database" "$thread_sidecar" "$completion_sidecar" "$responder_sidecar"; do
@@ -251,7 +251,7 @@ printf '=== STOP PRODUCTION AND CAPTURE REAL BACKUP ===\n'
 "$systemctl_command" --user stop "$service_name"
 stopped_for_gate=1
 [ "$(service_state)" != "active" ] || fail "production service did not stop"
-backup=$(GAUDERE_STATE_DIR="$state_directory" "$backup_script") || fail "stopped-state backup failed"
+backup=$(GAUDERE_STATE_DIR="$state_directory" sh "$backup_script") || fail "stopped-state backup failed"
 [ -f "$backup" ] || fail "backup archive was not created"
 printf 'BACKUP=%s\n' "$backup"
 
