@@ -2,25 +2,27 @@
 #define GAUDERE_AGENT_LOCAL_GOOSE_DIALOGUE_RESPONDER_RETRY_AUTHORITY_HPP
 
 #include <cstdint>
-#include <optional>
 #include <string>
 
 namespace gaudere_agent {
 
 inline constexpr int local_goose_dialogue_responder_retry_sidecar_schema = 1;
-inline constexpr std::uint32_t local_goose_dialogue_responder_max_retry_generation = 8;
+inline constexpr std::uint32_t local_goose_dialogue_responder_retry_generation = 1;
 inline constexpr const char* local_goose_dialogue_responder_retry_lineage_prefix =
     "cognition.local-goose-dialogue.responder-retry-lineage.v1:";
 
 /**
- * Immutable lineage for an explicitly authorized retry of one exact completion
- * event after a previous responder authority attempt became terminal.
+ * Immutable lineage for one explicitly authorized generation-1 retry of one
+ * exact completion event after the historical responder authority attempt
+ * became unusable before dispatch.
  *
  * The lineage itself grants no authority. It only binds exact event/head
- * evidence to the terminal historical grant/lease/decision/intent/disposition
- * chain and to a bounded retry generation. A later typed authority service must
- * separately prove those historical states before admitting any new grant,
- * lease, intent, submission or completion-feed ACK.
+ * evidence to the historical grant/lease/decision/intent/disposition chain.
+ * A later typed authority service must separately prove those historical states
+ * before admitting any new grant, lease, intent, submission or feed ACK.
+ *
+ * This v1 contract intentionally models no second retry. If generation 1 also
+ * fails, a later version and a new explicit gate are required.
  */
 struct LocalGooseDialogueResponderRetryLineage {
     std::string lineage_id;
@@ -36,7 +38,6 @@ struct LocalGooseDialogueResponderRetryLineage {
     std::string observed_speaker_id;
 
     std::uint32_t retry_generation = 0;
-    std::optional<std::string> previous_retry_lineage_id;
 
     std::string historical_grant_id;
     std::string historical_lease_id;
@@ -63,8 +64,6 @@ make_local_goose_dialogue_responder_retry_lineage(
     std::uint64_t thread_revision,
     const std::string& task_id,
     const std::string& observed_speaker_id,
-    std::uint32_t retry_generation,
-    std::optional<std::string> previous_retry_lineage_id,
     const std::string& historical_grant_id,
     const std::string& historical_lease_id,
     const std::string& historical_decision_id,
