@@ -67,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          runner=scripts/recover-first-production-dialogue-responder-authority-expired-bind-recovery.sh
+          runner=scripts/recover-first-production-dialogue-responder-authority-expired-bind.sh
           grep -Fq 'src.backup(dst)' "$runner"
           grep -Fq 'rehearsal/local-goose-dialogue-responder.db' "$runner"
           grep -Fq '"$responder_sidecar"' "$runner"
