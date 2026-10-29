@@ -3,7 +3,6 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
-#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -62,13 +61,6 @@ void bind_text(sqlite3* database,
     }
 }
 
-void bind_null(sqlite3* database, sqlite3_stmt* statement, const int index)
-{
-    if (sqlite3_bind_null(statement, index) != SQLITE_OK) {
-        throw std::runtime_error(sqlite3_errmsg(database));
-    }
-}
-
 void bind_int64(sqlite3* database,
                 sqlite3_stmt* statement,
                 const int index,
@@ -86,14 +78,6 @@ std::string text(sqlite3_stmt* statement, const int column)
     if (!value || bytes <= 0) return {};
     return std::string(reinterpret_cast<const char*>(value),
                        static_cast<std::size_t>(bytes));
-}
-
-std::optional<std::string> optional_text(sqlite3_stmt* statement, const int column)
-{
-    if (sqlite3_column_type(statement, column) == SQLITE_NULL) {
-        return std::nullopt;
-    }
-    return text(statement, column);
 }
 
 bool safe_identifier(const std::string& value) noexcept
@@ -178,21 +162,16 @@ void create_lineage_table(sqlite3* database)
         "consumer_id TEXT NOT NULL,"
         "completion_sequence INTEGER NOT NULL CHECK(completion_sequence > 0),"
         "event_id TEXT NOT NULL,"
-        "retry_generation INTEGER NOT NULL CHECK(retry_generation BETWEEN 1 AND 8),"
-        "previous_retry_lineage_id TEXT UNIQUE,"
+        "retry_generation INTEGER NOT NULL CHECK(retry_generation = 1),"
         "created_at_ms INTEGER NOT NULL CHECK(created_at_ms >= 0),"
         "document TEXT NOT NULL,"
-        "UNIQUE(consumer_id,event_id,retry_generation),"
-        "UNIQUE(consumer_id,completion_sequence,retry_generation),"
-        "CHECK((retry_generation=1 AND previous_retry_lineage_id IS NULL) OR "
-        "(retry_generation>1 AND previous_retry_lineage_id IS NOT NULL)),"
-        "FOREIGN KEY(previous_retry_lineage_id) REFERENCES "
-        "local_goose_dialogue_responder_retry_lineage(lineage_id));");
+        "UNIQUE(consumer_id,event_id),"
+        "UNIQUE(consumer_id,completion_sequence));");
 }
 
 Json lineage_json(const LocalGooseDialogueResponderRetryLineage& lineage)
 {
-    Json out{
+    return Json{
         {"lineage_id", lineage.lineage_id},
         {"request_id", lineage.request_id},
         {"consumer_id", lineage.consumer_id},
@@ -222,9 +201,6 @@ Json lineage_json(const LocalGooseDialogueResponderRetryLineage& lineage)
          lineage.historical_disposition_terminal_reason},
         {"created_at_ms", lineage.created_at_ms}
     };
-    out["previous_retry_lineage_id"] = lineage.previous_retry_lineage_id
-        ? Json(*lineage.previous_retry_lineage_id) : Json(nullptr);
-    return out;
 }
 
 LocalGooseDialogueResponderRetryLineage parse_lineage(const std::string& raw)
@@ -243,10 +219,6 @@ LocalGooseDialogueResponderRetryLineage parse_lineage(const std::string& raw)
     out.observed_speaker_kind = j.at("observed_speaker_kind").get<std::string>();
     out.observed_speaker_id = j.at("observed_speaker_id").get<std::string>();
     out.retry_generation = j.at("retry_generation").get<std::uint32_t>();
-    if (!j.at("previous_retry_lineage_id").is_null()) {
-        out.previous_retry_lineage_id =
-            j.at("previous_retry_lineage_id").get<std::string>();
-    }
     out.historical_grant_id = j.at("historical_grant_id").get<std::string>();
     out.historical_lease_id = j.at("historical_lease_id").get<std::string>();
     out.historical_decision_id = j.at("historical_decision_id").get<std::string>();
@@ -277,17 +249,17 @@ LocalGooseDialogueResponderRetryLineage read_lineage_row(sqlite3_stmt* statement
     const auto row_sequence = sqlite3_column_int64(statement, 2);
     const auto row_event = text(statement, 3);
     const auto row_generation = sqlite3_column_int64(statement, 4);
-    const auto row_previous = optional_text(statement, 5);
-    const auto row_created = sqlite3_column_int64(statement, 6);
-    if (row_sequence <= 0 || row_generation <= 0 || row_created < 0) {
+    const auto row_created = sqlite3_column_int64(statement, 5);
+    if (row_sequence <= 0
+        || row_generation != local_goose_dialogue_responder_retry_generation
+        || row_created < 0) {
         throw std::runtime_error("invalid responder retry lineage index columns");
     }
-    auto out = parse_lineage(text(statement, 7));
+    auto out = parse_lineage(text(statement, 6));
     if (out.request_id != row_request || out.consumer_id != row_consumer
         || out.completion_sequence != static_cast<std::uint64_t>(row_sequence)
         || out.event_id != row_event
         || out.retry_generation != static_cast<std::uint32_t>(row_generation)
-        || out.previous_retry_lineage_id != row_previous
         || out.created_at_ms != row_created) {
         throw std::runtime_error("responder retry lineage index/document mismatch");
     }
@@ -299,7 +271,7 @@ std::optional<LocalGooseDialogueResponderRetryLineage> find_lineage(
 {
     Statement statement(database,
         "SELECT request_id,consumer_id,completion_sequence,event_id,"
-        "retry_generation,previous_retry_lineage_id,created_at_ms,document "
+        "retry_generation,created_at_ms,document "
         "FROM local_goose_dialogue_responder_retry_lineage "
         "WHERE lineage_id=?1");
     bind_text(database, statement.get(), 1, lineage_id);
@@ -318,7 +290,7 @@ std::optional<LocalGooseDialogueResponderRetryLineage> find_by_request(
 {
     Statement statement(database,
         "SELECT request_id,consumer_id,completion_sequence,event_id,"
-        "retry_generation,previous_retry_lineage_id,created_at_ms,document "
+        "retry_generation,created_at_ms,document "
         "FROM local_goose_dialogue_responder_retry_lineage "
         "WHERE request_id=?1");
     bind_text(database, statement.get(), 1, request_id);
@@ -328,77 +300,41 @@ std::optional<LocalGooseDialogueResponderRetryLineage> find_by_request(
     return read_lineage_row(statement.get());
 }
 
-std::optional<LocalGooseDialogueResponderRetryLineage> find_event_generation(
+std::optional<LocalGooseDialogueResponderRetryLineage> find_event(
     sqlite3* database,
     const std::string& consumer_id,
-    const std::string& event_id,
-    const std::uint32_t retry_generation)
+    const std::string& event_id)
 {
     Statement statement(database,
         "SELECT request_id,consumer_id,completion_sequence,event_id,"
-        "retry_generation,previous_retry_lineage_id,created_at_ms,document "
+        "retry_generation,created_at_ms,document "
         "FROM local_goose_dialogue_responder_retry_lineage "
-        "WHERE consumer_id=?1 AND event_id=?2 AND retry_generation=?3");
+        "WHERE consumer_id=?1 AND event_id=?2");
     bind_text(database, statement.get(), 1, consumer_id);
     bind_text(database, statement.get(), 2, event_id);
-    bind_int64(database, statement.get(), 3,
-               static_cast<std::int64_t>(retry_generation));
     const int step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) return std::nullopt;
     if (step != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(database));
     return read_lineage_row(statement.get());
 }
 
-std::optional<LocalGooseDialogueResponderRetryLineage> find_sequence_generation(
+std::optional<LocalGooseDialogueResponderRetryLineage> find_sequence(
     sqlite3* database,
     const std::string& consumer_id,
-    const std::uint64_t completion_sequence,
-    const std::uint32_t retry_generation)
+    const std::uint64_t completion_sequence)
 {
     Statement statement(database,
         "SELECT request_id,consumer_id,completion_sequence,event_id,"
-        "retry_generation,previous_retry_lineage_id,created_at_ms,document "
+        "retry_generation,created_at_ms,document "
         "FROM local_goose_dialogue_responder_retry_lineage "
-        "WHERE consumer_id=?1 AND completion_sequence=?2 AND retry_generation=?3");
+        "WHERE consumer_id=?1 AND completion_sequence=?2");
     bind_text(database, statement.get(), 1, consumer_id);
     bind_int64(database, statement.get(), 2,
                static_cast<std::int64_t>(completion_sequence));
-    bind_int64(database, statement.get(), 3,
-               static_cast<std::int64_t>(retry_generation));
     const int step = sqlite3_step(statement.get());
     if (step == SQLITE_DONE) return std::nullopt;
     if (step != SQLITE_ROW) throw std::runtime_error(sqlite3_errmsg(database));
     return read_lineage_row(statement.get());
-}
-
-bool same_retry_root(
-    const LocalGooseDialogueResponderRetryLineage& previous,
-    const LocalGooseDialogueResponderRetryLineage& candidate) noexcept
-{
-    return previous.consumer_id == candidate.consumer_id
-        && previous.thread_alias == candidate.thread_alias
-        && previous.completion_sequence == candidate.completion_sequence
-        && previous.event_id == candidate.event_id
-        && previous.result_sha256 == candidate.result_sha256
-        && previous.thread_revision == candidate.thread_revision
-        && previous.task_id == candidate.task_id
-        && previous.observed_speaker_kind == candidate.observed_speaker_kind
-        && previous.observed_speaker_id == candidate.observed_speaker_id
-        && previous.historical_grant_id == candidate.historical_grant_id
-        && previous.historical_lease_id == candidate.historical_lease_id
-        && previous.historical_decision_id == candidate.historical_decision_id
-        && previous.historical_intent_id == candidate.historical_intent_id
-        && previous.historical_disposition_id == candidate.historical_disposition_id
-        && previous.historical_grant_terminal_reason
-            == candidate.historical_grant_terminal_reason
-        && previous.historical_lease_terminal_reason
-            == candidate.historical_lease_terminal_reason
-        && previous.historical_decision_terminal_reason
-            == candidate.historical_decision_terminal_reason
-        && previous.historical_intent_terminal_reason
-            == candidate.historical_intent_terminal_reason
-        && previous.historical_disposition_terminal_reason
-            == candidate.historical_disposition_terminal_reason;
 }
 
 } // namespace
@@ -478,18 +414,12 @@ LocalGooseDialogueResponderRetryStore::find_by_request(
 }
 
 std::optional<LocalGooseDialogueResponderRetryLineage>
-LocalGooseDialogueResponderRetryStore::find_for_event_generation(
+LocalGooseDialogueResponderRetryStore::find_for_event(
     const std::string& consumer_id,
-    const std::string& event_id,
-    const std::uint32_t retry_generation) const
+    const std::string& event_id) const
 {
-    if (!safe_identifier(consumer_id)
-        || retry_generation == 0
-        || retry_generation > local_goose_dialogue_responder_max_retry_generation) {
-        return std::nullopt;
-    }
-    return find_event_generation(
-        database_, consumer_id, event_id, retry_generation);
+    if (!safe_identifier(consumer_id)) return std::nullopt;
+    return find_event(database_, consumer_id, event_id);
 }
 
 LocalGooseDialogueResponderRetryLineageWrite
@@ -524,47 +454,31 @@ LocalGooseDialogueResponderRetryStore::prepare_lineage(
             return out;
         }
 
-        const auto event = find_event_generation(
-            database_, lineage.consumer_id, lineage.event_id,
-            lineage.retry_generation);
+        const auto event = find_event(
+            database_, lineage.consumer_id, lineage.event_id);
         if (event) {
             execute(database_, "COMMIT;");
             out.result = LocalGooseDialogueResponderRetryStoreResult::conflict;
             out.lineage = event;
-            out.detail = "responder retry event generation already exists";
+            out.detail = "responder retry event already has a lineage";
             return out;
         }
 
-        const auto sequence = find_sequence_generation(
-            database_, lineage.consumer_id, lineage.completion_sequence,
-            lineage.retry_generation);
+        const auto sequence = find_sequence(
+            database_, lineage.consumer_id, lineage.completion_sequence);
         if (sequence) {
             execute(database_, "COMMIT;");
             out.result = LocalGooseDialogueResponderRetryStoreResult::conflict;
             out.lineage = sequence;
-            out.detail = "responder retry sequence generation already exists";
+            out.detail = "responder retry sequence already has a lineage";
             return out;
-        }
-
-        if (lineage.retry_generation > 1) {
-            const auto previous = ::gaudere_agent::find_lineage(
-                database_, *lineage.previous_retry_lineage_id);
-            if (!previous
-                || previous->retry_generation + 1 != lineage.retry_generation
-                || !same_retry_root(*previous, lineage)) {
-                execute(database_, "COMMIT;");
-                out.result = LocalGooseDialogueResponderRetryStoreResult::conflict;
-                out.lineage = previous;
-                out.detail = "responder retry predecessor lineage conflicts";
-                return out;
-            }
         }
 
         Statement statement(database_,
             "INSERT INTO local_goose_dialogue_responder_retry_lineage("
             "lineage_id,request_id,consumer_id,completion_sequence,event_id,"
-            "retry_generation,previous_retry_lineage_id,created_at_ms,document)"
-            "VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)");
+            "retry_generation,created_at_ms,document)"
+            "VALUES(?1,?2,?3,?4,?5,?6,?7,?8)");
         bind_text(database_, statement.get(), 1, lineage.lineage_id);
         bind_text(database_, statement.get(), 2, lineage.request_id);
         bind_text(database_, statement.get(), 3, lineage.consumer_id);
@@ -573,14 +487,8 @@ LocalGooseDialogueResponderRetryStore::prepare_lineage(
         bind_text(database_, statement.get(), 5, lineage.event_id);
         bind_int64(database_, statement.get(), 6,
                    static_cast<std::int64_t>(lineage.retry_generation));
-        if (lineage.previous_retry_lineage_id) {
-            bind_text(database_, statement.get(), 7,
-                      *lineage.previous_retry_lineage_id);
-        } else {
-            bind_null(database_, statement.get(), 7);
-        }
-        bind_int64(database_, statement.get(), 8, lineage.created_at_ms);
-        bind_text(database_, statement.get(), 9, lineage_json(lineage).dump());
+        bind_int64(database_, statement.get(), 7, lineage.created_at_ms);
+        bind_text(database_, statement.get(), 8, lineage_json(lineage).dump());
         if (sqlite3_step(statement.get()) != SQLITE_DONE) {
             throw std::runtime_error(sqlite3_errmsg(database_));
         }
