@@ -27,7 +27,7 @@ struct LocalGooseDialogueResponderRetryLineageWrite {
 };
 
 /**
- * Dedicated append-only retry-lineage sidecar.
+ * Dedicated append-only generation-1 retry-lineage sidecar.
  *
  * This store is intentionally separate from the schema-v3 responder authority
  * sidecar. It cannot mutate historical grant/lease/decision/intent/disposition
@@ -53,10 +53,9 @@ public:
     find_by_request(const std::string& request_id) const;
 
     [[nodiscard]] std::optional<LocalGooseDialogueResponderRetryLineage>
-    find_for_event_generation(
+    find_for_event(
         const std::string& consumer_id,
-        const std::string& event_id,
-        std::uint32_t retry_generation) const;
+        const std::string& event_id) const;
 
     [[nodiscard]] LocalGooseDialogueResponderRetryLineageWrite prepare_lineage(
         const LocalGooseDialogueResponderRetryLineage& lineage);
