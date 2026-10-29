@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the first dormant storage tranche for explicitly retrying a responder intervention after a previous decision-authority attempt became terminal before dispatch.
+This document defines the first dormant storage tranche for explicitly retrying a responder intervention after a previous decision-authority attempt became unusable before dispatch.
 
 It does **not** authorize a retry, create a grant or lease, prepare an intent, submit a Task, advance a thread head, or ACK a completion event.
 
@@ -28,29 +28,26 @@ One lineage binds:
 - exact result SHA-256;
 - exact thread alias, revision and triggering V3 Task id;
 - exact observed human speaker id;
-- a retry generation in the bounded range 1..8;
-- for generation > 1, the immediately preceding retry-lineage id;
+- retry generation exactly `1`;
 - the root historical grant, lease, decision, intent and disposition ids;
 - the historical lease/decision/intent/disposition terminal reasons;
-- the historical grant terminal reason when one exists; an empty value is canonical when the grant remains in activated state but its authority window is already expired and irrevocably bound to the historical lease;
+- the historical grant terminal reason when one exists; an empty value is canonical when the grant remains activated but its authority window is already expired and irrevocably bound to the historical lease;
 - a creation timestamp, which is audit metadata and is intentionally excluded from identity.
 
-The lineage id hashes every immutable field above except the creation timestamp. Replaying the same explicit lineage request at a later time therefore resolves to the same id and cannot create a second logical retry generation.
+The lineage id hashes every immutable field above except the creation timestamp. Replaying the same explicit lineage request at a later time therefore resolves to the same id and cannot create a second logical retry.
 
-## Linear generations
+## Exactly one retry in v1
 
-Generation 1 has no previous retry-lineage id.
+Retry authority v1 permits exactly one generation-1 lineage for a consumer/event and exactly one for the corresponding consumer/completion sequence.
 
-Generation N > 1 must name an existing generation N-1 lineage with identical root event evidence and identical historical authority-chain evidence. The store rejects skipped generations and conflicting roots.
-
-The SQLite ledger additionally enforces:
+The SQLite ledger enforces:
 
 - unique `request_id`;
-- unique `(consumer_id,event_id,retry_generation)`;
-- unique `(consumer_id,completion_sequence,retry_generation)`;
-- unique non-null `previous_retry_lineage_id`.
+- unique `(consumer_id,event_id)`;
+- unique `(consumer_id,completion_sequence)`;
+- `retry_generation = 1`.
 
-This prevents concurrent duplicate generations and branching successors.
+There is no predecessor field and no generation-2 path in this version. If the generation-1 retry also becomes unusable, another retry requires a new versioned contract and a new explicit gate. Nothing in this v1 store can silently create or authorize a second retry.
 
 ## Sidecar boundary
 
@@ -58,13 +55,13 @@ The dedicated retry sidecar owns schema v1 and one table:
 
 `local_goose_dialogue_responder_retry_lineage`
 
-The sidecar is a current-user regular file mode `0600`, rejects unknown future schemas, enables SQLite foreign keys, and uses an append-only API. There is no update or delete operation in the store interface.
+The sidecar is a current-user regular file mode `0600`, rejects unknown future schemas, and uses an append-only API. There is no update or delete operation in the store interface.
 
 It is deliberately separate from the production schema-v3 responder sidecar. This tranche never opens or mutates the historical authority database.
 
 ## What this tranche cannot prove
 
-The retry-lineage store validates canonical identifiers, evidence shape, bounded generations and lineage continuity. It does not have read authority over the historical responder sidecar, completion feed, thread store or Task store.
+The retry-lineage store validates canonical identifiers, evidence shape and the exactly-one-retry boundary. It does not have read authority over the historical responder sidecar, completion feed, thread store or Task store.
 
 A later typed retry-authority service must re-read those authoritative stores and prove, at minimum, that:
 
@@ -75,9 +72,9 @@ A later typed retry-authority service must re-read those authoritative stores an
 5. the historical grant is either terminal with the recorded reason, or remains activated only for the historical lease and its grant authority window is already expired;
 6. no durable submission Task exists for the terminal historical intent;
 7. a **new** explicit grant and a **new** lease admit the retry;
-8. no previously admitted retry generation has already completed or has ambiguous durable submission evidence.
+8. no generation-1 retry lineage already exists for the exact event or completion sequence.
 
-Only after those proofs may a later tranche create a retry decision/disposition and prepare a new intent.
+Only after those proofs may a later tranche admit retry-specific decision/disposition authority and prepare a new intent.
 
 ## Production boundary
 
@@ -96,6 +93,6 @@ The provider remains off and no production authority state changes merely becaus
 
 The production sequence-4 historical decision, intent, disposition and lease have been recovered to terminal states without a submission or ACK. The associated historical grant was not rewritten by that recovery; it remains immutable and tied to the expired historical lease.
 
-This design therefore permits a future generation-1 lineage to represent that exact recovered chain without inventing a grant terminal transition that did not occur and without modifying any historical row.
+This design therefore permits one future generation-1 lineage to represent that exact recovered chain without inventing a grant terminal transition that did not occur and without modifying any historical row.
 
 Creating that real lineage is a later explicit gate. This tranche itself creates no production lineage and does not ACK sequence 4.
