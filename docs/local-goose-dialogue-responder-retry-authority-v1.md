@@ -10,7 +10,7 @@ It does **not** authorize a retry, create a grant or lease, prepare an intent, s
 
 The schema-v3 responder authority ledger intentionally models one durable decision and one durable disposition for one consumer/event. Its v1 disposition identity is derived from the exact completion evidence, consumer identity and disposition kind. Repeating the same intervention would therefore collide both with schema-v3 uniqueness and with the canonical v1 disposition id.
 
-A terminal historical attempt must remain immutable. Reusing, reopening, renewing or rewriting its grant, lease, decision, intent or disposition would erase the distinction between the authority that expired and any later authority explicitly granted for a retry.
+The historical attempt must remain immutable. Reusing, reopening, renewing or rewriting its grant, lease, decision, intent or disposition would erase the distinction between the authority that expired and any later authority explicitly granted for a retry.
 
 The retry path is therefore a separate append-only sidecar and namespace. The existing responder/authority sidecar remains schema v3 and is not migrated by this tranche.
 
@@ -31,7 +31,8 @@ One lineage binds:
 - a retry generation in the bounded range 1..8;
 - for generation > 1, the immediately preceding retry-lineage id;
 - the root historical grant, lease, decision, intent and disposition ids;
-- the terminal reason recorded for every member of that historical authority chain;
+- the historical lease/decision/intent/disposition terminal reasons;
+- the historical grant terminal reason when one exists; an empty value is canonical when the grant remains in activated state but its authority window is already expired and irrevocably bound to the historical lease;
 - a creation timestamp, which is audit metadata and is intentionally excluded from identity.
 
 The lineage id hashes every immutable field above except the creation timestamp. Replaying the same explicit lineage request at a later time therefore resolves to the same id and cannot create a second logical retry generation.
@@ -69,11 +70,12 @@ A later typed retry-authority service must re-read those authoritative stores an
 
 1. the completion event is still the exact next unACKed event for the consumer;
 2. the preferred thread head is still the exact historical human head;
-3. the referenced historical grant/lease/decision/intent/disposition chain exists and is terminal with the exact recorded reasons;
-4. no durable submission Task exists for the terminal historical intent;
-5. the historical lease committed zero turns for that failed attempt;
-6. a **new** explicit grant and a **new** lease admit the retry;
-7. no previously admitted retry generation has already completed or has ambiguous durable submission evidence.
+3. the referenced historical decision, intent and disposition are terminal with the exact recorded reasons;
+4. the historical lease is expired with the exact recorded reason and committed zero turns for that failed attempt;
+5. the historical grant is either terminal with the recorded reason, or remains activated only for the historical lease and its grant authority window is already expired;
+6. no durable submission Task exists for the terminal historical intent;
+7. a **new** explicit grant and a **new** lease admit the retry;
+8. no previously admitted retry generation has already completed or has ambiguous durable submission evidence.
 
 Only after those proofs may a later tranche create a retry decision/disposition and prepare a new intent.
 
@@ -92,6 +94,8 @@ The provider remains off and no production authority state changes merely becaus
 
 ## Sequence 4 recovery application
 
-The production sequence-4 historical attempt has already been recovered to terminal state. This design permits a future generation-1 lineage to point to that exact terminal chain without modifying any of its rows.
+The production sequence-4 historical decision, intent, disposition and lease have been recovered to terminal states without a submission or ACK. The associated historical grant was not rewritten by that recovery; it remains immutable and tied to the expired historical lease.
+
+This design therefore permits a future generation-1 lineage to represent that exact recovered chain without inventing a grant terminal transition that did not occur and without modifying any historical row.
 
 Creating that real lineage is a later explicit gate. This tranche itself creates no production lineage and does not ACK sequence 4.
