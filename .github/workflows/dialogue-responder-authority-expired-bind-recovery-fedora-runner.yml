@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'scripts/recover-first-production-dialogue-responder-authority-expired-bind.sh'
+      - 'scripts/backup-state.sh'
       - '.github/workflows/dialogue-responder-authority-expired-bind-recovery-fedora-runner.yml'
   workflow_dispatch:
 
@@ -21,8 +22,12 @@ jobs:
         run: |
           set -euo pipefail
           runner=scripts/recover-first-production-dialogue-responder-authority-expired-bind.sh
+          backup=scripts/backup-state.sh
 
+          [ -x "$runner" ]
+          [ -x "$backup" ]
           sh -n "$runner"
+          sh -n "$backup"
           grep -Fq 'AUTHORIZED_DIALOGUE_RESPONDER_AUTHORITY_EXPIRED_BIND_RECOVERY' "$runner"
           grep -Fq '93811d1e201641ccfe0a31bc5ebb53458e7794fd2f727f18ff91b7ff246ba071' "$runner"
           grep -Fq '1316cf68db93e4c91a7bd79fbd289b8f382f8659' "$runner"
@@ -62,7 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          runner=scripts/recover-first-production-dialogue-responder-authority-expired-bind.sh
+          runner=scripts/recover-first-production-dialogue-responder-authority-expired-bind-recovery.sh
           grep -Fq 'src.backup(dst)' "$runner"
           grep -Fq 'rehearsal/local-goose-dialogue-responder.db' "$runner"
           grep -Fq '"$responder_sidecar"' "$runner"
