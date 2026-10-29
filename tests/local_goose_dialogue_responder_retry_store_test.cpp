@@ -7,10 +7,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
 
 using namespace gaudere_agent;
 
@@ -99,7 +101,7 @@ LocalGooseDialogueResponderRetryLineage lineage(
         id("cognition.local-goose-dialogue.responder-decision.v1:", '6'),
         id("cognition.local-goose-dialogue.responder-intent.v1:", '7'),
         id("cognition.local-goose-dialogue.responder-disposition.v1:", '8'),
-        "grant_expired",
+        "",
         "lease_expired",
         decision_reason,
         "lease_or_intent_expired",
@@ -118,6 +120,7 @@ int main()
 
     const auto first = lineage("retry-sequence4-generation1", 1, std::nullopt, 1000);
     assert(valid_local_goose_dialogue_responder_retry_lineage(first));
+    assert(first.historical_grant_terminal_reason.empty());
 
     const auto first_replay = lineage(
         "retry-sequence4-generation1", 1, std::nullopt, 2000);
