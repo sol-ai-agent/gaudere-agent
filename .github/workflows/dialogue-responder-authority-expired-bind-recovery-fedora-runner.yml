@@ -25,7 +25,7 @@ jobs:
           backup=scripts/backup-state.sh
 
           [ -x "$runner" ]
-          [ -x "$backup" ]
+          [ ! -x "$backup" ]
           sh -n "$runner"
           sh -n "$backup"
           grep -Fq 'AUTHORIZED_DIALOGUE_RESPONDER_AUTHORITY_EXPIRED_BIND_RECOVERY' "$runner"
@@ -35,6 +35,7 @@ jobs:
           grep -Fq '<inspect|recover-expired-bind>' "$runner"
           grep -Fq 'recover-expired-bind' "$runner"
           grep -Fq 'backup-state.sh' "$runner"
+          grep -Fq 'sh "$backup_script"' "$runner"
           grep -Fq -- '--network none' "$runner"
           grep -Fq 'classification=intervention_owned' "$runner"
           grep -Fq 'verify_observer_state 2' "$runner"
