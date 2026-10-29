@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <limits>
 #include <string>
-#include <utility>
 
 namespace gaudere_agent {
 namespace {
@@ -95,7 +94,6 @@ std::string lineage_digest(
     append(canonical, lineage.observed_speaker_kind);
     append(canonical, lineage.observed_speaker_id);
     append(canonical, static_cast<std::uint64_t>(lineage.retry_generation));
-    append(canonical, lineage.previous_retry_lineage_id.value_or(""));
     append(canonical, lineage.historical_grant_id);
     append(canonical, lineage.historical_lease_id);
     append(canonical, lineage.historical_decision_id);
@@ -122,8 +120,6 @@ make_local_goose_dialogue_responder_retry_lineage(
     const std::uint64_t thread_revision,
     const std::string& task_id,
     const std::string& observed_speaker_id,
-    const std::uint32_t retry_generation,
-    std::optional<std::string> previous_retry_lineage_id,
     const std::string& historical_grant_id,
     const std::string& historical_lease_id,
     const std::string& historical_decision_id,
@@ -147,8 +143,7 @@ make_local_goose_dialogue_responder_retry_lineage(
     lineage.task_id = task_id;
     lineage.observed_speaker_kind = "human";
     lineage.observed_speaker_id = observed_speaker_id;
-    lineage.retry_generation = retry_generation;
-    lineage.previous_retry_lineage_id = std::move(previous_retry_lineage_id);
+    lineage.retry_generation = local_goose_dialogue_responder_retry_generation;
     lineage.historical_grant_id = historical_grant_id;
     lineage.historical_lease_id = historical_lease_id;
     lineage.historical_decision_id = historical_decision_id;
@@ -186,9 +181,8 @@ bool valid_local_goose_dialogue_responder_retry_lineage(
         || !prefixed_sha256(lineage.task_id, v3_task_prefix)
         || lineage.observed_speaker_kind != "human"
         || !safe_identifier(lineage.observed_speaker_id)
-        || lineage.retry_generation == 0
         || lineage.retry_generation
-            > local_goose_dialogue_responder_max_retry_generation
+            != local_goose_dialogue_responder_retry_generation
         || !prefixed_sha256(lineage.historical_grant_id, grant_prefix)
         || !safe_identifier(lineage.historical_lease_id)
         || !prefixed_sha256(lineage.historical_decision_id, decision_prefix)
@@ -202,17 +196,6 @@ bool valid_local_goose_dialogue_responder_retry_lineage(
         || !bounded_reason(lineage.historical_disposition_terminal_reason)
         || lineage.created_at_ms < 0) {
         return false;
-    }
-
-    if (lineage.retry_generation == 1) {
-        if (lineage.previous_retry_lineage_id) return false;
-    } else {
-        if (!lineage.previous_retry_lineage_id
-            || !prefixed_sha256(
-                *lineage.previous_retry_lineage_id,
-                local_goose_dialogue_responder_retry_lineage_prefix)) {
-            return false;
-        }
     }
 
     return lineage.lineage_id
