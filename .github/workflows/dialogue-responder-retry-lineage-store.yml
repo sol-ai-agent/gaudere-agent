@@ -1,0 +1,99 @@
+name: Dialogue responder retry lineage store v1 gate
+
+on:
+  pull_request:
+    paths:
+      - src/LocalGooseDialogueResponderRetryAuthority.hpp
+      - src/LocalGooseDialogueResponderRetryAuthority.cpp
+      - src/LocalGooseDialogueResponderRetryStore.hpp
+      - src/LocalGooseDialogueResponderRetryStore.cpp
+      - tests/local_goose_dialogue_responder_retry_store_test.cpp
+      - docs/local-goose-dialogue-responder-retry-authority-v1.md
+      - .github/workflows/dialogue-responder-retry-lineage-store.yml
+  push:
+    branches: [main]
+    paths:
+      - src/LocalGooseDialogueResponderRetryAuthority.hpp
+      - src/LocalGooseDialogueResponderRetryAuthority.cpp
+      - src/LocalGooseDialogueResponderRetryStore.hpp
+      - src/LocalGooseDialogueResponderRetryStore.cpp
+      - tests/local_goose_dialogue_responder_retry_store_test.cpp
+      - docs/local-goose-dialogue-responder-retry-authority-v1.md
+      - .github/workflows/dialogue-responder-retry-lineage-store.yml
+
+permissions:
+  contents: read
+
+jobs:
+  retry-lineage-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove append-only dormant retry boundary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          contract=src/LocalGooseDialogueResponderRetryAuthority.hpp
+          store=src/LocalGooseDialogueResponderRetryStore.cpp
+          store_h=src/LocalGooseDialogueResponderRetryStore.hpp
+          test_cpp=tests/local_goose_dialogue_responder_retry_store_test.cpp
+
+          grep -Fq 'local_goose_dialogue_responder_retry_sidecar_schema = 1' "$contract"
+          grep -Fq 'local_goose_dialogue_responder_retry_generation = 1' "$contract"
+          grep -Fq 'cognition.local-goose-dialogue.responder-retry-lineage.v1:' "$contract"
+          ! grep -Fq 'previous_retry_lineage_id' "$contract"
+
+          grep -Fq 'CHECK(retry_generation = 1)' "$store"
+          grep -Fq 'UNIQUE(consumer_id,event_id)' "$store"
+          grep -Fq 'UNIQUE(consumer_id,completion_sequence)' "$store"
+          ! grep -Fq 'previous_retry_lineage_id' "$store"
+
+          # Existing schema-v3 authority ledger is deliberately untouched.
+          grep -Fq 'local_goose_dialogue_responder_owned_sidecar_schema = 2' src/LocalGooseDialogueResponder.hpp
+          grep -Fq 'local_goose_dialogue_responder_sidecar_schema = 3' src/LocalGooseDialogueResponder.hpp
+          grep -Fq 'local_goose_dialogue_responder_authority_sidecar_schema = 3' src/LocalGooseDialogueResponderAuthority.hpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetry' src/LocalGooseDialogueResponderStore.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetry' src/LocalGooseDialogueResponderAuthorityStore.cpp
+
+          # Append-only store: no mutation of an existing lineage and no runtime authority.
+          ! grep -Eq 'UPDATE local_goose_dialogue_responder_retry|DELETE FROM local_goose_dialogue_responder_retry' "$store"
+          ! grep -Eq 'CompletionFeed|PreferredSubmit|Runtime|TaskStore|provider|OpenAI|stimulus|wake|systemctl|podman' "$store"
+          ! grep -Eq 'acknowledge\(|dispatch\(|submit\(|create_lease\(|activate_grant\(' "$store_h"
+
+          # Deliberately absent from production/runtime wiring in this tranche.
+          ! grep -Fq 'LocalGooseDialogueResponderRetry' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetry' Containerfile
+          ! grep -Fq 'LocalGooseDialogueResponderRetry' src/Makefile.am
+
+          # Adversarial proof covers replay, exact-one conflicts, second-generation rejection and future-schema rejection.
+          grep -Fq 'first_replay.lineage_id == first.lineage_id' "$test_cpp"
+          grep -Fq 'same_event' "$test_cpp"
+          grep -Fq 'same_sequence' "$test_cpp"
+          grep -Fq 'forbidden_second_generation' "$test_cpp"
+          grep -Fq 'historical_grant_terminal_reason.empty()' "$test_cpp"
+          grep -Fq 'rejected_future' "$test_cpp"
+
+  fedora-44-werror:
+    needs: retry-lineage-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y gcc-c++ json-devel sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Compile retry lineage store with Werror
+        run: |
+          set -eu
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Isrc \
+            tests/local_goose_dialogue_responder_retry_store_test.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/LocalGooseDialogueResponderRetryStore.cpp \
+            src/Sha256.cpp \
+            -lsqlite3 \
+            -o responder-retry-store-test
+      - name: Run retry lineage adversarial proof
+        run: |
+          set -eu
+          ./responder-retry-store-test
