@@ -7,12 +7,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <utility>
 
 using namespace gaudere_agent;
 
@@ -75,8 +73,6 @@ std::string id(const std::string& prefix, const char c)
 
 LocalGooseDialogueResponderRetryLineage lineage(
     const std::string& request_id,
-    const std::uint32_t generation,
-    std::optional<std::string> previous,
     const std::int64_t created_at_ms,
     const std::string& event_id = id(
         "cognition.local-goose-dialogue.completion.v1:", '1'),
@@ -94,8 +90,6 @@ LocalGooseDialogueResponderRetryLineage lineage(
         3,
         id("cognition.local-goose-dialogue.v3:", '3'),
         "bertrand",
-        generation,
-        std::move(previous),
         id("cognition.local-goose-dialogue.responder-grant.v1:", '4'),
         "authority-lease-v1-5555555555555555555555555555555555555555555555555555555555555555",
         id("cognition.local-goose-dialogue.responder-decision.v1:", '6'),
@@ -118,12 +112,12 @@ int main()
     std::filesystem::remove(path);
     std::filesystem::remove(future_path);
 
-    const auto first = lineage("retry-sequence4-generation1", 1, std::nullopt, 1000);
+    const auto first = lineage("retry-sequence4-generation1", 1000);
     assert(valid_local_goose_dialogue_responder_retry_lineage(first));
+    assert(first.retry_generation == 1);
     assert(first.historical_grant_terminal_reason.empty());
 
-    const auto first_replay = lineage(
-        "retry-sequence4-generation1", 1, std::nullopt, 2000);
+    const auto first_replay = lineage("retry-sequence4-generation1", 2000);
     assert(first_replay.lineage_id == first.lineage_id);
 
     LocalGooseDialogueResponderRetryStore store(path);
@@ -153,62 +147,41 @@ int main()
     const auto loaded = store.find_lineage(first.lineage_id);
     assert(loaded && loaded->request_id == first.request_id);
     assert(store.find_by_request(first.request_id));
-    assert(store.find_for_event_generation(
-        first.consumer_id, first.event_id, 1));
+    assert(store.find_for_event(first.consumer_id, first.event_id));
 
     const auto same_request_changed_evidence = lineage(
-        first.request_id, 1, std::nullopt, 1100,
+        first.request_id, 1100,
         first.event_id, first.completion_sequence,
         "different_terminal_reason");
     assert(same_request_changed_evidence.lineage_id != first.lineage_id);
     assert(store.prepare_lineage(same_request_changed_evidence).result
         == LocalGooseDialogueResponderRetryStoreResult::conflict);
 
-    const auto same_event_generation = lineage(
-        "retry-sequence4-generation1-conflict", 1, std::nullopt, 1200);
-    assert(store.prepare_lineage(same_event_generation).result
+    const auto same_event = lineage(
+        "retry-sequence4-event-conflict", 1200);
+    assert(store.prepare_lineage(same_event).result
         == LocalGooseDialogueResponderRetryStoreResult::conflict);
 
-    const auto same_sequence_generation = lineage(
-        "retry-sequence4-generation1-sequence-conflict", 1, std::nullopt, 1300,
+    const auto same_sequence = lineage(
+        "retry-sequence4-sequence-conflict", 1300,
         id("cognition.local-goose-dialogue.completion.v1:", 'a'), 4);
-    assert(store.prepare_lineage(same_sequence_generation).result
+    assert(store.prepare_lineage(same_sequence).result
         == LocalGooseDialogueResponderRetryStoreResult::conflict);
 
-    const auto second = lineage(
-        "retry-sequence4-generation2", 2, first.lineage_id, 2000);
-    assert(valid_local_goose_dialogue_responder_retry_lineage(second));
-    const auto second_write = store.prepare_lineage(second);
-    assert(second_write.result
-        == LocalGooseDialogueResponderRetryStoreResult::accepted);
-    assert(second_write.lineage
-        && second_write.lineage->previous_retry_lineage_id
-            == std::optional<std::string>{first.lineage_id});
-
-    const auto skipped_predecessor = lineage(
-        "retry-sequence4-generation3-wrong-parent", 3, first.lineage_id, 3000);
-    assert(store.prepare_lineage(skipped_predecessor).result
-        == LocalGooseDialogueResponderRetryStoreResult::conflict);
-
-    const auto third = lineage(
-        "retry-sequence4-generation3", 3, second.lineage_id, 3000);
-    assert(store.prepare_lineage(third).result
-        == LocalGooseDialogueResponderRetryStoreResult::accepted);
-
-    auto too_far = lineage(
-        "retry-sequence4-generation9", 9, third.lineage_id, 4000);
-    assert(!valid_local_goose_dialogue_responder_retry_lineage(too_far));
-    assert(store.prepare_lineage(too_far).result
+    auto forbidden_second_generation = lineage(
+        "retry-sequence4-generation2", 2000,
+        id("cognition.local-goose-dialogue.completion.v1:", 'b'), 5);
+    forbidden_second_generation.retry_generation = 2;
+    assert(!valid_local_goose_dialogue_responder_retry_lineage(
+        forbidden_second_generation));
+    assert(store.prepare_lineage(forbidden_second_generation).result
         == LocalGooseDialogueResponderRetryStoreResult::invalid);
 
     assert(scalar(path,
-        "SELECT COUNT(*) FROM local_goose_dialogue_responder_retry_lineage;") == 3);
+        "SELECT COUNT(*) FROM local_goose_dialogue_responder_retry_lineage;") == 1);
     assert(scalar(path,
         "SELECT COUNT(*) FROM local_goose_dialogue_responder_retry_lineage "
-        "WHERE retry_generation=1 AND previous_retry_lineage_id IS NULL;") == 1);
-    assert(scalar(path,
-        "SELECT COUNT(*) FROM local_goose_dialogue_responder_retry_lineage "
-        "WHERE retry_generation>1 AND previous_retry_lineage_id IS NOT NULL;") == 2);
+        "WHERE retry_generation=1;") == 1);
 
     {
         LocalGooseDialogueResponderRetryStore fresh(future_path);
