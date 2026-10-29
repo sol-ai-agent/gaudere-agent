@@ -1,1 +1,0 @@
-store-only; append-only; no runtime wiring; no production state mutation
