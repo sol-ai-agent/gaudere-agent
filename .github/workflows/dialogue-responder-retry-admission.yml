@@ -1,0 +1,127 @@
+name: Dialogue responder retry admission v1 gate
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryAdmission.hpp'
+      - 'src/LocalGooseDialogueResponderRetryAdmission.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_admission_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-admission-v1.md'
+      - '.github/workflows/dialogue-responder-retry-admission.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryAdmission.hpp'
+      - 'src/LocalGooseDialogueResponderRetryAdmission.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_admission_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-admission-v1.md'
+      - '.github/workflows/dialogue-responder-retry-admission.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  retry-admission-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove retry admission has one append-only mutation surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          header=src/LocalGooseDialogueResponderRetryAdmission.hpp
+          impl=src/LocalGooseDialogueResponderRetryAdmission.cpp
+          test_file=tests/local_goose_dialogue_responder_retry_admission_test.cpp
+
+          grep -Fq 'prepare_lineage(' "$header"
+          grep -Fq 'retry_store_.prepare_lineage(lineage)' "$impl"
+          grep -Fq 'LocalGooseDialogueResponderDecisionState::expired' "$impl"
+          grep -Fq 'LocalGooseDialogueResponderIntentState::expired' "$impl"
+          grep -Fq 'LocalGooseDialogueResponderDispositionState::manual_review' "$impl"
+          grep -Fq 'LocalGooseDialogueResponderLeaseState::expired' "$impl"
+          grep -Fq 'LocalGooseDialogueResponderGrantState::activated' "$impl"
+          grep -Fq 'bound_intent_expired_before_dispatch' "$impl"
+          grep -Fq 'lease_or_intent_expired' "$impl"
+          grep -Fq 'lease_expired' "$impl"
+          grep -Fq 'find_by_idempotency_key' "$impl"
+          grep -Fq 'next_for_consumer' "$impl"
+          grep -Fq 'thread_store_.find' "$impl"
+
+          ! grep -Eq 'prepare_grant\(|activate_grant\(|terminalize_grant\(' "$impl"
+          ! grep -Eq 'prepare_decision\(|bind_decision|terminalize_decision\(' "$impl"
+          ! grep -Eq 'create_lease\(|close_lease\(' "$impl"
+          ! grep -Eq 'prepare_intent\(|terminalize_intent\(|commit_submission\(|complete_intent\(' "$impl"
+          ! grep -Eq 'prepare_disposition\(|bind_disposition|terminalize_disposition\(|complete_disposition\(' "$impl"
+          ! grep -Eq '\.acknowledge\(|append_for_revision\(|thread_store_\.replace\(|thread_store_\.seed\(' "$impl"
+          ! grep -Eq 'dispatch\(|submit\(|task_store_\.save\(' "$impl"
+          ! grep -Eq 'Runtime|provider|OpenAI|stimulus|wake|systemctl|podman' "$impl"
+
+          ! grep -Fq 'LocalGooseDialogueResponderRetryAdmission' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryAdmission' Containerfile
+          ! grep -Fq 'LocalGooseDialogueResponderRetryAdmission' src/Makefile.am
+
+          grep -Fq 'prove_success_and_idempotent_replay' "$test_file"
+          grep -Fq 'prove_submission_task_blocks_admission' "$test_file"
+          grep -Fq 'prove_stale_head_blocks_admission' "$test_file"
+          grep -Fq 'prove_consumed_trigger_blocks_admission' "$test_file"
+
+  fedora-44-retry-admission:
+    needs: retry-admission-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: >-
+          dnf install -y autoconf automake diffutils gcc-c++ git json-devel
+          libcurl-devel libtool make pkgconf-pkg-config sqlite-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build pinned core
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/tmp/gaudere-install CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+
+      - name: Compile retry admission with Werror
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            tests/local_goose_dialogue_responder_retry_admission_test.cpp \
+            src/LocalGooseDialogueResponderRetryAdmission.cpp \
+            src/LocalGooseDialogueResponderRetryStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/retry-admission-test \
+            ${libs} -lsqlite3
+
+      - name: Run retry admission adversarial proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          /tmp/retry-admission-test
