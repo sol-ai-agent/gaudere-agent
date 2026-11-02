@@ -49,9 +49,9 @@ using LocalGooseDialogueResponderRetryAdmissionClock =
  * responder retry lineage.
  *
  * Historical responder/authority, completion-feed, preferred-head and Task
- * stores are held as const references. The only mutable store is the dedicated
- * append-only retry sidecar, and the only mutation requested from it is
- * prepare_lineage().
+ * stores are held internally as const references. The only mutable store is the
+ * dedicated append-only retry sidecar, and the only mutation requested from it
+ * is prepare_lineage().
  *
  * A successfully prepared lineage is audit evidence only. It creates no grant,
  * lease, decision, intent, disposition, Task, preferred-head update or feed ACK
@@ -60,11 +60,11 @@ using LocalGooseDialogueResponderRetryAdmissionClock =
 class LocalGooseDialogueResponderRetryAdmissionService {
 public:
     LocalGooseDialogueResponderRetryAdmissionService(
-        const LocalGooseDialogueCompletionFeedStore& completion_store,
-        const LocalGooseDialogueThreadStore& thread_store,
-        const LocalGooseDialogueResponderStore& responder_store,
-        const LocalGooseDialogueResponderAuthorityStore& authority_store,
-        const gaudere::work::TaskStore& task_store,
+        LocalGooseDialogueCompletionFeedStore& completion_store,
+        LocalGooseDialogueThreadStore& thread_store,
+        LocalGooseDialogueResponderStore& responder_store,
+        LocalGooseDialogueResponderAuthorityStore& authority_store,
+        gaudere::work::TaskStore& task_store,
         LocalGooseDialogueResponderRetryStore& retry_store,
         LocalGooseDialogueResponderRetryAdmissionClock clock);
 
