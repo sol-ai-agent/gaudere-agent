@@ -61,7 +61,9 @@ Expected:
 4. same admission returns `duplicate`, not a second lineage;
 5. retry schema 1 and exactly one lineage for the canonical event/consumer;
 6. logical SHA-256 of the four copied pre-existing databases is unchanged;
-7. live production still passes the exact prestate, with no retry sidecar.
+7. logical SHA-256 of the **four production SQLite databases** also matches
+   the stopped-state snapshot, both immediately after restart and after rehearsal;
+8. live production still passes the exact prestate, with no retry sidecar.
 
 A PASS proves *one retry lineage may be admitted in a copy*.
 It does **not** prove the lineage exists in production and does not
