@@ -17,7 +17,7 @@ old grant/lease/decision/intent/disposition must never be reactivated or reused.
 The executable `gaudere-responder-retry-admission-isolated` has precisely:
 
 - `--help`
-- `inspect` — validate recovered evidence, read and report any retry lineage
+- `inspect` — validate recovered evidence, read and report any retry lineage,\n  without creating an absent retry sidecar
 - `admit-generation-1` — call the typed #266 admission service to append one
   immutable retry lineage; exact replay returns `duplicate`
 
@@ -30,7 +30,8 @@ All paths are **hard-locked** under `/rehearsal`. The five SQLite files are:
 - `local-goose-dialogue-responder-retry.db` — dedicated retry schema 1
 
 The first four must already exist in a copied workspace. Only the fifth may
-be created and appended by the helper. No path flag, arbitrary command,
+be created and appended by the explicit `admit-generation-1` command.
+The `inspect` command does not create an absent retry file. No path flag, arbitrary command,
 runtime submission or control socket is exposed.
 
 An exact process replay uses the persisted lineage creation timestamp, so
