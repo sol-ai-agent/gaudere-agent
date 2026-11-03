@@ -64,6 +64,8 @@ jobs:
           grep -Fq 'logical_sha "$rehearsal/local-goose-dialogue-thread.db"' "$script"
           grep -Fq 'logical_sha "$rehearsal/local-goose-dialogue-completion.db"' "$script"
           grep -Fq 'logical_sha "$rehearsal/local-goose-dialogue-responder.db"' "$script"
+          grep -Fq 'verify_production_hashes' "$script"
+          grep -Fq 'PRODUCTION_SQLITE_LOGICAL_HASHES=unchanged' "$script"
           grep -Fq 'PRODUCTION_RETRY_SIDECAR=absent' "$script"
           ! grep -Eq 'dispatch-intent|bind-decision|activate-grant|prepare-grant|dialogue-feed-ack|local-thread-v3-send' "$script"
           ! grep -Eq 'tar -x|sqlite3 .* (UPDATE|DELETE|INSERT)|rm -rf|systemctl.*disable|podman run.*--network host' "$script"
