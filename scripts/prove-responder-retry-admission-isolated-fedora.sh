@@ -105,7 +105,7 @@ helper()
 }
 
 [ "$authorization" = AUTHORIZED_RESPONDER_RETRY_ADMISSION_ISOLATED ] || fail "explicit isolated gate authorization required"
-for cmd in git podman systemctl sqlite3 python3 sha256sum awk sed grep tr id mkdir mktemp sh; do
+for cmd in git podman systemctl sqlite3 python3 sha256sum awk sed grep tr id mkdir mktemp sh sleep; do
     command -v "$cmd" >/dev/null 2>&1 || fail "missing command: $cmd"
 done
 for f in "$backup_script" "$repo/Containerfile" "$repo/Containerfile.responder-retry-admission-isolated" \
@@ -182,6 +182,7 @@ PY
 printf '=== RESTART UNCHANGED SERVICE BEFORE REHEARSAL ===\n'
 systemctl --user start "$service" || fail "service restart failed"
 stopped=0
+sleep 3
 verify_live
 
 state_sha=$(logical_sha "$rehearsal/state.db")
