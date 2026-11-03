@@ -1,0 +1,87 @@
+name: Dialogue responder retry admission isolated Fedora runner
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/prove-responder-retry-admission-isolated-fedora.sh'
+      - 'docs/local-goose-dialogue-responder-retry-admission-fedora-v1.md'
+      - '.github/workflows/dialogue-responder-retry-admission-fedora.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/prove-responder-retry-admission-isolated-fedora.sh'
+      - 'docs/local-goose-dialogue-responder-retry-admission-fedora-v1.md'
+      - '.github/workflows/dialogue-responder-retry-admission-fedora.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  runner-fail-closed-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove Fedora runner is explicit and rehearsal-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=scripts/prove-responder-retry-admission-isolated-fedora.sh
+          test -f "$script"
+          test ! -x "$script"
+          sh -n "$script"
+          grep -Fq 'AUTHORIZED_RESPONDER_RETRY_ADMISSION_ISOLATED' "$script"
+          grep -Fq '[ "$(git -C "$repo" branch --show-current)" = main ]' "$script"
+          grep -Fq 'git -C "$repo" fetch --quiet origin main' "$script"
+          grep -Fq 'GAUDERE_STATE_DIR="$state_dir" sh "$backup_script"' "$script"
+          grep -Fq 'systemctl --user stop "$service"' "$script"
+          grep -Fq 'systemctl --user start "$service"' "$script"
+          grep -Fq "FEDORA_GAUDERE_RESPONDER_RETRY_ADMISSION_ISOLATED=ABORTED" "$script"
+          grep -Fq "FEDORA_GAUDERE_RESPONDER_RETRY_ADMISSION_ISOLATED=PASS" "$script"
+          grep -Fq "SERVICE_RECOVERY=restart_attempted_without_production_commit" "$script"
+          grep -Fq 'expected_image=93811d1e201641ccfe0a31bc5ebb53458e7794fd2f727f18ff91b7ff246ba071' "$script"
+          grep -Fq 'expected_core=1316cf68db93e4c91a7bd79fbd289b8f382f8659' "$script"
+          grep -Fq '[ "$(provider_total)" = 10 ]' "$script"
+          grep -Fq 'network_mode' "$script"
+          grep -Fq 'verify_trigger' "$script"
+          grep -Fq 'disposition_state=4' "$script"
+          grep -Fq 'AUTHORITY_DEFAULT=disabled' "$script"
+          grep -Fq '[ ! -e "$retry_db" ] && [ ! -L "$retry_db" ]' "$script"
+          grep -Fq 'python3 - "$rehearsal" "$state_db" "$thread_db" "$completion_db" "$responder_db"' "$script"
+          grep -Fq 'src.backup(dst)' "$script"
+          grep -Fq 'rehearsal="$workspace/rehearsal"' "$script"
+          grep -Fq 'v "$rehearsal:/rehearsal:rw"' "$script"
+          grep -Fq 'read-only --read-only-tmpfs' "$script"
+          grep -Fq -- '--network none' "$script"
+          grep -Fq -- '--cap-drop all' "$script"
+          grep -Fq 'before=$(helper inspect)' "$script"
+          grep -Fq 'admit=$(helper admit-generation-1)' "$script"
+          grep -Fq 'replay=$(helper admit-generation-1)' "$script"
+          grep -Fq 'ADMISSION_RESULT=accepted' "$script"
+          grep -Fq 'ADMISSION_RESULT=duplicate' "$script"
+          grep -Fq 'LINEAGE_PRESENT=no' "$script"
+          grep -Fq 'LINEAGE_PRESENT=yes' "$script"
+          grep -Fq 'logical_sha "$rehearsal/state.db"' "$script"
+          grep -Fq 'logical_sha "$rehearsal/local-goose-dialogue-thread.db"' "$script"
+          grep -Fq 'logical_sha "$rehearsal/local-goose-dialogue-completion.db"' "$script"
+          grep -Fq 'logical_sha "$rehearsal/local-goose-dialogue-responder.db"' "$script"
+          grep -Fq 'verify_production_hashes' "$script"
+          grep -Fq 'PRODUCTION_SQLITE_LOGICAL_HASHES=unchanged' "$script"
+          grep -Fq 'PRODUCTION_RETRY_SIDECAR=absent' "$script"
+          ! grep -Eq 'dispatch-intent|bind-decision|activate-grant|prepare-grant|dialogue-feed-ack|local-thread-v3-send' "$script"
+          ! grep -Eq 'tar -x|sqlite3 .* (UPDATE|DELETE|INSERT)|rm -rf|systemctl.*disable|podman run.*--network host' "$script"
+          ! grep -Fq 'prove-responder-retry-admission-isolated-fedora' src/main.cpp
+          ! grep -Fq 'prove-responder-retry-admission-isolated-fedora' Containerfile
+
+  fedora-44-runner-syntax:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Fedora shell portability and helper container contract
+        shell: sh
+        run: |
+          set -eu
+          sh -n scripts/prove-responder-retry-admission-isolated-fedora.sh
+          grep -Fq 'gaudere-responder-retry-admission-isolated' Containerfile.responder-retry-admission-isolated
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-responder-retry-admission-isolated"]' Containerfile.responder-retry-admission-isolated
+          grep -Fq 'io.gaudere.role="dialogue-responder-retry-admission-isolated-v1"' Containerfile.responder-retry-admission-isolated
