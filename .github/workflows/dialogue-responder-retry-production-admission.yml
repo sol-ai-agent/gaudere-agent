@@ -1,0 +1,89 @@
+name: Dialogue responder retry generation-1 production admission
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/admit-first-production-responder-retry-generation1.sh'
+      - 'docs/local-goose-dialogue-responder-retry-production-admission-v1.md'
+      - '.github/workflows/dialogue-responder-retry-production-admission.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/admit-first-production-responder-retry-generation1.sh'
+      - 'docs/local-goose-dialogue-responder-retry-production-admission-v1.md'
+      - '.github/workflows/dialogue-responder-retry-production-admission.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  production-retry-fail-closed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check separate production authorization and fail-closed state copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=scripts/admit-first-production-responder-retry-generation1.sh
+          test -f "$script"
+          test ! -x "$script"
+          sh -n "$script"
+          grep -Fq 'AUTHORIZED_RESPONDER_RETRY_ADMISSION_PRODUCTION' "$script"
+          grep -Fq 'expected_lineage_id=cognition.local-goose-dialogue.responder-retry-lineage.v1:da6bb42704949f0003e670c06e7ed04078c238f08356f1853f9b3776455f2bca' "$script"
+          grep -Fq '[ "$(git -C "$repo" branch --show-current)" = main ]' "$script"
+          grep -Fq '[ "$agent_ref" = "$(git -C "$repo" rev-parse origin/main)" ]' "$script"
+          grep -Fq 'expected_image=93811d1e201641ccfe0a31bc5ebb53458e7794fd2f727f18ff91b7ff246ba071' "$script"
+          grep -Fq 'expected_core=1316cf68db93e4c91a7bd79fbd289b8f382f8659' "$script"
+          grep -Fq '[ "$(network_mode)" = none ]' "$script"
+          grep -Fq '[ "$(provider_total)" = 10 ]' "$script"
+          grep -Fq 'verify_trigger' "$script"
+          grep -Fq 'AUTHORITY_DEFAULT=disabled' "$script"
+          grep -Fq 'disposition_state=4' "$script"
+          grep -Fq '[ ! -e "$retry_db" ] && [ ! -L "$retry_db" ]' "$script"
+          grep -Fq 'GAUDERE_STATE_DIR="$state_dir" sh "$backup_script"' "$script"
+          grep -Fq 'python3 - "$rehearsal" "$state_db" "$thread_db" "$completion_db" "$responder_db"' "$script"
+          grep -Fq 'src.backup(dst)' "$script"
+          grep -Fq 'before=$(helper inspect)' "$script"
+          grep -Fq 'admit=$(helper admit-generation-1)' "$script"
+          grep -Fq 'replay=$(helper admit-generation-1)' "$script"
+          grep -Fq 'ADMISSION_RESULT=duplicate' "$script"
+          grep -Fq 'LINEAGE_PRESENT=no' "$script"
+          grep -Fq 'LINEAGE_PRESENT=yes' "$script"
+          grep -Fq 'verify_production_hashes' "$script"
+          grep -Fq "source = Path(sys.argv[1])" "$script"
+          grep -Fq 'if os.path.lexists(target):' "$script"
+          grep -Fq 'os.link(staging, target)' "$script"
+          grep -Fq 'os.fsync(output.fileno())' "$script"
+          grep -Fq 'os.fsync(directory_fd)' "$script"
+          grep -Fq 'os.chmod(staging, 0o600)' "$script"
+          grep -Fq 'committing=1' "$script"
+          grep -Fq 'SERVICE_RECOVERY=stopped_after_possible_retry_sidecar_commit' "$script"
+          grep -Fq 'SERVICE_RECOVERY=restart_attempted_without_production_commit' "$script"
+          grep -Fq 'PRECOMMIT_BACKUP=' "$script"
+          grep -Fq 'PRODUCTION_RETRY_SIDECAR=present' "$script"
+          grep -Fq 'PRODUCTION_RETRY_LINEAGES=1' "$script"
+          grep -Fq 'PRODUCTION_SQLITE_LOGICAL_HASHES=unchanged' "$script"
+          grep -Fq 'FEDORA_GAUDERE_RESPONDER_RETRY_ADMISSION_PRODUCTION=PASS' "$script"
+          grep -Fq 'FEDORA_GAUDERE_RESPONDER_RETRY_ADMISSION_PRODUCTION=ABORTED' "$script"
+          grep -Fq -- '--network none' "$script"
+          grep -Fq -- '--cap-drop all' "$script"
+          grep -Fq -- '--read-only --read-only-tmpfs' "$script"
+          grep -Fq -- '-v "$rehearsal:/rehearsal:rw"' "$script"
+          ! grep -Eq 'dispatch-intent|bind-decision|activate-grant|prepare-grant|dialogue-feed-ack|local-thread-v3-send' "$script"
+          ! grep -Eq 'tar -x|sqlite3 .* (UPDATE|DELETE|INSERT)|rm -rf|podman run.*--network host|systemctl.*disable' "$script"
+          ! grep -Fq 'admit-first-production-responder-retry-generation1.sh' src/main.cpp
+          ! grep -Fq 'admit-first-production-responder-retry-generation1.sh' Containerfile
+
+  fedora-44-production-retry-runner-syntax:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check POSIX shell syntax and no production wiring
+        shell: sh
+        run: |
+          set -eu
+          sh -n scripts/admit-first-production-responder-retry-generation1.sh
+          grep -Fq 'io.gaudere.role="dialogue-responder-retry-admission-isolated-v1"' Containerfile.responder-retry-admission-isolated
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-responder-retry-admission-isolated"]' Containerfile.responder-retry-admission-isolated
