@@ -96,6 +96,13 @@ logical_sha()
     sqlite3 -readonly "$1" '.dump' > "$workspace/sqlite-dump.tmp" || fail "cannot dump SQLite: $1"
     sha256sum "$workspace/sqlite-dump.tmp" | awk '{print $1}'
 }
+verify_production_hashes()
+{
+    [ "$(logical_sha "$state_db")" = "$state_sha" ] || fail "production Task/provider state changed"
+    [ "$(logical_sha "$thread_db")" = "$thread_sha" ] || fail "production thread state changed"
+    [ "$(logical_sha "$completion_db")" = "$completion_sha" ] || fail "production completion/ACK state changed"
+    [ "$(logical_sha "$responder_db")" = "$responder_sha" ] || fail "production historical authority state changed"
+}
 helper()
 {
     podman run --rm --network none --userns keep-id --user "$uid:$gid" \
@@ -189,6 +196,7 @@ state_sha=$(logical_sha "$rehearsal/state.db")
 thread_sha=$(logical_sha "$rehearsal/local-goose-dialogue-thread.db")
 completion_sha=$(logical_sha "$rehearsal/local-goose-dialogue-completion.db")
 responder_sha=$(logical_sha "$rehearsal/local-goose-dialogue-responder.db")
+verify_production_hashes
 [ ! -e "$rehearsal/local-goose-dialogue-responder-retry.db" ] || fail "rehearsal retry sidecar unexpectedly present"
 
 printf '=== INSPECT REHEARSAL (READ-ONLY) ===\n'
@@ -226,6 +234,8 @@ isolated_retry="$rehearsal/local-goose-dialogue-responder-retry.db"
 
 printf '=== VERIFY PRODUCTION STILL UNCHANGED ===\n'
 verify_live
+verify_production_hashes
+printf 'PRODUCTION_SQLITE_LOGICAL_HASHES=unchanged\n'
 printf 'AGENT_REF=%s\n' "$agent_ref"
 printf 'CORE_REF=%s\n' "$core_ref"
 printf 'PRODUCTION_IMAGE=%s\n' "$(image_id)"
