@@ -87,3 +87,36 @@ jobs:
           sh -n scripts/admit-first-production-responder-retry-generation1.sh
           grep -Fq 'io.gaudere.role="dialogue-responder-retry-admission-isolated-v1"' Containerfile.responder-retry-admission-isolated
           grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-responder-retry-admission-isolated"]' Containerfile.responder-retry-admission-isolated
+
+  atomic-production-sidecar-no-clobber:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise exact embedded atomic commit code without production
+        shell: bash
+        run: |
+          set -euo pipefail
+          script=scripts/admit-first-production-responder-retry-generation1.sh
+          temp="$(mktemp -d)"
+          trap 'rm -rf "$temp"' EXIT
+          awk '/^python3 - / && /isolated_retry/ && /retry_db/ {copy=1; next} copy && /^PY$/ {exit} copy {print}' "$script" > "$temp/commit.py"
+          test -s "$temp/commit.py"
+          python3 -m py_compile "$temp/commit.py"
+          printf '%s' 'sample canonical retry copy' > "$temp/source"
+          python3 "$temp/commit.py" "$temp/source" "$temp/production-retry.db"
+          cmp "$temp/source" "$temp/production-retry.db"
+          test "$(stat -c '%a' "$temp/production-retry.db")" = 600
+          test "$(stat -c '%h' "$temp/production-retry.db")" = 1
+          printf '%s' 'attempted overwrite' > "$temp/source"
+          if python3 "$temp/commit.py" "$temp/source" "$temp/production-retry.db"; then
+            echo 'FAIL: production sidecar overwrite accepted'
+            exit 1
+          fi
+          test "$(cat "$temp/production-retry.db")" = 'sample canonical retry copy'
+          ln -s "$temp/production-retry.db" "$temp/forbidden-symlink"
+          if python3 "$temp/commit.py" "$temp/source" "$temp/forbidden-symlink"; then
+            echo 'FAIL: symlink retry target accepted'
+            exit 1
+          fi
+          test "$(cat "$temp/production-retry.db")" = 'sample canonical retry copy'
+          test "$(find "$temp" -maxdepth 1 -name '.retry-admission-staging.*' | wc -l)" = 0
