@@ -1,0 +1,113 @@
+name: Dialogue responder retry admission isolated helper
+
+on:
+  pull_request:
+    paths:
+      - 'src/local_goose_dialogue_responder_retry_admission_isolated_main.cpp'
+      - 'Containerfile.responder-retry-admission-isolated'
+      - 'docs/local-goose-dialogue-responder-retry-admission-isolated-v1.md'
+      - '.github/workflows/dialogue-responder-retry-admission-isolated.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/local_goose_dialogue_responder_retry_admission_isolated_main.cpp'
+      - 'Containerfile.responder-retry-admission-isolated'
+      - 'docs/local-goose-dialogue-responder-retry-admission-isolated-v1.md'
+      - '.github/workflows/dialogue-responder-retry-admission-isolated.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  retry-admission-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard isolated retry admission CLI and absent production wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=src/local_goose_dialogue_responder_retry_admission_isolated_main.cpp
+          image=Containerfile.responder-retry-admission-isolated
+          grep -Fq '<inspect|admit-generation-1>' "$helper"
+          grep -Fq '"/rehearsal/state.db"' "$helper"
+          grep -Fq '"/rehearsal/local-goose-dialogue-responder-retry.db"' "$helper"
+          grep -Fq 'first-production-responder-retry-generation1-admission-seq4-v1' "$helper"
+          grep -Fq '7297b1ad75c62c19a46780ab8cce874353d7fe95b260c504c844878a9d8db844' "$helper"
+          grep -Fq 'f82c3df882b60babea7d88a36589aad57d1f7b0b2b9ec4d208e8be8d01b71fae' "$helper"
+          grep -Fq 'LocalGooseDialogueResponderRetryAdmissionService service' "$helper"
+          grep -Fq 'service.prepare_lineage(request)' "$helper"
+          grep -Fq 'SEQUENCE4_ACK=no' "$helper"
+          grep -Fq 'SUBMISSION_TASK=absent' "$helper"
+          grep -Fq 'LINEAGE_PRESENT=' "$helper"
+          ! grep -Eq 'prepare_grant\(|activate_grant\(|create_lease\(|prepare_decision\(' "$helper"
+          ! grep -Eq 'dispatch\(|submit\(|\.acknowledge\(|commit_submission\(' "$helper"
+          ! grep -Eq 'task_store\.save\(|\.replace\(|\.seed\(' "$helper"
+          ! grep -Eq 'systemctl|podman|OpenAI|stimulus|wake' "$helper"
+          grep -Fq 'io.gaudere.role="dialogue-responder-retry-admission-isolated-v1"' "$image"
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-responder-retry-admission-isolated"]' "$image"
+          ! grep -Fq 'local_goose_dialogue_responder_retry_admission_isolated_main' src/main.cpp
+          ! grep -Fq 'local_goose_dialogue_responder_retry_admission_isolated_main' Containerfile
+          ! grep -Fq 'local_goose_dialogue_responder_retry_admission_isolated_main' src/Makefile.am
+
+  fedora-44-retry-admission-helper:
+    needs: retry-admission-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: >-
+          dnf install -y autoconf automake diffutils gcc-c++ git json-devel
+          libcurl-devel libtool make pkgconf-pkg-config sqlite-devel
+
+      - uses: actions/checkout@v4
+
+      - name: Build pinned core
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/tmp/gaudere-install CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+
+      - name: Compile isolated retry admission helper with Werror
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            src/local_goose_dialogue_responder_retry_admission_isolated_main.cpp \
+            src/LocalGooseDialogueResponderRetryAdmission.cpp \
+            src/LocalGooseDialogueResponderRetryStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/retry-admission-helper \
+            ${libs} -lsqlite3
+
+      - name: Prove only narrow hard-locked helper CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          /tmp/retry-admission-helper --help | tee /tmp/retry-admission-helper-help
+          grep -Fq '<inspect|admit-generation-1>' /tmp/retry-admission-helper-help
