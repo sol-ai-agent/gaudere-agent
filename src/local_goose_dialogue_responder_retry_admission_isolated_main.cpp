@@ -14,6 +14,8 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -76,7 +78,21 @@ struct Stores {
     LocalGooseDialogueCompletionFeedStore feed{completion};
     LocalGooseDialogueResponderStore responder_store{responder};
     LocalGooseDialogueResponderAuthorityStore authority{responder};
-    LocalGooseDialogueResponderRetryStore retry_store{retry};
+    std::unique_ptr<LocalGooseDialogueResponderRetryStore> retry_store;
+
+    explicit Stores(const bool may_create_retry_sidecar)
+    {
+        const auto status = std::filesystem::symlink_status(retry);
+        if (std::filesystem::is_regular_file(status)) {
+            retry_store = std::make_unique<LocalGooseDialogueResponderRetryStore>(retry);
+        } else if (status.type() == std::filesystem::file_type::not_found
+                   && may_create_retry_sidecar) {
+            retry_store = std::make_unique<LocalGooseDialogueResponderRetryStore>(retry);
+        } else {
+            require(status.type() == std::filesystem::file_type::not_found,
+                    "retry sidecar path is unsafe");
+        }
+    }
 };
 
 void prove_unchanged_trigger(const Stores& stores)
@@ -156,8 +172,12 @@ void print_state(const Stores& stores)
 {
     prove_unchanged_trigger(stores);
     require(stores.authority.schema_version() == 3, "authority schema differs");
-    require(stores.retry_store.schema_version() == 1, "retry schema differs");
-    const auto existing = stores.retry_store.find_for_event(consumer, event_id);
+    if (stores.retry_store) {
+        require(stores.retry_store->schema_version() == 1, "retry schema differs");
+    }
+    const auto existing = stores.retry_store
+        ? stores.retry_store->find_for_event(consumer, event_id)
+        : std::optional<LocalGooseDialogueResponderRetryLineage>{};
     if (existing) prove_lineage(*existing);
     std::cout << "RESPONDER_CURSOR=3\n"
               << "NEXT_SEQUENCE=4\n"
@@ -177,7 +197,8 @@ void print_state(const Stores& stores)
 void admit(Stores& stores)
 {
     prove_unchanged_trigger(stores);
-    const auto existing = stores.retry_store.find_for_event(consumer, event_id);
+    require(stores.retry_store != nullptr, "retry admission sidecar unavailable");
+    const auto existing = stores.retry_store->find_for_event(consumer, event_id);
     if (existing) prove_lineage(*existing);
     const auto timestamp = existing ? existing->created_at_ms : now_ms();
     const LocalGooseDialogueResponderRetryAdmissionRequest request{
@@ -186,7 +207,7 @@ void admit(Stores& stores)
     };
     LocalGooseDialogueResponderRetryAdmissionService service{
         stores.feed, stores.threads, stores.responder_store, stores.authority,
-        stores.tasks, stores.retry_store, [timestamp] { return timestamp; }
+        stores.tasks, *stores.retry_store, [timestamp] { return timestamp; }
     };
     const auto write = service.prepare_lineage(request);
     using Result = LocalGooseDialogueResponderRetryAdmissionResult;
@@ -194,7 +215,7 @@ void admit(Stores& stores)
             "retry admission rejected exact recovered lineage");
     require(write.lineage.has_value(), "retry admission yielded no durable lineage");
     prove_lineage(*write.lineage);
-    const auto persisted = stores.retry_store.find_for_event(consumer, event_id);
+    const auto persisted = stores.retry_store->find_for_event(consumer, event_id);
     require(persisted.has_value()
             && persisted->lineage_id == write.lineage->lineage_id,
             "retry lineage is not durably persisted");
@@ -220,7 +241,7 @@ int main(int argc, char** argv)
         require(command == "inspect" || command == "admit-generation-1",
                 "unsupported command");
         require_snapshot_files();
-        Stores stores;
+        Stores stores{command == "admit-generation-1"};
         if (command == "inspect") print_state(stores);
         else admit(stores);
         return 0;
