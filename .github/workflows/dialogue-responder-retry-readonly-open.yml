@@ -1,0 +1,79 @@
+name: Responder retry existing-only read-only store boundary
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryStore.hpp'
+      - 'src/LocalGooseDialogueResponderRetryStore.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_store_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-existing-readonly-v1.md'
+      - '.github/workflows/dialogue-responder-retry-readonly-open.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryStore.hpp'
+      - 'src/LocalGooseDialogueResponderRetryStore.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_store_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-existing-readonly-v1.md'
+      - '.github/workflows/dialogue-responder-retry-readonly-open.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  strict-read-only-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard absence of implicit file creation, migration or mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryStore.hpp
+          cpp=src/LocalGooseDialogueResponderRetryStore.cpp
+          t=tests/local_goose_dialogue_responder_retry_store_test.cpp
+          grep -Fq 'existing_read_only' "$h"
+          grep -Fq 'is_read_only() const noexcept' "$h"
+          grep -Fq 'verify_owner_mode(path);' "$cpp"
+          grep -Fq 'reject_sqlite_companions(path);' "$cpp"
+          grep -Fq 'SQLITE_OPEN_READONLY' "$cpp"
+          grep -Fq 'sqlite3_db_readonly(database_, "main")' "$cpp"
+          grep -Fq 'retry read-only schema must be v1' "$cpp"
+          grep -Fq 'retry read-only snapshot requires DELETE journal mode' "$cpp"
+          grep -Fq 'if (read_only_) {' "$cpp"
+          grep -Fq 'return; // No BEGIN IMMEDIATE' "$cpp"
+          grep -Fq 'retry store opened existing_read_only' "$cpp"
+          grep -Fq 'rejected_absent && !std::filesystem::exists(absent)' "$t"
+          grep -Fq 'rejected_companion' "$t"
+          grep -Fq 'rejected_unversioned' "$t"
+          grep -Fq 'rejected_readonly_future' "$t"
+          grep -Fq 'reader.prepare_lineage(first).result' "$t"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only' Containerfile
+          ! grep -Fq 'LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only' src/Makefile.am
+
+  fedora-44-read-only-store-proof:
+    needs: strict-read-only-api
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install exact proof dependencies
+        run: dnf install -y gcc-c++ json-devel sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Compile with warnings as errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -Isrc \
+            tests/local_goose_dialogue_responder_retry_store_test.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/LocalGooseDialogueResponderRetryStore.cpp \
+            src/Sha256.cpp \
+            -lsqlite3 -o /tmp/gaudere-retry-store-readonly-test
+      - name: Test never-create / never-write / rejected snapshot cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-store-readonly-test

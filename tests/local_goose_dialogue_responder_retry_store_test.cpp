@@ -6,7 +6,9 @@
 #include <cassert>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
@@ -21,6 +23,14 @@ std::string temp_path(const std::string& suffix)
     return "/tmp/gaudere-responder-retry-"
         + std::to_string(static_cast<unsigned long long>(getpid()))
         + "-" + suffix + ".db";
+}
+
+std::string byte_snapshot(const std::string& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    assert(input.good());
+    return {std::istreambuf_iterator<char>{input},
+            std::istreambuf_iterator<char>{}};
 }
 
 std::int64_t scalar(const std::string& path, const std::string& sql)
@@ -195,6 +205,111 @@ int main()
         rejected_future = true;
     }
     assert(rejected_future);
+
+    // A strict existing-only reader cannot initialize, migrate or mutate the
+    // lineage sidecar, even if prepare_lineage is called through the same class.
+    const auto before_bytes = byte_snapshot(path);
+    {
+        LocalGooseDialogueResponderRetryStore reader(
+            path, LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only);
+        assert(reader.is_read_only());
+        assert(reader.schema_version() == 1);
+        assert(reader.find_lineage(first.lineage_id));
+        assert(reader.find_for_event(first.consumer_id, first.event_id));
+        assert(reader.find_by_request(first.request_id));
+        assert(reader.prepare_lineage(first).result
+            == LocalGooseDialogueResponderRetryStoreResult::unavailable);
+    }
+    assert(!store.is_read_only());
+    assert(byte_snapshot(path) == before_bytes);
+    assert(!std::filesystem::exists(path + "-wal"));
+    assert(!std::filesystem::exists(path + "-shm"));
+    assert(!std::filesystem::exists(path + "-journal"));
+
+    // Never create an absent file (the legacy writer constructor may create).
+    const auto absent = temp_path("strict-absent");
+    std::filesystem::remove(absent);
+    bool rejected_absent = false;
+    try {
+        LocalGooseDialogueResponderRetryStore reader(
+            absent, LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only);
+    } catch (const std::exception&) {
+        rejected_absent = true;
+    }
+    assert(rejected_absent && !std::filesystem::exists(absent));
+
+    // Symlink and wrong mode are rejected before SQLite can open the file.
+    const auto link_path = temp_path("strict-link");
+    const auto unsafe_path = temp_path("strict-unsafe");
+    std::filesystem::remove(link_path);
+    std::filesystem::remove(unsafe_path);
+    std::filesystem::create_symlink(path, link_path);
+    std::filesystem::copy_file(path, unsafe_path);
+    assert(chmod(unsafe_path.c_str(), 0644) == 0);
+    for (const auto& forbidden : {link_path, unsafe_path}) {
+        bool rejected = false;
+        try {
+            LocalGooseDialogueResponderRetryStore reader(
+                forbidden,
+                LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only);
+        } catch (const std::exception&) {
+            rejected = true;
+        }
+        assert(rejected);
+    }
+    assert(byte_snapshot(path) == before_bytes);
+    std::filesystem::remove(link_path);
+    std::filesystem::remove(unsafe_path);
+
+    // An active companion must never be recovered by a "read-only" snapshot.
+    {
+        std::ofstream wal(path + "-wal");
+        wal << "fake WAL companion";
+    }
+    bool rejected_companion = false;
+    try {
+        LocalGooseDialogueResponderRetryStore reader(
+            path, LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only);
+    } catch (const std::exception&) {
+        rejected_companion = true;
+    }
+    assert(rejected_companion);
+    std::filesystem::remove(path + "-wal");
+    assert(byte_snapshot(path) == before_bytes);
+
+    // Reject an unversioned file, not silently turn it into schema v1.
+    const auto unversioned = temp_path("strict-unversioned");
+    std::filesystem::remove(unversioned);
+    sqlite3* empty_db = nullptr;
+    assert(sqlite3_open_v2(unversioned.c_str(), &empty_db,
+                           SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                           nullptr) == SQLITE_OK);
+    assert(sqlite3_close(empty_db) == SQLITE_OK);
+    assert(chmod(unversioned.c_str(), 0600) == 0);
+    const auto unversioned_bytes = byte_snapshot(unversioned);
+    bool rejected_unversioned = false;
+    try {
+        LocalGooseDialogueResponderRetryStore reader(
+            unversioned,
+            LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only);
+    } catch (const std::exception&) {
+        rejected_unversioned = true;
+    }
+    assert(rejected_unversioned);
+    assert(byte_snapshot(unversioned) == unversioned_bytes);
+    std::filesystem::remove(unversioned);
+
+    const auto future_bytes = byte_snapshot(future_path);
+    bool rejected_readonly_future = false;
+    try {
+        LocalGooseDialogueResponderRetryStore reader(
+            future_path,
+            LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only);
+    } catch (const std::exception&) {
+        rejected_readonly_future = true;
+    }
+    assert(rejected_readonly_future);
+    assert(byte_snapshot(future_path) == future_bytes);
 
     std::filesystem::remove(path);
     std::filesystem::remove(future_path);

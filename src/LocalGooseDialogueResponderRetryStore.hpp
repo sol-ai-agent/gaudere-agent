@@ -11,6 +11,11 @@ struct sqlite3;
 
 namespace gaudere_agent {
 
+enum class LocalGooseDialogueResponderRetryStoreOpenMode : std::uint8_t {
+    create_or_open = 0,
+    existing_read_only = 1
+};
+
 enum class LocalGooseDialogueResponderRetryStoreResult : std::uint8_t {
     accepted,
     duplicate,
@@ -36,7 +41,10 @@ struct LocalGooseDialogueResponderRetryLineageWrite {
  */
 class LocalGooseDialogueResponderRetryStore {
 public:
-    explicit LocalGooseDialogueResponderRetryStore(const std::string& path);
+    explicit LocalGooseDialogueResponderRetryStore(
+        const std::string& path,
+        LocalGooseDialogueResponderRetryStoreOpenMode open_mode =
+            LocalGooseDialogueResponderRetryStoreOpenMode::create_or_open);
     ~LocalGooseDialogueResponderRetryStore();
 
     LocalGooseDialogueResponderRetryStore(
@@ -45,6 +53,7 @@ public:
         const LocalGooseDialogueResponderRetryStore&) = delete;
 
     [[nodiscard]] int schema_version() const noexcept { return schema_version_; }
+    [[nodiscard]] bool is_read_only() const noexcept { return read_only_; }
 
     [[nodiscard]] std::optional<LocalGooseDialogueResponderRetryLineage>
     find_lineage(const std::string& lineage_id) const;
@@ -63,6 +72,7 @@ public:
 private:
     sqlite3* database_ = nullptr;
     int schema_version_ = 0;
+    bool read_only_ = false;
 };
 
 } // namespace gaudere_agent
