@@ -202,7 +202,9 @@ LocalGooseDialogueResponderRetryEligibilityService::inspect_generation_1(
             || grant->terminal_reason
                 != lineage->historical_grant_terminal_reason
             || grant->thread_alias != event->thread_alias
-            || grant->max_system_turns != lease->max_system_turns) {
+            || grant->max_system_turns != lease->max_system_turns
+            || grant->speaker_kind != lease->speaker_kind
+            || grant->speaker_id != lease->speaker_id) {
             return status(Code::conflict, "historical grant differs");
         }
 
