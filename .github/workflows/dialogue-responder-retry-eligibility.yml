@@ -1,0 +1,121 @@
+name: Dialogue responder retry generation-1 read-only eligibility
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryEligibility.hpp'
+      - 'src/LocalGooseDialogueResponderRetryEligibility.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_eligibility_test.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_fixture.hpp'
+      - 'tests/local_goose_dialogue_responder_retry_admission_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-eligibility-v1.md'
+      - '.github/workflows/dialogue-responder-retry-eligibility.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryEligibility.hpp'
+      - 'src/LocalGooseDialogueResponderRetryEligibility.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_eligibility_test.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_fixture.hpp'
+      - 'tests/local_goose_dialogue_responder_retry_admission_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-eligibility-v1.md'
+      - '.github/workflows/dialogue-responder-retry-eligibility.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard pure evidence inspection without authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          header=src/LocalGooseDialogueResponderRetryEligibility.hpp
+          source=src/LocalGooseDialogueResponderRetryEligibility.cpp
+          test=tests/local_goose_dialogue_responder_retry_eligibility_test.cpp
+          grep -Fq 'evidence_consistent_no_authority' "$header"
+          grep -Fq 'inspect_generation_1(' "$header"
+          grep -Fq 'const LocalGooseDialogueCompletionFeedStore& completion_' "$header"
+          grep -Fq 'const LocalGooseDialogueResponderRetryStore& retry_' "$header"
+          grep -Fq 'const gaudere::work::TaskStore& tasks_' "$header"
+          grep -Fq 'find_for_event' "$source"
+          grep -Fq 'find_by_idempotency_key' "$source"
+          grep -Fq 'consumer_last_sequence' "$source"
+          grep -Fq 'next_for_consumer' "$source"
+          grep -Fq 'DispositionState::manual_review' "$source"
+          grep -Fq 'DecisionState::expired' "$source"
+          grep -Fq 'LeaseState::expired' "$source"
+          grep -Fq 'GrantState::activated' "$source"
+          ! grep -Eq 'prepare_grant\(|activate_grant\(|prepare_decision\(|bind_decision\(' "$source"
+          ! grep -Eq 'create_lease\(|close_lease\(|prepare_intent\(|prepare_disposition\(' "$source"
+          ! grep -Eq 'prepare_lineage\(|acknowledge\(|dispatch\(|submit\(|\.save\(' "$source"
+          ! grep -Eq 'INSERT INTO|UPDATE |DELETE FROM|sqlite3_open|systemctl|podman|OpenAI|network' "$source"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryEligibility' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryEligibility' Containerfile
+          ! grep -Fq 'LocalGooseDialogueResponderRetryEligibility' src/Makefile.am
+          grep -Fq 'prove_existing_lineage_is_evidence_only' "$test"
+          grep -Fq 'prove_ack_blocks_eligibility' "$test"
+          grep -Fq 'prove_stale_head_blocks_eligibility' "$test"
+          grep -Fq 'prove_submission_task_blocks_eligibility' "$test"
+          grep -Fq 'prove_missing_trigger_task_blocks_eligibility' "$test"
+
+  fedora-44-retry-eligibility:
+    needs: read-only-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install build dependencies
+        run: >-
+          dnf install -y autoconf automake diffutils gcc-c++ git json-devel
+          libcurl-devel libtool make pkgconf-pkg-config sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Build pinned core
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/tmp/gaudere-install CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+      - name: Compile standalone read-only evidence proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            tests/local_goose_dialogue_responder_retry_eligibility_test.cpp \
+            src/LocalGooseDialogueResponderRetryEligibility.cpp \
+            src/LocalGooseDialogueResponderRetryAdmission.cpp \
+            src/LocalGooseDialogueResponderRetryStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/retry-eligibility-test \
+            ${libs} -lsqlite3
+      - name: Run read-only retry eligibility adversarial proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          /tmp/retry-eligibility-test
