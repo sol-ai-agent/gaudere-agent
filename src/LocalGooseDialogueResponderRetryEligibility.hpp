@@ -55,7 +55,8 @@ public:
         const LocalGooseDialogueResponderRetryStore& retry);
 
     [[nodiscard]] LocalGooseDialogueResponderRetryEligibilityStatus
-    inspect_generation_1(std::int64_t now_ms) const;
+    inspect_generation_1(const std::string& expected_lineage_id,
+                         std::int64_t now_ms) const;
 
 private:
     const LocalGooseDialogueCompletionFeedStore& completion_;
