@@ -100,6 +100,7 @@ LocalGooseDialogueResponderRetryEligibilityService(
 
 LocalGooseDialogueResponderRetryEligibilityStatus
 LocalGooseDialogueResponderRetryEligibilityService::inspect_generation_1(
+    const std::string& expected_lineage_id,
     const std::int64_t now_ms) const
 {
     using GrantState = LocalGooseDialogueResponderGrantState;
@@ -109,7 +110,7 @@ LocalGooseDialogueResponderRetryEligibilityService::inspect_generation_1(
     using DispositionKind = LocalGooseDialogueResponderDispositionKind;
     using DispositionState = LocalGooseDialogueResponderDispositionState;
 
-    if (now_ms < 0) {
+    if (now_ms < 0 || expected_lineage_id.empty()) {
         return status(Code::unavailable, "invalid inspection clock");
     }
     try {
@@ -121,13 +122,13 @@ LocalGooseDialogueResponderRetryEligibilityService::inspect_generation_1(
         }
 
         const auto lineage = retry_.find_lineage(
-            local_goose_dialogue_responder_first_retry_lineage_id);
+            expected_lineage_id);
         if (!lineage) {
             return status(Code::lineage_absent, "generation-1 audit lineage absent");
         }
         if (!valid_local_goose_dialogue_responder_retry_lineage(*lineage)
             || lineage->lineage_id
-                != local_goose_dialogue_responder_first_retry_lineage_id
+                != expected_lineage_id
             || lineage->consumer_id != "system-responder-v1"
             || lineage->retry_generation != 1
             || lineage->completion_sequence != 4
