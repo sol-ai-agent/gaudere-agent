@@ -137,6 +137,21 @@ void ensure_secure_file(const std::string& path)
     verify_owner_mode(path);
 }
 
+void reject_sqlite_companions(const std::string& path)
+{
+    // This first read-only tranche accepts a quiescent rollback-journal
+    // snapshot only, not an active WAL or a hot rollback journal.
+    const char* const suffixes[] = {"-wal", "-shm", "-journal"};
+    for (const char* suffix : suffixes) {
+        struct stat metadata {};
+        const auto companion = path + suffix;
+        if (lstat(companion.c_str(), &metadata) == 0 || errno != ENOENT) {
+            throw std::runtime_error(
+                "retry read-only snapshot has a SQLite companion");
+        }
+    }
+}
+
 std::vector<std::string> user_table_names(sqlite3* database)
 {
     Statement statement(
@@ -340,12 +355,25 @@ std::optional<LocalGooseDialogueResponderRetryLineage> find_sequence(
 } // namespace
 
 LocalGooseDialogueResponderRetryStore::LocalGooseDialogueResponderRetryStore(
-    const std::string& path)
+    const std::string& path,
+    const LocalGooseDialogueResponderRetryStoreOpenMode open_mode)
 {
-    ensure_secure_file(path);
-    if (sqlite3_open_v2(path.c_str(), &database_,
-                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
-                        nullptr) != SQLITE_OK) {
+    if (open_mode != LocalGooseDialogueResponderRetryStoreOpenMode::create_or_open
+        && open_mode
+            != LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only) {
+        throw std::invalid_argument("invalid responder retry store open mode");
+    }
+    read_only_ =
+        open_mode == LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only;
+    if (read_only_) {
+        verify_owner_mode(path); // No O_CREAT: reject missing/symlink/unsafe mode.
+        reject_sqlite_companions(path);
+    } else {
+        ensure_secure_file(path);
+    }
+    const int flags = SQLITE_OPEN_FULLMUTEX
+        | (read_only_ ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE);
+    if (sqlite3_open_v2(path.c_str(), &database_, flags, nullptr) != SQLITE_OK) {
         const std::string message = database_
             ? sqlite3_errmsg(database_) : "cannot open responder retry SQLite";
         sqlite3_close(database_);
@@ -353,6 +381,30 @@ LocalGooseDialogueResponderRetryStore::LocalGooseDialogueResponderRetryStore(
         throw std::runtime_error(message);
     }
     try {
+        if (read_only_) {
+            if (sqlite3_db_readonly(database_, "main") != 1) {
+                throw std::runtime_error("retry connection is not SQLite read-only");
+            }
+            Statement version(database_, "PRAGMA user_version");
+            if (sqlite3_step(version.get()) != SQLITE_ROW
+                || sqlite3_column_int(version.get(), 0)
+                    != local_goose_dialogue_responder_retry_sidecar_schema) {
+                throw std::runtime_error("retry read-only schema must be v1");
+            }
+            if (user_table_names(database_)
+                != std::vector<std::string>{
+                    "local_goose_dialogue_responder_retry_lineage"}) {
+                throw std::runtime_error("retry read-only table set differs");
+            }
+            Statement journal(database_, "PRAGMA journal_mode");
+            if (sqlite3_step(journal.get()) != SQLITE_ROW
+                || text(journal.get(), 0) != "delete") {
+                throw std::runtime_error(
+                    "retry read-only snapshot requires DELETE journal mode");
+            }
+            schema_version_ = 1;
+            return; // No BEGIN IMMEDIATE, schema creation or writable pragmas.
+        }
         execute(database_, "PRAGMA journal_mode=DELETE;");
         execute(database_, "PRAGMA synchronous=FULL;");
         execute(database_, "PRAGMA busy_timeout=5000;");
@@ -385,7 +437,9 @@ LocalGooseDialogueResponderRetryStore::LocalGooseDialogueResponderRetryStore(
         }
         execute(database_, "COMMIT;");
     } catch (...) {
-        try { execute(database_, "ROLLBACK;"); } catch (...) {}
+        if (!read_only_) {
+            try { execute(database_, "ROLLBACK;"); } catch (...) {}
+        }
         sqlite3_close(database_);
         database_ = nullptr;
         throw;
@@ -427,6 +481,11 @@ LocalGooseDialogueResponderRetryStore::prepare_lineage(
     const LocalGooseDialogueResponderRetryLineage& lineage)
 {
     LocalGooseDialogueResponderRetryLineageWrite out;
+    if (read_only_) {
+        out.result = LocalGooseDialogueResponderRetryStoreResult::unavailable;
+        out.detail = "retry store opened existing_read_only";
+        return out;
+    }
     if (!valid_local_goose_dialogue_responder_retry_lineage(lineage)) {
         out.detail = "invalid responder retry lineage";
         return out;
