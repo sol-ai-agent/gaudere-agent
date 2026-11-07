@@ -1,0 +1,75 @@
+name: Retry generation-1 no-authority grant proposal
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryGrantProposal.hpp'
+      - 'src/LocalGooseDialogueResponderRetryGrantProposal.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_grant_proposal_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-grant-proposal-v1.md'
+      - '.github/workflows/dialogue-responder-retry-grant-proposal.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryGrantProposal.hpp'
+      - 'src/LocalGooseDialogueResponderRetryGrantProposal.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_grant_proposal_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-grant-proposal-v1.md'
+      - '.github/workflows/dialogue-responder-retry-grant-proposal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-authority-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify inert preparation contract with no host effects
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryGrantProposal.hpp
+          c=src/LocalGooseDialogueResponderRetryGrantProposal.cpp
+          t=tests/local_goose_dialogue_responder_retry_grant_proposal_test.cpp
+          grep -Fq 'prepared_only' "$h"
+          grep -Fq 'approval_reference' "$h"
+          grep -Fq 'NOT a grant' "$h"
+          grep -Fq 'local_goose_dialogue_responder_retry_max_grant_ttl_ms' "$h"
+          grep -Fq 'matches_local_goose_dialogue_responder_retry_grant_scope' "$c"
+          grep -Fq 'local_goose_dialogue_responder_message_intervention' "$c"
+          grep -Fq 'test_tamper_rejected' "$t"
+          grep -Fq 'test_invalid_input_fails_closed' "$t"
+          ! grep -Eq 'sqlite3_open|systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|OpenAI|WakeIntent' "$c"
+          ! grep -Eq 'activate_grant|prepare_grant\(|dispatch\(|submit\(|acknowledge\(|create_lease\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryGrantProposal' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryGrantProposal' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryGrantProposal' Containerfile
+          echo GAUDERE_RESPONDER_RETRY_GRANT_PREPARATION_NO_AUTHORITY=PASS
+
+  fedora-44-adversarial-proposal:
+    needs: no-authority-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install compiler and SQLite headers
+        run: dnf install -y gcc-c++ sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Strict standalone compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_grant_proposal_test.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 \
+            -o /tmp/gaudere-retry-grant-proposal-test
+      - name: Canonical proposal tampering and boundary tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-grant-proposal-test
+          echo GAUDERE_RESPONDER_RETRY_GRANT_PROPOSAL_ISOLATED_CI=PASS
