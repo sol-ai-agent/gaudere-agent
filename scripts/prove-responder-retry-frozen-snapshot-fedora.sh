@@ -161,8 +161,8 @@ help=$(podman run --rm --network none --read-only --read-only-tmpfs \
 require_line "$help" "Usage: retry-frozen-snapshot <inspect-generation-1> (fixed /rehearsal paths only)"
 
 printf '=== STOP SERVICE AND CAPTURE FIVE FROZEN DATABASES ===\n'
-systemctl --user stop "$service" || fail "cannot stop production service"
 stopped=1
+systemctl --user stop "$service" || fail "cannot stop production service"
 [ "$(systemctl --user is-active "$service" 2>/dev/null || true)" != active ] || fail "service did not stop"
 backup=$(GAUDERE_STATE_DIR="$state_dir" sh "$backup_script") || fail "stopped-state backup failed"
 [ -f "$backup" ] && [ ! -L "$backup" ] || fail "backup unsafe"
@@ -204,9 +204,9 @@ retry_sha=$(logical_sha "$rehearsal/local-goose-dialogue-responder-retry.db")
 
 printf '=== RESTART UNCHANGED SERVICE BEFORE INSPECTION ===\n'
 systemctl --user start "$service" || fail "service restart failed"
-stopped=0
 sleep 3
 verify_live
+stopped=0
 verify_production_hashes
 [ "$(logical_sha "$retry_db")" = "$retry_sha" ] || fail "production retry audit changed"
 [ "$(sha256sum "$retry_db" | awk '{print $1}')" = "$retry_raw_sha" ] || fail "production retry bytes changed"
