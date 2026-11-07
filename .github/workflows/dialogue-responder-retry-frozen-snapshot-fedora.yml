@@ -1,0 +1,85 @@
+name: Responder retry frozen-snapshot Fedora copy-only gate
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/prove-responder-retry-frozen-snapshot-fedora.sh'
+      - 'docs/local-goose-dialogue-responder-retry-frozen-snapshot-fedora-v1.md'
+      - '.github/workflows/dialogue-responder-retry-frozen-snapshot-fedora.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/prove-responder-retry-frozen-snapshot-fedora.sh'
+      - 'docs/local-goose-dialogue-responder-retry-frozen-snapshot-fedora-v1.md'
+      - '.github/workflows/dialogue-responder-retry-frozen-snapshot-fedora.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  strict-copy-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce explicit frozen-copy-only gate boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          s=scripts/prove-responder-retry-frozen-snapshot-fedora.sh
+          test -f "$s" && test ! -x "$s"
+          sh -n "$s"
+          grep -Fq 'AUTHORIZED_RESPONDER_RETRY_FROZEN_SNAPSHOT' "$s"
+          grep -Fq 'expected_lineage_id=cognition.local-goose-dialogue.responder-retry-lineage.v1:da6bb42704949f0003e670c06e7ed04078c238f08356f1853f9b3776455f2bca' "$s"
+          grep -Fq 'expected_image=93811d1e201641ccfe0a31bc5ebb53458e7794fd2f727f18ff91b7ff246ba071' "$s"
+          grep -Fq 'expected_core=1316cf68db93e4c91a7bd79fbd289b8f382f8659' "$s"
+          grep -Fq '[ "$(git -C "$repo" branch --show-current)" = main ]' "$s"
+          grep -Fq 'git -C "$repo" fetch --quiet origin main' "$s"
+          grep -Fq 'GAUDERE_STATE_DIR="$state_dir" sh "$backup_script"' "$s"
+          grep -Fq 'systemctl --user stop "$service"' "$s"
+          grep -Fq 'systemctl --user start "$service"' "$s"
+          grep -Fq 'SERVICE_RECOVERY=restart_attempted_without_production_commit' "$s"
+          grep -Fq 'network_mode' "$s"
+          grep -Fq '[ "$(provider_total)" = 10 ]' "$s"
+          grep -Fq 'AUTHORITY_DEFAULT=disabled' "$s"
+          grep -Fq 'disposition_state=4' "$s"
+          grep -Fq 'sqlite3 -readonly "$retry_db"' "$s"
+          grep -Fq 'sha256sum "$retry_db"' "$s"
+          grep -Fq 'reader.backup(writer)' "$s"
+          grep -Fq 'python3 - "$rehearsal" "$state_db" "$thread_db" "$completion_db" "$responder_db" "$retry_db"' "$s"
+          grep -Fq 'Containerfile.responder-retry-frozen-snapshot' "$s"
+          grep -Fq 'dialogue-responder-retry-frozen-snapshot-inspect-v1' "$s"
+          grep -Fq -- '--network none' "$s"
+          grep -Fq -- '--cap-drop all' "$s"
+          grep -Fq -- '--read-only --read-only-tmpfs' "$s"
+          grep -Fq 'helper inspect-generation-1' "$s"
+          grep -Fq 'ELIGIBILITY=evidence_consistent_no_authority' "$s"
+          grep -Fq 'RETRY_AUTHORITY=absent' "$s"
+          grep -Fq 'verify_production_hashes' "$s"
+          grep -Fq 'PRODUCTION_FIVE_SQLITE_LOGICAL_HASHES=unchanged' "$s"
+          grep -Fq 'FEDORA_GAUDERE_RESPONDER_RETRY_FROZEN_SNAPSHOT_ISOLATED=PASS' "$s"
+          grep -Fq 'FEDORA_GAUDERE_RESPONDER_RETRY_FROZEN_SNAPSHOT_ISOLATED=ABORTED' "$s"
+          ! grep -Eq 'admit-generation-1|prepare-lineage|prepare-grant|activate-grant|prepare-decision|bind-decision|dispatch-intent|dialogue-feed-ack|local-thread-v3-send' "$s"
+          ! grep -Eq 'rm -rf|tar -x|sqlite3 .* (UPDATE|DELETE|INSERT)|os[.]link|os[.]unlink|shutil[.]copyfile' "$s"
+          ! grep -Fq 'Containerfile.responder-retry-frozen-snapshot' Containerfile
+          ! grep -Fq 'prove-responder-retry-frozen-snapshot-fedora' src/main.cpp
+          if env -u GAUDERE_RESPONDER_RETRY_FROZEN_SNAPSHOT_AUTHORIZATION sh "$s"; then
+            echo 'Unauthorized runner did not fail closed' >&2
+            exit 1
+          fi
+
+  fedora-44-shell-proof:
+    needs: strict-copy-only
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install POSIX shell proof tools
+        run: dnf install -y bash coreutils grep
+      - uses: actions/checkout@v4
+      - name: Validate POSIX shell syntax and no execution bit
+        shell: bash
+        run: |
+          set -euo pipefail
+          s=scripts/prove-responder-retry-frozen-snapshot-fedora.sh
+          test -f "$s"
+          test ! -x "$s"
+          sh -n "$s"
