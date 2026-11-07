@@ -37,7 +37,8 @@ constexpr const char* schema_sql =
     "completion_sequence INTEGER NOT NULL CHECK(completion_sequence=4),"
     "expected_head_revision INTEGER NOT NULL CHECK(expected_head_revision=3),"
     "prepared_at_ms INTEGER NOT NULL CHECK(prepared_at_ms>=0),"
-    "UNIQUE(consumer_id,event_id,retry_generation),"\n    "UNIQUE(consumer_id,completion_sequence,retry_generation))";
+    "UNIQUE(consumer_id,event_id,retry_generation),"
+    "UNIQUE(consumer_id,completion_sequence,retry_generation))";
 
 constexpr const char* select_columns =
     "scope_id,request_id,lineage_id,consumer_id,event_id,result_sha256,"
