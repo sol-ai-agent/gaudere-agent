@@ -1,0 +1,79 @@
+name: Retry generation-1 isolated no-authority scope ledger
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryScopeStore.hpp'
+      - 'src/LocalGooseDialogueResponderRetryScopeStore.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_scope_store_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-scope-store-v1.md'
+      - '.github/workflows/dialogue-responder-retry-scope-store.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryScopeStore.hpp'
+      - 'src/LocalGooseDialogueResponderRetryScopeStore.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_scope_store_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-scope-store-v1.md'
+      - '.github/workflows/dialogue-responder-retry-scope-store.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-ledger-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard isolated schema and non-authority API
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryScopeStore.hpp
+          c=src/LocalGooseDialogueResponderRetryScopeStore.cpp
+          t=tests/local_goose_dialogue_responder_retry_scope_store_test.cpp
+          grep -Fq 'create_new_isolated' "$h"
+          grep -Fq 'existing_read_only' "$h"
+          grep -Fq 'existing_writer' "$h"
+          grep -Fq 'stage_scope(' "$h"
+          grep -Fq 'UNIQUE(consumer_id,event_id,retry_generation)' "$c"
+          grep -Fq 'O_EXCL | O_CLOEXEC | O_NOFOLLOW' "$c"
+          grep -Fq 'SQLITE_OPEN_READONLY' "$c"
+          grep -Fq 'BEGIN IMMEDIATE' "$c"
+          grep -Fq 'verify_schema(database_)' "$c"
+          grep -Fq 'test_exact_replay_and_conflict' "$t"
+          grep -Fq 'test_missing_and_unsafe_open' "$t"
+          grep -Fq 'test_foreign_and_future_schema' "$t"
+          ! grep -Eq 'prepare_grant\(|activate_grant\(|prepare_decision\(|bind_decision\(' "$c"
+          ! grep -Eq 'prepare_intent\(|prepare_disposition\(|dispatch\(|submit\(|acknowledge\(' "$c"
+          ! grep -Eq 'UPDATE local_goose_dialogue_responder_|DELETE FROM local_goose_dialogue_responder_' "$c"
+          ! grep -Eq 'systemctl|podman|OpenAI|curl|network|TaskStore' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryScopeStore' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryScopeStore' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryScopeStore' Containerfile
+
+  fedora-44-isolated-ledger:
+    needs: isolated-ledger-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install minimal build dependencies
+        run: dnf install -y gcc-c++ sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Compile strict standalone ledger test
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_scope_store_test.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 \
+            -o /tmp/gaudere-retry-scope-store-test
+      - name: Verify isolated ledger with adversarial fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-scope-store-test
+          echo GAUDERE_RESPONDER_RETRY_SCOPE_STORE_ISOLATED_CI=PASS
