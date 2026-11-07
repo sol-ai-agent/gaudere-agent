@@ -1,0 +1,113 @@
+name: Responder retry frozen snapshot evidence-only inspector
+
+on:
+  pull_request:
+    paths:
+      - 'src/local_goose_dialogue_responder_retry_frozen_snapshot_main.cpp'
+      - 'Containerfile.responder-retry-frozen-snapshot'
+      - 'docs/local-goose-dialogue-responder-retry-frozen-snapshot-inspect-v1.md'
+      - '.github/workflows/dialogue-responder-retry-frozen-snapshot-inspect.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/local_goose_dialogue_responder_retry_frozen_snapshot_main.cpp'
+      - 'Containerfile.responder-retry-frozen-snapshot'
+      - 'docs/local-goose-dialogue-responder-retry-frozen-snapshot-inspect-v1.md'
+      - '.github/workflows/dialogue-responder-retry-frozen-snapshot-inspect.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-production-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify typed, hard-locked, evidence-only helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          s=src/local_goose_dialogue_responder_retry_frozen_snapshot_main.cpp
+          c=Containerfile.responder-retry-frozen-snapshot
+          grep -Fq 'inspect-generation-1' "$s"
+          grep -Fq 'local_goose_dialogue_responder_first_retry_lineage_id' "$s"
+          grep -Fq 'LocalGooseDialogueResponderRetryEligibilityService' "$s"
+          grep -Fq 'LocalGooseDialogueResponderRetryStoreOpenMode::existing_read_only' "$s"
+          grep -Fq 'retry.is_read_only()' "$s"
+          grep -Fq '"/rehearsal/state.db"' "$s"
+          grep -Fq '"/rehearsal/local-goose-dialogue-responder-retry.db"' "$s"
+          ! grep -Eq 'prepare_lineage\(|prepare_grant\(|activate_grant\(|prepare_decision\(|bind_decision\(|dispatch\(|acknowledge\(|submit\(' "$s"
+          ! grep -Eq 'system\(|popen\(|execve\(|sqlite3_open\(' "$s"
+          ! grep -Eq 'admit-generation-1|LocalGooseDialogueResponderRetryAdmission.cpp' "$c"
+          grep -Fq 'src/LocalGooseDialogueResponderRetryEligibility.cpp' "$c"
+          grep -Fq 'ENTRYPOINT ["/usr/local/bin/gaudere-responder-retry-frozen-snapshot"]' "$c"
+          ! grep -Fq 'local_goose_dialogue_responder_retry_frozen_snapshot_main' src/main.cpp
+          ! grep -Fq 'local_goose_dialogue_responder_retry_frozen_snapshot_main' src/Makefile.am
+          ! grep -Fq 'gaudere-responder-retry-frozen-snapshot' Containerfile
+
+  fedora-44-frozen-snapshot-helper:
+    needs: no-production-authority
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 20
+    steps:
+      - name: Install bounded build dependencies
+        run: >-
+          dnf install -y autoconf automake diffutils gcc-c++ git json-devel
+          libcurl-devel libtool make pkgconf-pkg-config sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Build pinned core with warnings as errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < gaudere.ref)
+          git clone https://github.com/sol-ai-agent/gaudere.git /tmp/gaudere
+          git -C /tmp/gaudere checkout --detach "$core_ref"
+          cd /tmp/gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix=/tmp/gaudere-install CXXFLAGS='-O2 -Wall -Wextra -Wpedantic -Werror'
+          make --jobs=2 check
+          make install
+      - name: Compile frozen snapshot helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH=/tmp/gaudere-install/lib/pkgconfig
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          cflags="$(pkg-config --cflags gaudere-persistence-sqlite nlohmann_json)"
+          libs="$(pkg-config --libs gaudere-persistence-sqlite nlohmann_json)"
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror \
+            ${cflags} -Isrc \
+            src/local_goose_dialogue_responder_retry_frozen_snapshot_main.cpp \
+            src/LocalGooseDialogueResponderRetryEligibility.cpp \
+            src/LocalGooseDialogueResponderRetryStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/LocalGooseDialogueResponderAuthorityStore.cpp \
+            src/LocalGooseDialogueResponderAuthority.cpp \
+            src/LocalGooseDialogueResponderStore.cpp \
+            src/LocalGooseDialogueResponder.cpp \
+            src/LocalGooseDialogueCompletionFeed.cpp \
+            src/LocalGooseDialogueThreadStore.cpp \
+            src/LocalGooseDialogueV2.cpp \
+            src/LocalGooseDialogueV3.cpp \
+            src/Sha256.cpp \
+            -o /tmp/gaudere-retry-frozen-snapshot-helper \
+            ${libs} -lsqlite3
+      - name: Prove help-only surface and fail-closed missing snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH=/tmp/gaudere-install/lib
+          helper=/tmp/gaudere-retry-frozen-snapshot-helper
+          "$helper" --help | grep -Fq '<inspect-generation-1>'
+          if "$helper" admit-generation-1; then
+            echo 'Unexpected admission authority' >&2
+            false
+          fi
+          if "$helper" inspect-generation-1; then
+            echo 'Unexpected success without a frozen rehearsal snapshot' >&2
+            false
+          fi
+          test ! -e /rehearsal
