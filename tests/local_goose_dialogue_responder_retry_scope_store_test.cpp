@@ -125,6 +125,10 @@ void test_exact_replay_and_conflict()
         second = make_scope("scope-request-1", '2');
         assert(store.stage_scope(second).result == Result::conflict);
 
+        // Same completion sequence/generation but a different event is also forbidden.
+        const auto changed_event = make_scope("scope-request-4", '2');
+        assert(store.stage_scope(changed_event).result == Result::conflict);
+
         // Same consumer/event/generation with distinct canonical lineage.
         const auto alternate = make_local_goose_dialogue_responder_retry_scope(
             "scope-request-3", lineage("other-lineage-request"), 2100);
