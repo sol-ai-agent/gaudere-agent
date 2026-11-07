@@ -35,9 +35,11 @@ those authoritative facts. **Never infer permission from a staged scope.**
 
 - The new schema v1 is separate from both the historical responder SQLite and
   the audit-lineage SQLite. No schema migration or update of either is present.
-- `UNIQUE(lineage_id)`, `UNIQUE(request_id)` and
-  `UNIQUE(consumer_id,event_id,retry_generation)` enforce at most one scope
-  for the exact generation-1 retry, without changing legacy uniqueness.
+- `UNIQUE(lineage_id)`, `UNIQUE(request_id)`,
+  `UNIQUE(consumer_id,event_id,retry_generation)` and
+  `UNIQUE(consumer_id,completion_sequence,retry_generation)` enforce one
+  scope for the exact generation-1 event **and** sequence, even if the
+  observed event ID changes, without changing legacy uniqueness.
 - Canonical records are immutable. Atomic `BEGIN IMMEDIATE` staging accepts
   one insertion, returns `duplicate` for exact replay, `conflict` for a changed
   request, lineage, event or payload; no replace, update or deletion path.
@@ -61,7 +63,7 @@ wrong sequence and speaker, read-only nonmutating access, missing path,
 symlink, 0644 mode, companions, foreign DDL and future schema.
 
 This CI is **not** a Fedora host proof, a deployed production sidecar or any
-grant of operational authority. The original provider/OAI remains OFF;
+grant of operational authority. The original provider/OpenAI remains OFF;
 production `Network=none`; sequence 4 must remain pending at cursor 3,
 preferred head revision 3, with no new Task.
 
