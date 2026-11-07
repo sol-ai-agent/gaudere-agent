@@ -37,6 +37,7 @@ jobs:
           grep -Fq 'existing_writer' "$h"
           grep -Fq 'stage_scope(' "$h"
           grep -Fq 'UNIQUE(consumer_id,event_id,retry_generation)' "$c"
+          grep -Fq 'UNIQUE(consumer_id,completion_sequence,retry_generation)' "$c"
           grep -Fq 'O_EXCL | O_CLOEXEC | O_NOFOLLOW' "$c"
           grep -Fq 'SQLITE_OPEN_READONLY' "$c"
           grep -Fq 'BEGIN IMMEDIATE' "$c"
