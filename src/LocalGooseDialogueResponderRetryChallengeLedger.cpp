@@ -442,6 +442,46 @@ Code LocalGooseDialogueResponderRetryChallengeLedger::reserve(
     } catch (...) { return Code::unavailable; }
 }
 
+Code LocalGooseDialogueResponderRetryChallengeLedger::burn_if_exact(
+    const Reservation& expected, const std::string& evidence_sha256)
+{
+    if (read_only_) return Code::unavailable;
+    if (!valid_local_goose_dialogue_responder_retry_challenge_reservation(expected)
+        || !lower_sha256(evidence_sha256))
+        return Code::invalid;
+    try {
+        // Serialize lookup and burn under one transaction, so another writer
+        // cannot replace the observed row between comparison and commit.
+        Transaction tx(database_);
+        const auto actual = find_by(database_, "challenge_id", expected.challenge_id);
+        if (!actual || actual->state != State::reserved
+            || actual->evidence_sha256.has_value()
+            || !same(actual->reservation, expected)) {
+            tx.commit();
+            return Code::conflict;
+        }
+
+        const std::string sql = std::string("UPDATE ") + table_name
+            + " SET state=1,evidence_sha256=?1"
+              " WHERE reservation_id=?2 AND challenge_id=?3"
+              " AND request_id=?4 AND state=0 AND evidence_sha256 IS NULL";
+        Statement s(database_, sql);
+        bind_text(s.get(), 1, evidence_sha256);
+        bind_text(s.get(), 2, expected.reservation_id);
+        bind_text(s.get(), 3, expected.challenge_id);
+        bind_text(s.get(), 4, expected.request_id);
+        if (sqlite3_step(s.get()) != SQLITE_DONE
+            || sqlite3_changes(database_) != 1)
+            return Code::unavailable;
+        tx.commit();
+        return Code::accepted;
+    } catch (...) {
+        // No retry after uncertain SQLite commit. Caller must inspect
+        // durable state and fail to manual review, never automatically replay.
+        return Code::unavailable;
+    }
+}
+
 Code LocalGooseDialogueResponderRetryChallengeLedger::burn(
     const std::string& challenge_id,
     const std::string& request_id,

@@ -94,6 +94,16 @@ public:
     [[nodiscard]] LocalGooseDialogueResponderRetryChallengeLedgerCode
     reserve(const LocalGooseDialogueResponderRetryChallengeReservation& reservation);
 
+    // Atomically compare EVERY immutable reservation field under a SQLite
+    // BEGIN IMMEDIATE writer transaction before burning. A prior read-only
+    // inspection is not proof of ongoing ownership; this method narrows that
+    // TOCTOU window but is still NOT an authorization or dispatcher capability.
+    // The evidence digest is opaque caller data; callers must independently
+    // validate its signed content and separately enrolled operator key.
+    [[nodiscard]] LocalGooseDialogueResponderRetryChallengeLedgerCode
+    burn_if_exact(const LocalGooseDialogueResponderRetryChallengeReservation& expected,
+                  const std::string& evidence_sha256);
+
     [[nodiscard]] LocalGooseDialogueResponderRetryChallengeLedgerCode
     burn(const std::string& challenge_id,
          const std::string& request_id,

@@ -1,0 +1,84 @@
+name: Retry exact signed proof consume-once ledger — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.cpp'
+      - 'src/LocalGooseDialogueResponderRetrySignedProofConsumer.hpp'
+      - 'src/LocalGooseDialogueResponderRetrySignedProofConsumer.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_signed_proof_consumer_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-signed-proof-consume-once-v1.md'
+      - '.github/workflows/dialogue-responder-retry-signed-proof-consume-once.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.cpp'
+      - 'src/LocalGooseDialogueResponderRetrySignedProofConsumer.hpp'
+      - 'src/LocalGooseDialogueResponderRetrySignedProofConsumer.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_signed_proof_consumer_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-signed-proof-consume-once-v1.md'
+      - '.github/workflows/dialogue-responder-retry-signed-proof-consume-once.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  consumption-no-runtime-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact matching burn and no production effects
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetrySignedProofConsumer.hpp
+          c=src/LocalGooseDialogueResponderRetrySignedProofConsumer.cpp
+          l=src/LocalGooseDialogueResponderRetryChallengeLedger.cpp
+          t=tests/local_goose_dialogue_responder_retry_signed_proof_consumer_test.cpp
+          grep -Fq 'burned_no_authority' "$h"
+          grep -Fq 'inspect_local_goose_dialogue_responder_retry_exact_message_signature' "$c"
+          grep -Fq 'local_goose_dialogue_responder_retry_nonce_fingerprint' "$c"
+          grep -Fq 'burn_if_exact(*expected, evidence)' "$c"
+          grep -Fq 'Transaction tx(database_)' "$l"
+          grep -Fq 'same(actual->reservation, expected)' "$l"
+          grep -Fq 'test_competing_writers_cannot_both_burn' "$t"
+          grep -Fq 'test_invalid_signature_message_and_expiry_do_not_burn' "$t"
+          ! grep -Eq 'activate_grant|create_lease|dispatch|TaskStore|Runtime|systemctl|podman|curl|fork\(|execve\(|sqlite3_open' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetrySignedProofConsumer' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetrySignedProofConsumer' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetrySignedProofConsumer' Containerfile
+          echo GAUDERE_RETRY_SIGNED_PROOF_CONSUME_NO_AUTHORITY=PASS
+
+  fedora-44-signed-proof-once:
+    needs: consumption-no-runtime-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install compiler, OpenSSL and SQLite
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile isolated signed proof burn tests with -Werror
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -pthread -Isrc \
+            tests/local_goose_dialogue_responder_retry_signed_proof_consumer_test.cpp \
+            src/LocalGooseDialogueResponderRetrySignedProofConsumer.cpp \
+            src/LocalGooseDialogueResponderRetryProofReservationInspector.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryChallengeLedger.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-signed-proof-consumer-test
+      - name: Prove signed bytes, burn-once, crash restart, race and fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-signed-proof-consumer-test
+          echo GAUDERE_RETRY_SIGNED_PROOF_CONSUME_ONCE_ISOLATED_CI=PASS
