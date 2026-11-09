@@ -212,6 +212,19 @@ void test_exact_scope_nonce_and_challenge_binding()
         '1');
     assert(inspect(s, p, changed, statement, key.public_key)
         == Code::invalid_challenge);
+    // Oversized/untrusted challenge fields fail before unbounded hashing.
+    changed = c;
+    changed.proposal_id = std::string(1024 * 1024, 'x');
+    assert(inspect(s, p, changed, statement, key.public_key)
+        == Code::invalid_challenge);
+    changed = c;
+    changed.challenge_id += "overflow";
+    assert(inspect(s, p, changed, statement, key.public_key)
+        == Code::invalid_challenge);
+    changed = c;
+    changed.approval_reference = std::string(200, 'a');
+    assert(inspect(s, p, changed, statement, key.public_key)
+        == Code::invalid_challenge);
 
     auto altered_p = p;
     altered_p.approval_reference = "approval-other";
