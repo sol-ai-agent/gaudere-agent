@@ -46,6 +46,25 @@ bool lowercase_hex(const std::string& s, const std::size_t length) noexcept
     return true;
 }
 
+bool safe_identifier(const std::string& s) noexcept
+{
+    if (s.empty() || s.size() > 128) return false;
+    for (const unsigned char c : s) {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+              || (c >= '0' && c <= '9') || c == '_' || c == '.'
+              || c == ':' || c == '-')) return false;
+    }
+    return true;
+}
+
+bool prefixed_sha256(const std::string& id, const char* prefix) noexcept
+{
+    const std::string p(prefix);
+    return id.size() == p.size() + 64
+        && id.compare(0, p.size(), p) == 0
+        && lowercase_hex(id.substr(p.size()), 64);
+}
+
 bool nonzero_nonce(const std::string& nonce) noexcept
 {
     if (!lowercase_hex(nonce, 64)) return false;
@@ -71,14 +90,14 @@ std::string challenge_identity(const Challenge& challenge)
 bool valid_challenge(const Challenge& c) noexcept
 {
     if (!nonzero_nonce(c.nonce_hex)
-        || !lowercase_hex(c.challenge_id.substr(
-            std::string(challenge_prefix).size()), 64)
-        || c.challenge_id.compare(
-            0, std::string(challenge_prefix).size(), challenge_prefix) != 0
-        || c.proposal_id.empty()
-        || c.scope_id.empty()
-        || c.lineage_id.empty()
-        || c.approval_reference.empty()
+        || !prefixed_sha256(c.challenge_id, challenge_prefix)
+        || !prefixed_sha256(c.proposal_id,
+            local_goose_dialogue_responder_retry_grant_proposal_prefix)
+        || !prefixed_sha256(c.scope_id,
+            local_goose_dialogue_responder_retry_scope_prefix)
+        || !prefixed_sha256(c.lineage_id,
+            local_goose_dialogue_responder_retry_lineage_prefix)
+        || !safe_identifier(c.approval_reference)
         || c.issued_at_ms < 0
         || c.expires_at_ms <= c.issued_at_ms
         || c.expires_at_ms - c.issued_at_ms
