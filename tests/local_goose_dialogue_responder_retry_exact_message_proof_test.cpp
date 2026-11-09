@@ -1,4 +1,5 @@
 #include "LocalGooseDialogueResponderRetryExactMessageProof.hpp"
+#include "LocalGooseDialogueResponder.hpp"
 
 #include "Sha256.hpp"
 
