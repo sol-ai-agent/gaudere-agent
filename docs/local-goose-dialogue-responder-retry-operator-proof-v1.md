@@ -45,7 +45,7 @@ operator id `bertrand`, and the single decision literal
 `approve_retry_generation_1`. No wildcard authority, new message content or
 generic approval is permitted.
 
-The inspector rejects invalid source proposal/scope, altered challenge, wrong
+The inspector bounds all challenge identifiers and exact prefix/hash lengths before canonical hashing; oversized or malformed values fail closed. It rejects invalid source proposal/scope, altered challenge, wrong
 nonce, stale/early/expired proof, wrong actor/decision/key fingerprint,
 malformed signature or a signature for another challenge. It verifies against
 one separately pinned Ed25519 public key. The result is explicitly named
