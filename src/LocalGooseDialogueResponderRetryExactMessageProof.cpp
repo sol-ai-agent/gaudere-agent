@@ -99,7 +99,9 @@ bool exact_challenge(const Challenge& challenge,
                      const Proposal& proposal,
                      const Scope& scope)
 {
-    if (challenge.expires_at_ms <= challenge.issued_at_ms) return false;
+    if (challenge.issued_at_ms < 0
+        || challenge.expires_at_ms <= challenge.issued_at_ms)
+        return false;
     const auto canonical =
         make_local_goose_dialogue_responder_retry_operator_challenge(
             proposal, scope, challenge.nonce_hex, challenge.issued_at_ms,
