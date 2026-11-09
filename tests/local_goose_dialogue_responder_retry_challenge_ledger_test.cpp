@@ -141,7 +141,7 @@ void test_unique_nonce_and_generation_budget()
     assert(l.reserve(r) == Code::accepted);
 
     // A distinct challenge may never reuse a nonce fingerprint.
-    const auto same_nonce = record('a', 'f', 'g', '2');
+    const auto same_nonce = record('a', 'f', 'e', '2');
     assert(l.reserve(same_nonce) == Code::conflict);
     // A second challenge against the exact scope/generation is also denied.
     const auto same_scope = record('1', 'f', 'c', '3');
