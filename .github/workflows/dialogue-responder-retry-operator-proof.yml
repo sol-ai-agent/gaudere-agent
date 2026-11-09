@@ -1,0 +1,74 @@
+name: Retry operator signature proof — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorProof.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorProof.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_proof_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-operator-proof-v1.md'
+      - '.github/workflows/dialogue-responder-retry-operator-proof.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorProof.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorProof.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_proof_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-operator-proof-v1.md'
+      - '.github/workflows/dialogue-responder-retry-operator-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  signed-proof-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify read-only cryptographic check is not wired
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryOperatorProof.hpp
+          c=src/LocalGooseDialogueResponderRetryOperatorProof.cpp
+          t=tests/local_goose_dialogue_responder_retry_operator_proof_test.cpp
+          grep -Fq 'cryptographically_consistent_no_authority' "$h"
+          grep -Fq 'separately_pinned_ed25519_public_key' "$h"
+          grep -Fq 'EVP_DigestVerify' "$c"
+          grep -Fq 'approval_reference' "$c"
+          grep -Fq 'test_exact_pinned_key_and_statement' "$t"
+          grep -Fq 'test_exact_scope_nonce_and_challenge_binding' "$t"
+          ! grep -Eq 'EVP_DigestSign|EVP_PKEY_new_raw_private_key|sqlite3_open|systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime' "$c"
+          ! grep -Eq 'prepare_grant\(|activate_grant\(|dispatch\(|submit\(|acknowledge\(|create_lease\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorProof' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorProof' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorProof' Containerfile
+          echo GAUDERE_RETRY_OPERATOR_SIGNATURE_NO_AUTHORITY=PASS
+
+  fedora-44-synthetic-operator:
+    needs: signed-proof-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install isolated build dependencies
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile strict standalone operator proof test
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_operator_proof_test.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-operator-proof-test
+      - name: Verify exact scope/nonce/key/signature binding with synthetic key
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-operator-proof-test
+          echo GAUDERE_RETRY_OPERATOR_SIGNATURE_SYNTHETIC_CI=PASS
