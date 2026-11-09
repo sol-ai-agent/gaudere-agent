@@ -1,0 +1,78 @@
+name: Retry exact proof to reserved challenge ledger — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryProofReservationInspector.hpp'
+      - 'src/LocalGooseDialogueResponderRetryProofReservationInspector.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_proof_reservation_inspector_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-proof-reservation-inspection-v1.md'
+      - '.github/workflows/dialogue-responder-retry-proof-reservation-inspection.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryProofReservationInspector.hpp'
+      - 'src/LocalGooseDialogueResponderRetryProofReservationInspector.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_proof_reservation_inspector_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-proof-reservation-inspection-v1.md'
+      - '.github/workflows/dialogue-responder-retry-proof-reservation-inspection.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-authority-read-only-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check absence of authority, mutator and production wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryProofReservationInspector.hpp
+          c=src/LocalGooseDialogueResponderRetryProofReservationInspector.cpp
+          t=tests/local_goose_dialogue_responder_retry_proof_reservation_inspector_test.cpp
+          grep -Fq 'consistent_reserved_no_authority' "$h"
+          grep -Fq 'existing_read_only' "$c"
+          grep -Fq 'nonce_fingerprint' "$c"
+          grep -Fq 'same_reservation' "$c"
+          grep -Fq 'inspect_local_goose_dialogue_responder_retry_exact_message_signature' "$c"
+          grep -Fq 'test_absorbing_consumption_and_uncertainty' "$t"
+          grep -Fq 'test_signature_and_expected_request_fail_closed' "$t"
+          ! grep -Eq 'create_new_isolated|existing_writer|\.reserve\(|\.burn\(|\.mark_uncertain\(|BEGIN IMMEDIATE|sqlite3_exec|EVP_DigestSign|EVP_PKEY_new_raw_private_key|systemctl|podman|curl|fork\(|execve\(' "$c"
+          ! grep -Eq 'activate_grant\(|prepare_grant\(|dispatch\(|submit\(|acknowledge\(|create_lease\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryProofReservationInspector' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryProofReservationInspector' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryProofReservationInspector' Containerfile
+          echo GAUDERE_RETRY_PROOF_RESERVATION_READ_ONLY_NO_AUTHORITY=PASS
+
+  fedora-44-exact-proof-reservation:
+    needs: no-authority-read-only-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install isolated build dependencies
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile isolated evidence link with strict warnings
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_proof_reservation_inspector_test.cpp \
+            src/LocalGooseDialogueResponderRetryProofReservationInspector.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryChallengeLedger.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-proof-reservation-test
+      - name: Verify exact nonce, signed payload and no-mutation under restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-proof-reservation-test
+          echo GAUDERE_RETRY_PROOF_RESERVATION_ISOLATED_CI=PASS
