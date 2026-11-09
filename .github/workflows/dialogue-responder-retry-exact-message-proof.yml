@@ -1,0 +1,76 @@
+name: Retry exact-message operator signature proof — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryExactMessageProof.hpp'
+      - 'src/LocalGooseDialogueResponderRetryExactMessageProof.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_exact_message_proof_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-exact-message-proof-v1.md'
+      - '.github/workflows/dialogue-responder-retry-exact-message-proof.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryExactMessageProof.hpp'
+      - 'src/LocalGooseDialogueResponderRetryExactMessageProof.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_exact_message_proof_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-exact-message-proof-v1.md'
+      - '.github/workflows/dialogue-responder-retry-exact-message-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-message-no-authority-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect closed cryptographic boundary and no production wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryExactMessageProof.hpp
+          c=src/LocalGooseDialogueResponderRetryExactMessageProof.cpp
+          t=tests/local_goose_dialogue_responder_retry_exact_message_proof_test.cpp
+          grep -Fq 'cryptographically_consistent_no_authority' "$h"
+          grep -Fq 'separately_pinned_ed25519_public_key' "$h"
+          grep -Fq 'EVP_DigestVerify' "$c"
+          grep -Fq 'safe_exact_utf8' "$c"
+          grep -Fq 'review.message_text' "$c"
+          grep -Fq 'test_proposal_challenge_and_old_signature_isolation' "$t"
+          grep -Fq 'test_message_tamper_and_normalization' "$t"
+          ! grep -Eq 'EVP_DigestSign|EVP_PKEY_new_raw_private_key|sqlite3_open|systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime' "$c"
+          ! grep -Eq 'activate_grant\(|prepare_grant\(|dispatch\(|submit\(|acknowledge\(|create_lease\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryExactMessageProof' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryExactMessageProof' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryExactMessageProof' Containerfile
+          echo GAUDERE_RETRY_EXACT_MESSAGE_NO_AUTHORITY=PASS
+
+  fedora-44-exact-message-synthetic:
+    needs: exact-message-no-authority-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install strict standalone build dependencies
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile exact-message signature proof with -Werror
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_exact_message_proof_test.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-exact-message-proof-test
+      - name: Verify exact message, UTF-8, key and v1 replay isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-exact-message-proof-test
+          echo GAUDERE_RETRY_EXACT_MESSAGE_SYNTHETIC_CI=PASS
