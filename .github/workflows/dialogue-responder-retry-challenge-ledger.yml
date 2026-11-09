@@ -1,0 +1,75 @@
+name: Retry generation-1 challenge one-time ledger
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_challenge_ledger_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-challenge-ledger-v1.md'
+      - '.github/workflows/dialogue-responder-retry-challenge-ledger.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryChallengeLedger.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_challenge_ledger_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-challenge-ledger-v1.md'
+      - '.github/workflows/dialogue-responder-retry-challenge-ledger.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no authority or production integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryChallengeLedger.hpp
+          c=src/LocalGooseDialogueResponderRetryChallengeLedger.cpp
+          t=tests/local_goose_dialogue_responder_retry_challenge_ledger_test.cpp
+          grep -Fq 'create_new_isolated' "$h"
+          grep -Fq 'existing_read_only' "$h"
+          grep -Fq 'mark_uncertain' "$h"
+          grep -Fq 'SQLITE_OPEN_NOFOLLOW' "$c"
+          grep -Fq 'UNIQUE(scope_id,retry_generation)' "$c"
+          grep -Fq 'nonce_sha256 TEXT NOT NULL UNIQUE' "$c"
+          grep -Fq 'BEGIN IMMEDIATE' "$c"
+          grep -Fq 'PRAGMA synchronous=FULL' "$c"
+          grep -Fq 'test_reserve_burn_and_restart' "$t"
+          grep -Fq 'test_absorbing_uncertain' "$t"
+          ! grep -Eq 'EVP_DigestSign|EVP_PKEY_new_raw_private_key|TaskStore|Runtime|systemctl|podman|curl|fork\(|execve\(' "$c"
+          ! grep -Eq 'activate_grant\(|prepare_grant\(|dispatch\(|submit\(|acknowledge\(|create_lease\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryChallengeLedger' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryChallengeLedger' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryChallengeLedger' Containerfile
+          echo GAUDERE_RETRY_CHALLENGE_LEDGER_CODE_ONLY=PASS
+
+  fedora-44-challenge-ledger:
+    needs: ledger-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install isolated compiler and SQLite
+        run: dnf install -y gcc-c++ sqlite-devel
+      - uses: actions/checkout@v4
+      - name: Strict standalone compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_challenge_ledger_test.cpp \
+            src/LocalGooseDialogueResponderRetryChallengeLedger.cpp \
+            src/Sha256.cpp -lsqlite3 \
+            -o /tmp/gaudere-retry-challenge-ledger-test
+      - name: Prove one-time burn and fail-closed schema/replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-challenge-ledger-test
+          echo GAUDERE_RETRY_CHALLENGE_LEDGER_ISOLATED_CI=PASS
