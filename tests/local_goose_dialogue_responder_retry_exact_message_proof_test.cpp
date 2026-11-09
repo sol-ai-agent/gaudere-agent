@@ -279,7 +279,7 @@ void test_malformed_text_and_boundaries()
     assert(make(std::string(4096, 'A')));
     assert(!make("hello\rworld"));
     assert(!make("hello\tworld"));
-    assert(!make(std::string("NUL\\0", 5)));
+    assert(!make(std::string("NUL\0", 4)));
     assert(!make(std::string("\xc0\xaf", 2))); // overlong
     assert(!make(std::string("\xed\xa0\x80", 3))); // UTF-8 surrogate
     assert(!make(std::string("\xf4\x90\x80\x80", 4))); // > U+10ffff
