@@ -153,7 +153,9 @@ Code check(const Review& r, const Proposal& p, const Scope& s,
 
 void test_exact_message_signature()
 {
-    const auto s = scope(), p = proposal(s), c = challenge(p, s);
+    const auto s = scope();
+    const auto p = proposal(s);
+    const auto c = challenge(p, s);
     SyntheticKey key(0x42);
     const std::string message = u8"Réponse précise.\nÀ bientôt.";
     const auto r = review(p, s, c, message);
@@ -178,7 +180,9 @@ void test_exact_message_signature()
 
 void test_message_tamper_and_normalization()
 {
-    const auto s = scope(), p = proposal(s), c = challenge(p, s);
+    const auto s = scope();
+    const auto p = proposal(s);
+    const auto c = challenge(p, s);
     SyntheticKey key(0x42);
     const auto r = review(p, s, c, u8"Café");
     const auto proof = sign(r, p, s, c, key);
@@ -236,7 +240,9 @@ void test_message_tamper_and_normalization()
 
 void test_proposal_challenge_and_old_signature_isolation()
 {
-    const auto s = scope(), p = proposal(s), c = challenge(p, s);
+    const auto s = scope();
+    const auto p = proposal(s);
+    const auto c = challenge(p, s);
     SyntheticKey key(0x42);
     const auto r = review(p, s, c, "One exact intervention.");
     const auto proof = sign(r, p, s, c, key);
@@ -269,7 +275,9 @@ void test_proposal_challenge_and_old_signature_isolation()
 
 void test_malformed_text_and_boundaries()
 {
-    const auto s = scope(), p = proposal(s), c = challenge(p, s);
+    const auto s = scope();
+    const auto p = proposal(s);
+    const auto c = challenge(p, s);
     const auto make = [&](const std::string& text) {
         return make_local_goose_dialogue_responder_retry_exact_message_review(
             p, s, c, text);
