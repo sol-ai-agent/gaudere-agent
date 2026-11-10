@@ -1,0 +1,77 @@
+name: Retry local operator public key pin — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorKeyPin.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_key_pin_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-operator-key-pin-v1.md'
+      - '.github/workflows/dialogue-responder-retry-operator-key-pin.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorKeyPin.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_key_pin_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-operator-key-pin-v1.md'
+      - '.github/workflows/dialogue-responder-retry-operator-key-pin.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-runtime-no-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify local pin cannot be sourced from a candidate or execute actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryOperatorKeyPin.hpp
+          c=src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp
+          t=tests/local_goose_dialogue_responder_retry_operator_key_pin_test.cpp
+          grep -Fq 'cryptographically_consistent_no_authority' "$h"
+          grep -Fq 'independently_trusted_key_fingerprint' "$h"
+          grep -Fq 'O_NOFOLLOW' "$c"
+          grep -Fq 'before.st_nlink != 1' "$c"
+          grep -Fq 'before.st_uid != geteuid()' "$c"
+          grep -Fq '0400' "$c"
+          grep -Fq 'test_unauthorized_key_cannot_replace_independent_trust' "$t"
+          grep -Fq 'test_strict_canonical_format_and_bounds' "$t"
+          ! grep -Eq 'EVP_DigestSign|EVP_PKEY_new_raw_private_key|sqlite3_open|systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(|acknowledge\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorKeyPin' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorKeyPin' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorKeyPin' Containerfile
+          echo GAUDERE_RETRY_OPERATOR_PIN_INERT_BOUNDARY=PASS
+
+  fedora-44-local-pin-synthetic:
+    needs: no-runtime-no-authority
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install minimal isolated C++ and crypto dependencies
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile local key pin and exact signed-message tests with -Werror
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_operator_key_pin_test.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-operator-local-pin-test
+      - name: Reject substituted public keys, symlink/hardlink/mode, malformed file and altered text
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-operator-local-pin-test
+          echo GAUDERE_RETRY_OPERATOR_PIN_SYNTHETIC_CI=PASS
