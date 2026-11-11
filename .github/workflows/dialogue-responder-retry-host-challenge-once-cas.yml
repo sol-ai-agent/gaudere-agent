@@ -1,0 +1,71 @@
+name: Retry host challenge once — source-only SQLite CAS
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeOnceLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeOnceLedger.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_challenge_once_ledger_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-challenge-once-cas-v1.md'
+      - '.github/workflows/dialogue-responder-retry-host-challenge-once-cas.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeOnceLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeOnceLedger.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_challenge_once_ledger_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-challenge-once-cas-v1.md'
+      - '.github/workflows/dialogue-responder-retry-host-challenge-once-cas.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-only-existing-ledger-no-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert challenge issuance/production runtime not wired
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryHostChallengeOnceLedger.hpp
+          c=src/LocalGooseDialogueResponderRetryHostChallengeOnceLedger.cpp
+          t=tests/local_goose_dialogue_responder_retry_host_challenge_once_ledger_test.cpp
+          grep -Fq 'verified_challenge_marked_consumed_no_authority' "$h"
+          grep -Fq 'BEGIN IMMEDIATE' "$c"
+          grep -Fq 'sqlite3_changes(ledger.database_) != 1' "$c"
+          grep -Fq 'SQLITE_OPEN_NOFOLLOW' "$c"
+          grep -Fq 'SQLITE_OPEN_READWRITE' "$c"
+          ! grep -Fq 'SQLITE_OPEN_CREATE' "$c"
+          grep -Fq 'PRAGMA synchronous=FULL' "$c"
+          grep -Fq 'inspect_local_goose_dialogue_responder_retry_host_challenge_proof(' "$c"
+          grep -Fq 'test_two_independent_processes_compete_for_one_challenge' "$t"
+          ! grep -Eq 'systemctl|podman|curl|execve\(|TaskStore|Runtime|dispatch\(|EVP_PKEY_new_raw_private_key|O_CREAT|SQLITE_OPEN_CREATE' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostChallengeOnceLedger' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostChallengeOnceLedger' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostChallengeOnceLedger' Containerfile
+          echo GAUDERE_HOST_ONCE_SOURCE_ONLY_NO_AUTHORITY=PASS
+
+  fedora44-synthetic-one-shot-concurrency:
+    needs: source-only-existing-ledger-no-authority
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install compiler and SQLite/Ed25519 libraries
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Build and run synthetic two-process one-shot CAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -pthread -Isrc \
+            tests/local_goose_dialogue_responder_retry_host_challenge_once_ledger_test.cpp \
+            src/LocalGooseDialogueResponderRetryHostChallengeOnceLedger.cpp \
+            src/LocalGooseDialogueResponderRetryHostChallengeProof.cpp \
+            src/LocalGooseDialogueResponderRetryHostAnchorReceipt.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-host-once-cas-test
+          /tmp/gaudere-retry-host-once-cas-test
+          echo GAUDERE_HOST_ONCE_FEDORA44_SYNTHETIC=PASS
