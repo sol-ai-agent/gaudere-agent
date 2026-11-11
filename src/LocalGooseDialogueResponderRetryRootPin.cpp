@@ -69,10 +69,13 @@ bool safe_ancestor(const int fd, const bool last)
         return false;
     if (last)
         return s.st_uid == geteuid() && (s.st_mode & 07777) == 0700;
-    // Root-owned and owner-owned ancestors are permitted, but not writable
-    // by group/other; reject sticky /tmp and every symlink component.
+    // Trust exact root-owned sticky directories (e.g. /tmp) only as
+    // ancestors of the strict owner-0700 immediate parent. The sticky bit
+    // prevents other UIDs from replacing our private directory there.
+    const bool sticky_root = s.st_uid == 0
+        && (s.st_mode & 07777) == 01777;
     return (s.st_uid == 0 || s.st_uid == geteuid())
-        && (s.st_mode & 0022) == 0;
+        && (((s.st_mode & 0022) == 0) || sticky_root);
 }
 
 std::optional<std::array<unsigned char, 32>> read_secure_root(
