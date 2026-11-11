@@ -1,0 +1,79 @@
+name: Retry operator trust floor isolated monotonic ledger — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-trust-floor-ledger-v1.md'
+      - '.github/workflows/dialogue-responder-retry-trust-floor-ledger.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-trust-floor-ledger-v1.md'
+      - '.github/workflows/dialogue-responder-retry-trust-floor-ledger.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inert-trust-floor-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify atomic monotonic floor and no production integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp
+          c=src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp
+          t=tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp
+          grep -Fq 'advanced_no_authority' "$h"
+          grep -Fq 'BEGIN IMMEDIATE' "$c"
+          grep -Fq 'root_signed_new_generation <= expected_prior_generation' "$c"
+          grep -Fq 'current.minimum_generation != expected_prior_generation' "$c"
+          grep -Fq 'sqlite3_changes(database_) != 1' "$c"
+          grep -Fq 'require_safe_parent(path)' "$c"
+          grep -Fq 'test_two_separate_writers_only_one_advance' "$t"
+          grep -Fq 'test_floor_survives_restart_and_blocks_old_root_signed_active' "$t"
+          ! grep -Eq 'systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(|EVP_DigestSign|EVP_PKEY_new_raw_private_key' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' Containerfile
+          echo GAUDERE_TRUST_FLOOR_LEDGER_NO_AUTHORITY=PASS
+
+  fedora-44-trust-floor-durability:
+    needs: inert-trust-floor-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install SQLite crypto and C++ compiler
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile test against same root-signed policy as PR283
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -pthread -Isrc \
+            tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-trust-floor-ledger-test
+      - name: Prove durable floor monotonicity, signed replay refusal and two-writer exclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-trust-floor-ledger-test
+          echo GAUDERE_TRUST_FLOOR_LEDGER_FEDORA44=PASS
