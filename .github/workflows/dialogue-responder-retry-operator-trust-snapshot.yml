@@ -1,0 +1,78 @@
+name: Retry root-signed operator trust snapshot — no runtime authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_trust_snapshot_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-operator-trust-snapshot-v1.md'
+      - '.github/workflows/dialogue-responder-retry-operator-trust-snapshot.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_operator_trust_snapshot_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-operator-trust-snapshot-v1.md'
+      - '.github/workflows/dialogue-responder-retry-operator-trust-snapshot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  code-only-trust-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce no signer enrollment, runtime/Task/ACK or untrusted root wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          c=src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp
+          h=src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp
+          t=tests/local_goose_dialogue_responder_retry_operator_trust_snapshot_test.cpp
+          grep -Fq 'independently_trusted_root_fingerprint' "$h"
+          grep -Fq 'independently_trusted_minimum_generation' "$h"
+          grep -Fq 'EVP_DigestVerify(' "$c"
+          grep -Fq 'snapshot->status != "active"' "$c"
+          grep -Fq 'snapshot->generation < independently_trusted_minimum_generation' "$c"
+          grep -Fq 'inspect_local_goose_dialogue_responder_retry_pinned_signature' "$c"
+          grep -Fq 'test_revoke_and_floor_against_old_signed_active' "$t"
+          grep -Fq 'test_key_rotation_requires_signed_policy_and_matching_local_pin' "$t"
+          ! grep -Eq 'EVP_DigestSign|EVP_PKEY_new_raw_private_key|sqlite3_open|systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustSnapshot' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustSnapshot' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustSnapshot' Containerfile
+          echo GAUDERE_RETRY_OPERATOR_TRUST_SNAPSHOT_INERT=PASS
+
+  fedora-44-synthetic-root-policy:
+    needs: code-only-trust-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install isolated crypto compiler dependencies
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile root-signed operator trust tests under Fedora44 Werror
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_operator_trust_snapshot_test.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-trust-snapshot-test
+      - name: Assert independent root, signed revocation, rollback floor and rotation
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/gaudere-retry-trust-snapshot-test
+          echo GAUDERE_RETRY_OPERATOR_TRUST_SNAPSHOT_FEDORA44=PASS
