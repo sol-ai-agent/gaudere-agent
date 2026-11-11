@@ -40,7 +40,7 @@ The format permits `status=revoked` as a **signed tombstone**, but it
 never authorizes a signature. The signature is Ed25519 over:
 
 ```text
-gaudere-retry-operator-trust-snapshot-signature.v1|<raw first six LF-terminated lines>
+gaudere-retry-operator-trust-snapshot-signature.v1|<raw first seven LF-terminated lines>
 ```
 
 Fields are exactly ordered. Decimal values are nonnegative, minimal
