@@ -36,6 +36,8 @@ jobs:
           grep -Fq 'independently_pinned_host_signer_public_key' "$h"
           grep -Fq 'host_context_sha256=' "$c"
           grep -Fq 'EVP_DigestVerify(' "$c"
+          grep -Fq 'sha256_hex("gaudere-retry-operator-root-ed25519-key-v1|" + raw)' "$c"
+          grep -Fq 'sha256_hex("gaudere-retry-operator-ed25519-key-v1|" + raw)' "$c"
           grep -Fq 'max_receipt_size = 1600' "$c"
           grep -Fq 'receipt->anchor_epoch < independently_trusted_minimum_anchor_epoch' "$c"
           grep -Fq 'test_independent_synthetic_host_signature_and_exact_manifest' "$t"
