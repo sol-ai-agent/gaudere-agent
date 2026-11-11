@@ -50,10 +50,10 @@ enum class LocalGooseDialogueResponderRetryTrustFloorCode : std::uint8_t {
     unavailable_or_commit_uncertain
 };
 
-// Only a separate trusted controller may call this after it verifies an
-// authenticated root-signed snapshot AND authentic human authorization.
-// This class does not authenticate that caller, verify its evidence digest,
-// issue a challenge, approve a message or dispatch any Task.
+// This isolated SQLite ledger does not authenticate the human controller,
+// issue a challenge, approve a message or dispatch any Task. Its private
+// mutation entry point is accessible only to the signed REVOKED verifier.
+// The caller must still supply genuinely independent enrolled trust anchors.
 //
 // All updates compare root fingerprint AND prior generation under one
 // BEGIN IMMEDIATE transaction. No decrement, reset, duplicate advance,
