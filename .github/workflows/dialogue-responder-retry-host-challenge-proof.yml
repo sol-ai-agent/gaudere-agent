@@ -1,0 +1,69 @@
+name: Retry host challenge-bound receipt — no replay authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeProof.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeProof.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_challenge_proof_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-challenge-proof-v2.md'
+      - '.github/workflows/dialogue-responder-retry-host-challenge-proof.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeProof.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostChallengeProof.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_challenge_proof_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-challenge-proof-v2.md'
+      - '.github/workflows/dialogue-responder-retry-host-challenge-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-only-no-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject runtime and nonce-consume authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryHostChallengeProof.hpp
+          c=src/LocalGooseDialogueResponderRetryHostChallengeProof.cpp
+          t=tests/local_goose_dialogue_responder_retry_host_challenge_proof_test.cpp
+          grep -Fq 'challenge_bound_cryptographic_consistency_no_authority' "$h"
+          grep -Fq 'max_challenge_lifetime_ms = 300000' "$c"
+          grep -Fq 'sha256_hex(exact_v1_host_signed_receipt)' "$c"
+          grep -Fq 'inspect_local_goose_dialogue_responder_retry_host_anchor_receipt(' "$c"
+          grep -Fq 'independently_expected_challenge_sha256' "$h"
+          grep -Fq 'independently_expected_request_context_sha256' "$h"
+          grep -Fq 'test_exact_receipt_and_externally_expected_challenge' "$t"
+          grep -Fq 'test_canonical_format_and_short_lifetime' "$t"
+          ! grep -Eq 'systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(|EVP_PKEY_new_raw_private_key|open\(|openat\(|chmod\(|mkdir\(|BEGIN IMMEDIATE' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostChallengeProof' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostChallengeProof' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostChallengeProof' Containerfile
+          echo GAUDERE_HOST_CHALLENGE_SOURCE_ONLY=PASS
+
+  fedora44-synthetic-challenge-proof:
+    needs: source-only-no-authority
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install compiler and crypto dependency
+        run: dnf install -y gcc-c++ openssl-devel
+      - uses: actions/checkout@v4
+      - name: Verify exact challenge-bound host proof against v1 receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_host_challenge_proof_test.cpp \
+            src/LocalGooseDialogueResponderRetryHostChallengeProof.cpp \
+            src/LocalGooseDialogueResponderRetryHostAnchorReceipt.cpp \
+            src/Sha256.cpp -lcrypto \
+            -o /tmp/gaudere-retry-host-challenge-proof-test
+          /tmp/gaudere-retry-host-challenge-proof-test
+          echo GAUDERE_HOST_CHALLENGE_SYNTHETIC_FEDORA44=PASS
