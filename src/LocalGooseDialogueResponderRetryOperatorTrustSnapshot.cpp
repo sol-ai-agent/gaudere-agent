@@ -147,6 +147,40 @@ std::string root_fingerprint(const std::array<unsigned char, 32>& key)
 
 } // namespace
 
+std::optional<LocalGooseDialogueResponderRetryVerifiedSignedTrustPolicy>
+verify_local_goose_dialogue_responder_retry_signed_trust_policy(
+    const std::string& candidate_signed_snapshot,
+    const std::array<unsigned char, 32>& separately_enrolled_root_public_key,
+    const std::string& independently_trusted_root_fingerprint,
+    const std::int64_t trusted_now_ms)
+{
+    try {
+        if (!lower_hex(independently_trusted_root_fingerprint, 64)
+            || root_fingerprint(separately_enrolled_root_public_key)
+                != independently_trusted_root_fingerprint)
+            return std::nullopt;
+
+        const auto parsed = parse(candidate_signed_snapshot);
+        if (!parsed || !verify_root(*parsed, separately_enrolled_root_public_key))
+            return std::nullopt;
+        if (trusted_now_ms < parsed->not_before_ms
+            || trusted_now_ms >= parsed->not_after_ms)
+            return std::nullopt;
+
+        LocalGooseDialogueResponderRetryVerifiedSignedTrustPolicy verified;
+        verified.status = parsed->status == "revoked"
+            ? LocalGooseDialogueResponderRetrySignedTrustStatus::revoked
+            : LocalGooseDialogueResponderRetrySignedTrustStatus::active;
+        verified.operator_key_fingerprint = parsed->key_fingerprint;
+        verified.generation = parsed->generation;
+        // Hash the full exact signed snapshot, including signature and LF.
+        verified.snapshot_sha256 = sha256_hex(candidate_signed_snapshot);
+        return verified;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
 Code inspect_local_goose_dialogue_responder_retry_operator_trust_snapshot(
     const std::string& candidate_signed_snapshot,
     const std::array<unsigned char, 32>& separately_enrolled_root_public_key,

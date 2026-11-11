@@ -1,6 +1,7 @@
 #ifndef GAUDERE_AGENT_LOCAL_GOOSE_DIALOGUE_RESPONDER_RETRY_OPERATOR_TRUST_FLOOR_LEDGER_HPP
 #define GAUDERE_AGENT_LOCAL_GOOSE_DIALOGUE_RESPONDER_RETRY_OPERATOR_TRUST_FLOOR_LEDGER_HPP
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -22,6 +23,20 @@ struct LocalGooseDialogueResponderRetryTrustFloorRecord {
     std::string last_transition_sha256; // opaque evidence, NOT a signature
 };
 
+class LocalGooseDialogueResponderRetryTrustFloorLedger;
+enum class LocalGooseDialogueResponderRetryRevocationCommitCode : std::uint8_t;
+
+// Only the bridge with verified Ed25519 REVOKED evidence may call the
+// ledger's private compare-and-advance implementation.
+[[nodiscard]] LocalGooseDialogueResponderRetryRevocationCommitCode
+commit_local_goose_dialogue_responder_retry_verified_revocation(
+    LocalGooseDialogueResponderRetryTrustFloorLedger& ledger,
+    const std::string& candidate_signed_snapshot,
+    const std::array<unsigned char, 32>& separately_enrolled_root_public_key,
+    const std::string& independently_trusted_root_fingerprint,
+    const std::string& independently_trusted_operator_key_fingerprint,
+    std::int64_t trusted_now_ms);
+
 enum class LocalGooseDialogueResponderRetryTrustFloorOpenMode : std::uint8_t {
     create_new_isolated,
     existing_read_only,
@@ -35,10 +50,10 @@ enum class LocalGooseDialogueResponderRetryTrustFloorCode : std::uint8_t {
     unavailable_or_commit_uncertain
 };
 
-// Only a separate trusted controller may call this after it verifies an
-// authenticated root-signed snapshot AND authentic human authorization.
-// This class does not authenticate that caller, verify its evidence digest,
-// issue a challenge, approve a message or dispatch any Task.
+// This isolated SQLite ledger does not authenticate the human controller,
+// issue a challenge, approve a message or dispatch any Task. Its private
+// mutation entry point is accessible only to the signed REVOKED verifier.
+// The caller must still supply genuinely independent enrolled trust anchors.
 //
 // All updates compare root fingerprint AND prior generation under one
 // BEGIN IMMEDIATE transaction. No decrement, reset, duplicate advance,
@@ -59,6 +74,19 @@ public:
     [[nodiscard]] std::optional<LocalGooseDialogueResponderRetryTrustFloorRecord>
     inspect(const std::string& independently_trusted_root_fingerprint) const;
 
+    [[nodiscard]] bool is_read_only() const noexcept { return read_only_; }
+private:
+    friend LocalGooseDialogueResponderRetryRevocationCommitCode
+    commit_local_goose_dialogue_responder_retry_verified_revocation(
+        LocalGooseDialogueResponderRetryTrustFloorLedger& ledger,
+        const std::string& candidate_signed_snapshot,
+        const std::array<unsigned char, 32>& separately_enrolled_root_public_key,
+        const std::string& independently_trusted_root_fingerprint,
+        const std::string& independently_trusted_operator_key_fingerprint,
+        std::int64_t trusted_now_ms);
+
+    // Never exposed directly to callers: unsigned supplied hashes/generations
+    // cannot mutate a trust floor through the public C++ API.
     [[nodiscard]] LocalGooseDialogueResponderRetryTrustFloorCode
     advance_after_external_signature_review(
         const std::string& independently_trusted_root_fingerprint,
@@ -66,8 +94,6 @@ public:
         std::uint64_t root_signed_new_generation,
         const std::string& externally_verified_snapshot_sha256);
 
-    [[nodiscard]] bool is_read_only() const noexcept { return read_only_; }
-private:
     sqlite3* database_ = nullptr;
     bool read_only_ = true;
 };
