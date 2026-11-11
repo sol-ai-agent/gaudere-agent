@@ -247,9 +247,11 @@ LocalGooseDialogueResponderRetryTrustFloorLedger(
         if (result != SQLITE_OK || !database_)
             throw std::runtime_error("cannot open trust floor SQLite file");
         sqlite3_busy_timeout(database_, 3000);
+        // Synchronous is per connection, not durable database metadata.
+        // Require FULL again for every reopened writer, not only bootstrap.
+        if (!read_only_) exec(database_, "PRAGMA synchronous=FULL");
         if (creating) {
             exec(database_, "PRAGMA journal_mode=DELETE");
-            exec(database_, "PRAGMA synchronous=FULL");
             exec(database_, schema_sql);
             exec(database_, "PRAGMA user_version=1");
             const auto initial_evidence = sha256_hex(
