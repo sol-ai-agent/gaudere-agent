@@ -208,6 +208,22 @@ void test_canonical_wire_constraints_and_domain_separation()
         == Code::invalid_receipt_format);
     assert(inspect(receipt(host, base + "unknown=1\n"), host, anchor, context)
         == Code::invalid_receipt_format);
+    auto crlf = base;
+    const auto first_lf = crlf.find('\n');
+    assert(first_lf != std::string::npos);
+    crlf.insert(first_lf, "\r");
+    assert(inspect(receipt(host, crlf), host, anchor, context)
+        == Code::invalid_receipt_format);
+    auto tabbed = base;
+    const auto pin = tabbed.find("root_pin_path=");
+    assert(pin != std::string::npos);
+    tabbed.insert(pin + std::string("root_pin_path=").size(), "\t");
+    assert(inspect(receipt(host, tabbed), host, anchor, context)
+        == Code::invalid_receipt_format);
+    auto nonascii = base;
+    nonascii.insert(pin + std::string("root_pin_path=").size(), "\xc3\xa9");
+    assert(inspect(receipt(host, nonascii), host, anchor, context)
+        == Code::invalid_receipt_format);
     auto noncanonical = base;
     const auto at = noncanonical.find("anchor_epoch=7\n");
     assert(at != std::string::npos);
