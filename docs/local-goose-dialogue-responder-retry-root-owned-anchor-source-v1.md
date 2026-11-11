@@ -62,7 +62,17 @@ A compromised runtime UID must not be allowed to own or rewrite `/etc`
 trust configuration; the correctness of Linux ownership, mount namespace,
 UID separation, and the deployed binary's build provenance are assumptions.
 Privilege escalation, a malicious root or malicious image remain out of
-scope. Whole-host restore could roll back both manifest and SQLite;
+scope. A **rootless container or attacker-created user/mount namespace can
+present its own root-owned /etc tree**: `st_uid == 0` and a non-root
+`geteuid()` inside that namespace do not by themselves establish *host*
+root custody. In particular, the synthetic CI container deliberately proves
+only filesystem predicates, **not** host enrollment provenance. Deployment
+must refuse any container/runtime namespace whose mount trust cannot be
+independently established, or must obtain the anchor through a separately
+authenticated host-side service. Neither model is selected or implemented
+here; this stage MUST NOT be promoted to runtime authorization.
+
+Whole-host restore could roll back both manifest and SQLite;
 external monotonic evidence is still required. The external clock is still
 untrusted. A newer ACTIVE root-signed snapshot is **not** proof of a renewed
 operator ceremony or permission.
