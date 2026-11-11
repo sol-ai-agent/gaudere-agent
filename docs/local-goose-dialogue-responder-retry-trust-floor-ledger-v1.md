@@ -23,18 +23,22 @@ through its update API.
 
 `(slot=1, root_fingerprint, minimum_generation, last_transition_sha256)`
 
-The evidence hash is opaque caller input. It is **not** a signed operator
-approval and **not** proof that the caller verified a root-signed
-policy. The initializer hash is only an explicit *test/bootstrap marker*
-and is not real enrollment.
+The stored hash is the digest of the exact signature-verified policy
+(including the signature and last LF), computed by the #285 bridge, not
+an arbitrary digest supplied through its public API. The raw
+`advance_after_external_signature_review()` method is **private** and
+can only be reached by its friend revocation bridge; a direct unsigned
+C++ call is rejected at compile time.
 
-The consuming controller MUST independently authenticate the caller,
-verify the actual root-signed status/generation and its key/root
-identity, and gate the write on genuine operator authorization before
-calling `advance_after_external_signature_review()`. This API does none
-of those things. A malicious writer possessing file access could raise
-the floor to deny service. Nothing in this code should be exposed via
-Drive/B10 or user-provided paths.
+The bridge verifies the independently pinned root public key and SHA256,
+the signed operator-key fingerprint, `status=revoked`, generation,
+validity window and full Ed25519 signature before updating the floor.
+Only a genuine root-signed tombstone can advance it via the public API.
+There is **still no actual human enrollment or consent**: a caller that
+can substitute the supposedly independent root/key/clock can invent its
+own trust policy. A malicious same-UID writer with filesystem access
+could also change the database or restore a backup. Nothing in this
+code should be exposed to Drive/B10 or arbitrary caller-specified paths.
 
 ### Atomic compare-and-swap
 
@@ -83,13 +87,14 @@ The dedicated workflow compiles strict C++17 `-Werror` against the
 #283 root-signed policy and #282 local key pin. Its tests:
 
 1. Create a private SQLite floor 1, verify an exact synthetic
-   Ed25519-signed ACTIVE generation 1, apply a *separately reviewed*
-   generation 8 floor transition and confirm the old valid signed
-   ACTIVE generation is rejected.
+   Ed25519-signed ACTIVE generation 1, commit a valid root-signed
+   REVOKED generation 8 using the only public update path and confirm
+   the old valid signed ACTIVE generation is rejected.
 2. Close and reopen read-only/re-writable; the higher floor survives
    normal restart, read-only cannot advance, no automatic reset.
-3. Reject wrong root, stale expected generation, old/same generation,
-   malformed digest and out-of-range SQLite int64 generation.
+3. Reject wrong root/key fingerprint, forged/corrupted signature,
+   root-signed ACTIVE instead of REVOKED, stale and expired snapshots,
+   out-of-range generations and noncanonical signed content.
 4. Launch two threads holding separate writer connections against the
    same prior generation. At most one advances, with durable floor 2.
 5. Reject absent files, duplicate creation, permissive file/parent
@@ -103,9 +108,9 @@ commands are executed by this repository PR.
 
 - Trusted operator key/root enrollment and ownership proof, with
   secure root fingerprint and independent monotonic checkpoint.
-- Root-signed policy verification wired **before** any counter update,
-  and a non-bypassable service identity boundary; not only an opaque
-  evidence digest supplied by a caller.
+- Cryptographic policy verification is now wired before public counter
+  updates, but an **authenticated external service identity** is still
+  needed so a caller cannot choose its own trust anchors.
 - Trusted clock/CSPRNG challenge issuer and human signing UX showing
   the exact message; reconnect trust state after crash.
 - Fresh historical retry eligibility, cross-store transactional
