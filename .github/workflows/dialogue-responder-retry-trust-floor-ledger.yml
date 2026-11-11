@@ -7,10 +7,6 @@ on:
       - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp'
-      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.hpp'
-      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp'
-      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
-      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp'
       - 'tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp'
@@ -19,6 +15,10 @@ on:
   push:
     branches: [main]
     paths:
+      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.hpp'
+      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp'
       - 'tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp'
