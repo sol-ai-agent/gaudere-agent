@@ -87,6 +87,7 @@ private:
     // cannot mutate a trust floor through the public C++ API.
     [[nodiscard]] LocalGooseDialogueResponderRetryTrustFloorCode
     advance_after_external_signature_review(
+        const std::string& independently_trusted_root_fingerprint,
         std::uint64_t expected_prior_generation,
         std::uint64_t root_signed_new_generation,
         const std::string& externally_verified_snapshot_sha256);
