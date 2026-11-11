@@ -1,0 +1,80 @@
+name: Retry root-owned fixed trust source — no enrollment authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryRootOwnedAnchor.hpp'
+      - 'src/LocalGooseDialogueResponderRetryRootOwnedAnchor.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_root_owned_anchor_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-root-owned-anchor-source-v1.md'
+      - '.github/workflows/dialogue-responder-retry-root-owned-anchor.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryRootOwnedAnchor.hpp'
+      - 'src/LocalGooseDialogueResponderRetryRootOwnedAnchor.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_root_owned_anchor_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-root-owned-anchor-source-v1.md'
+      - '.github/workflows/dialogue-responder-retry-root-owned-anchor.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inert-no-caller-anchor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check no root selection or runtime path was added
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryRootOwnedAnchor.hpp
+          c=src/LocalGooseDialogueResponderRetryRootOwnedAnchor.cpp
+          t=tests/local_goose_dialogue_responder_retry_root_owned_anchor_test.cpp
+          grep -Fq '"/etc/gaudere/retry-operator-root-anchor.v1"' "$h"
+          grep -Fq 'load_local_goose_dialogue_responder_retry_root_owned_anchor()' "$h"
+          grep -Fq 'if (geteuid() == 0) return std::nullopt;' "$c"
+          grep -Fq 'O_NOFOLLOW' "$c"
+          grep -Fq 's.st_uid == 0' "$c"
+          grep -Fq 'existing_read_only_floor' "$c"
+          grep -Fq 'consistent_active_no_authority' "$c"
+          grep -Fq 'setuid(65534)' "$t"
+          grep -Fq 'fork()' "$t"
+          ! grep -Eq 'systemctl|podman|curl|TaskStore|Runtime|dispatch\(|EVP_PKEY_new_raw_private_key|BEGIN IMMEDIATE|chmod\(|chown\(|mkdir\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryRootOwnedAnchor' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryRootOwnedAnchor' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryRootOwnedAnchor' Containerfile
+          echo GAUDERE_ROOT_OWNED_ANCHOR_NO_ENROLLMENT_AUTHORITY=PASS
+
+  fedora-44-unprivileged-root-owned-source:
+    needs: inert-no-caller-anchor
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install toolchain in disposable container
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile source-only manifest reader and exercise unprivileged isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -pthread -Isrc \
+            tests/local_goose_dialogue_responder_retry_root_owned_anchor_test.cpp \
+            src/LocalGooseDialogueResponderRetryRootOwnedAnchor.cpp \
+            src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp \
+            src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp \
+            src/LocalGooseDialogueResponderRetryRootPin.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-root-owned-anchor-test
+          /tmp/gaudere-retry-root-owned-anchor-test
+          echo GAUDERE_ROOT_OWNED_ANCHOR_FEDORA44_SYNTHETIC=PASS
