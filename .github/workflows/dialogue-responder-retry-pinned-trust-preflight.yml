@@ -1,0 +1,89 @@
+name: Retry protected root and revocation-floor preflight — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.hpp'
+      - 'src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_pinned_trust_preflight_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-pinned-trust-preflight-v1.md'
+      - '.github/workflows/dialogue-responder-retry-pinned-trust-preflight.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.hpp'
+      - 'src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_pinned_trust_preflight_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-pinned-trust-preflight-v1.md'
+      - '.github/workflows/dialogue-responder-retry-pinned-trust-preflight.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-inert-readonly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject runtime wiring and unauthorized mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.hpp
+          c=src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.cpp
+          t=tests/local_goose_dialogue_responder_retry_pinned_trust_preflight_test.cpp
+          grep -Fq 'consistent_active_no_authority' "$h"
+          grep -Fq 'consistent_revoked_no_authority' "$h"
+          grep -Fq 'if (!existing_read_only_floor.is_read_only())' "$c"
+          grep -Fq 'verify_local_goose_dialogue_responder_retry_signed_trust_policy' "$c"
+          grep -Fq 'signed_policy_below_floor' "$c"
+          grep -Fq 'test_protected_root_signed_policy_and_read_only_floor' "$t"
+          ! grep -Eq 'systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(|BEGIN IMMEDIATE|EVP_PKEY_new_raw_private_key' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryPinnedTrustPreflight' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryPinnedTrustPreflight' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryPinnedTrustPreflight' Containerfile
+          echo GAUDERE_PINNED_TRUST_PREFLIGHT_INERT=PASS
+
+  fedora-44-cryptographic-readonly:
+    needs: static-inert-readonly
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install compiler and isolated test libraries
+        run: dnf install -y gcc-c++ sqlite-devel openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile against existing root-signed revocation and SQLite floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -pthread -Isrc \
+            tests/local_goose_dialogue_responder_retry_pinned_trust_preflight_test.cpp \
+            src/LocalGooseDialogueResponderRetryPinnedTrustPreflight.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp \
+            src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp \
+            src/LocalGooseDialogueResponderRetryRootPin.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp \
+            src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
+            src/LocalGooseDialogueResponderRetryOperatorProof.cpp \
+            src/LocalGooseDialogueResponderRetryGrantProposal.cpp \
+            src/LocalGooseDialogueResponderRetryScopeStore.cpp \
+            src/LocalGooseDialogueResponderRetryAuthority.cpp \
+            src/Sha256.cpp -lsqlite3 -lcrypto \
+            -o /tmp/gaudere-retry-pinned-trust-preflight-test
+          /tmp/gaudere-retry-pinned-trust-preflight-test
+          cat >/tmp/preflight-unpinned-root.cpp <<'EOF'
+          #include "LocalGooseDialogueResponderRetryPinnedTrustPreflight.hpp"
+          void must_not_compile(
+              const std::array<unsigned char, 32>& raw_root,
+              const gaudere_agent::LocalGooseDialogueResponderRetryTrustFloorLedger& ledger) {
+              (void)gaudere_agent::inspect_local_goose_dialogue_responder_retry_pinned_trust_preflight(
+                  raw_root, ledger, "", std::string(64, 'a'), 5000);
+          }
+          EOF
+          if g++ -std=c++17 -Isrc -fsyntax-only /tmp/preflight-unpinned-root.cpp >/tmp/preflight-bypass.out 2>&1; then
+            echo UNPINNED_PREFLIGHT_BYPASS=FAIL
+            exit 1
+          fi
+          echo GAUDERE_PINNED_TRUST_PREFLIGHT_FEDORA44=PASS
