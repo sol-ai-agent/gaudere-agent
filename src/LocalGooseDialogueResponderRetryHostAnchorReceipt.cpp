@@ -195,6 +195,13 @@ Code inspect_local_goose_dialogue_responder_retry_host_anchor_receipt(
         if (sha256_hex("gaudere-retry-host-attestor-ed25519-key-v1|" + raw)
                 != independently_pinned_host_signer_fingerprint)
             return Code::invalid_independent_host_trust;
+        // Domain separation does not make the SAME Ed25519 private key a
+        // separate identity. Forbid host signer reuse as root or operator.
+        if (sha256_hex("gaudere-retry-operator-root-ed25519-key-v1|" + raw)
+                == observed_anchor.root_fingerprint
+            || sha256_hex("gaudere-retry-operator-ed25519-key-v1|" + raw)
+                == observed_anchor.operator_key_fingerprint)
+            return Code::invalid_independent_host_trust;
 
         const auto receipt = parse(candidate_exact_signed_receipt);
         if (!receipt) return Code::invalid_receipt_format;
