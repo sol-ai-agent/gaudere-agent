@@ -106,6 +106,11 @@ std::optional<ParsedReceipt> parse(const std::string& exact)
         || exact.find('\0') != std::string::npos
         || exact.compare(0, header.size(), header) != 0)
         return std::nullopt;
+    // Canonical wire format is ASCII printable plus LF only, not CRLF,
+    // UTF-8 path substitutions, TAB, DEL or other control characters.
+    for (const unsigned char byte : exact)
+        if ((byte < 0x20 && byte != '\n') || byte > 0x7e)
+            return std::nullopt;
     std::size_t offset = header.size();
     const auto pin = field(exact, offset, "root_pin_path=");
     const auto root = field(exact, offset, "root_fingerprint=");
