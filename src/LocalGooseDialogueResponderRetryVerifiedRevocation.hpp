@@ -3,8 +3,8 @@
 
 #include "LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp"
 #include "LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp"
+#include "LocalGooseDialogueResponderRetryRootPin.hpp"
 
-#include <array>
 #include <cstdint>
 #include <string>
 
@@ -32,8 +32,7 @@ enum class LocalGooseDialogueResponderRetryRevocationCommitCode : std::uint8_t {
 commit_local_goose_dialogue_responder_retry_verified_revocation(
     LocalGooseDialogueResponderRetryTrustFloorLedger& ledger,
     const std::string& candidate_signed_snapshot,
-    const std::array<unsigned char, 32>& separately_enrolled_root_public_key,
-    const std::string& independently_trusted_root_fingerprint,
+    const LocalGooseDialogueResponderRetryRootPin& enrolled_root_pin,
     const std::string& independently_trusted_operator_key_fingerprint,
     std::int64_t trusted_now_ms);
 
