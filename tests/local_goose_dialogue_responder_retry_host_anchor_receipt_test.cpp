@@ -142,6 +142,23 @@ void test_independent_synthetic_host_signature_and_exact_manifest()
     const auto self_attested = receipt(hostile, body(anchor, context));
     assert(inspect(self_attested, host, anchor, context)
         == Code::invalid_host_signature);
+
+    // Different purpose prefixes alone do not prove independent custody:
+    // a host signing key must not ALSO be the trust root or operator key.
+    const std::string host_raw(
+        reinterpret_cast<const char*>(host.pub.data()), host.pub.size());
+    Anchor same_key = anchor;
+    same_key.root_fingerprint = sha256_hex(
+        "gaudere-retry-operator-root-ed25519-key-v1|" + host_raw);
+    assert(inspect(receipt(host, body(same_key, context)),
+                   host, same_key, context)
+        == Code::invalid_independent_host_trust);
+    same_key = anchor;
+    same_key.operator_key_fingerprint = sha256_hex(
+        "gaudere-retry-operator-ed25519-key-v1|" + host_raw);
+    assert(inspect(receipt(host, body(same_key, context)),
+                   host, same_key, context)
+        == Code::invalid_independent_host_trust);
     assert(inspect(canonical, hostile, anchor, context)
         == Code::invalid_host_signature);
     assert(inspect_local_goose_dialogue_responder_retry_host_anchor_receipt(
