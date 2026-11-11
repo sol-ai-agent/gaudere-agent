@@ -3,6 +3,10 @@ name: Retry operator trust floor isolated monotonic ledger — no authority
 on:
   pull_request:
     paths:
+      - 'src/LocalGooseDialogueResponderRetryRootPin.hpp'
+      - 'src/LocalGooseDialogueResponderRetryRootPin.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_root_pin_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-root-pin-v1.md'
       - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.hpp'
       - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
@@ -15,6 +19,10 @@ on:
   push:
     branches: [main]
     paths:
+      - 'src/LocalGooseDialogueResponderRetryRootPin.hpp'
+      - 'src/LocalGooseDialogueResponderRetryRootPin.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_root_pin_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-root-pin-v1.md'
       - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.hpp'
       - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
@@ -51,6 +59,9 @@ jobs:
           grep -Fq 'friend LocalGooseDialogueResponderRetryRevocationCommitCode' "$h"
           grep -Fq 'verify_local_goose_dialogue_responder_retry_signed_trust_policy' src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp
           grep -Fq 'test_unverified_unsigned_or_wrong_root_cannot_advance' "$t"
+          grep -Fq 'LocalGooseDialogueResponderRetryRootPin& enrolled_root_pin' src/LocalGooseDialogueResponderRetryVerifiedRevocation.hpp
+          grep -Fq 'load_local_goose_dialogue_responder_retry_root_pin' src/LocalGooseDialogueResponderRetryRootPin.cpp
+          grep -Fq 'test_path_components_and_parent_permissions' tests/local_goose_dialogue_responder_retry_root_pin_test.cpp
           ! grep -Eq 'systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(|EVP_DigestSign|EVP_PKEY_new_raw_private_key' "$c"
           ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' src/main.cpp
           ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' src/Makefile.am
@@ -58,6 +69,9 @@ jobs:
           ! grep -Fq 'LocalGooseDialogueResponderRetryVerifiedRevocation' src/main.cpp
           ! grep -Fq 'LocalGooseDialogueResponderRetryVerifiedRevocation' src/Makefile.am
           ! grep -Fq 'LocalGooseDialogueResponderRetryVerifiedRevocation' Containerfile
+          ! grep -Fq 'LocalGooseDialogueResponderRetryRootPin' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryRootPin' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryRootPin' Containerfile
           echo GAUDERE_TRUST_FLOOR_LEDGER_NO_AUTHORITY=PASS
 
   fedora-44-trust-floor-durability:
@@ -77,6 +91,7 @@ jobs:
             tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp \
             src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp \
             src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp \
+            src/LocalGooseDialogueResponderRetryRootPin.cpp \
             src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp \
             src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp \
             src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
@@ -86,11 +101,17 @@ jobs:
             src/LocalGooseDialogueResponderRetryAuthority.cpp \
             src/Sha256.cpp -lsqlite3 -lcrypto \
             -o /tmp/gaudere-retry-trust-floor-ledger-test
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_root_pin_test.cpp \
+            src/LocalGooseDialogueResponderRetryRootPin.cpp \
+            src/Sha256.cpp -lcrypto \
+            -o /tmp/gaudere-retry-root-pin-test
       - name: Prove durable floor monotonicity, signed replay refusal and two-writer exclusion
         shell: bash
         run: |
           set -euo pipefail
           /tmp/gaudere-retry-trust-floor-ledger-test
+          /tmp/gaudere-retry-root-pin-test
           cat >/tmp/trust-floor-bypass.cpp <<'EOF'
           #include "LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp"
           void must_not_compile(gaudere_agent::LocalGooseDialogueResponderRetryTrustFloorLedger& x) {
@@ -103,4 +124,17 @@ jobs:
             exit 1
           fi
           grep -Fq 'private within this context' /tmp/bypass.out
+          cat >/tmp/root-pin-bypass.cpp <<'EOF'
+          #include "LocalGooseDialogueResponderRetryVerifiedRevocation.hpp"
+          void should_not_compile(gaudere_agent::LocalGooseDialogueResponderRetryTrustFloorLedger& x,
+                                  const std::string& signed_policy,
+                                  const std::array<unsigned char,32>& root) {
+            (void)gaudere_agent::commit_local_goose_dialogue_responder_retry_verified_revocation(
+                x, signed_policy, root, std::string(64, 'a'), std::string(64, 'b'), 5000);
+          }
+          EOF
+          if g++ -std=c++17 -Isrc -fsyntax-only /tmp/root-pin-bypass.cpp >/tmp/root-bypass.out 2>&1; then
+            echo "UNPINNED_ROOT_REVOCATION_BYPASS=FAIL"
+            exit 1
+          fi
           echo GAUDERE_TRUST_FLOOR_LEDGER_FEDORA44=PASS

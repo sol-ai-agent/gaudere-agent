@@ -1,6 +1,7 @@
 #include "LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp"
 #include "LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp"
 #include "LocalGooseDialogueResponderRetryVerifiedRevocation.hpp"
+#include "LocalGooseDialogueResponderRetryRootPin.hpp"
 #include "LocalGooseDialogueResponderRetryProofReservationInspector.hpp"
 #include "LocalGooseDialogueResponderRetryExactMessageProof.hpp"
 #include "LocalGooseDialogueResponder.hpp"
@@ -192,13 +193,14 @@ struct Temp {
         assert(chmod(dir.string().c_str(), 0700) == 0);
         db = dir / "trust-floor.sqlite";
         pin = dir / "operator.pin";
+        root_path = dir / "root.pin";
     }
     ~Temp()
     {
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
     }
-    std::filesystem::path dir, db, pin;
+    std::filesystem::path dir, db, pin, root_path;
 };
 
 std::string root_fp(const SyntheticKey& key)
@@ -206,6 +208,35 @@ std::string root_fp(const SyntheticKey& key)
     const std::string raw(reinterpret_cast<const char*>(key.pub.data()),
                           key.pub.size());
     return sha256_hex("gaudere-retry-operator-root-ed25519-key-v1|" + raw);
+}
+
+using RootPin = LocalGooseDialogueResponderRetryRootPin;
+
+std::string root_file_content(const SyntheticKey& key)
+{
+    return std::string(local_goose_dialogue_responder_retry_root_pin_header)
+        + hex_signature(key.pub.data(), key.pub.size()) + "\n";
+}
+
+void write_root_pin(const std::filesystem::path& path, const SyntheticKey& key)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    assert(out.good());
+    const std::string content = root_file_content(key);
+    out.write(content.data(), static_cast<std::streamsize>(content.size()));
+    out.close();
+    assert(out.good());
+    assert(chmod(path.string().c_str(), 0400) == 0);
+}
+
+RootPin load_root(const std::filesystem::path& path, const SyntheticKey& root)
+{
+    const auto loaded = load_local_goose_dialogue_responder_retry_root_pin(
+        path.string(), root_fp(root));
+    assert(loaded.has_value());
+    assert(loaded->public_key() == root.pub);
+    assert(loaded->fingerprint() == root_fp(root));
+    return *loaded;
 }
 
 void write_pin(const std::filesystem::path& path, const SyntheticKey& key)
@@ -236,11 +267,12 @@ std::string snapshot(Fixture& f, const std::string& state,
 }
 
 CommitCode commit_revocation(
-    FloorLedger& ledger, Fixture& f, const std::string& signed_revocation)
+    FloorLedger& ledger, Fixture& f, const RootPin& enrolled_root,
+    const std::string& signed_revocation)
 {
     return commit_local_goose_dialogue_responder_retry_verified_revocation(
-        ledger, signed_revocation, f.root.pub, root_fp(f.root),
-        f.proof.key_fingerprint, 5000);
+        ledger, signed_revocation, enrolled_root, f.proof.key_fingerprint,
+        5000);
 }
 
 TrustCode inspect_policy(
@@ -257,6 +289,8 @@ void test_floor_survives_restart_and_blocks_old_root_signed_active()
     Fixture f;
     Temp t("restart");
     write_pin(t.pin, f.key);
+    write_root_pin(t.root_path, f.root);
+    const auto root_pin = load_root(t.root_path, f.root);
     const auto trusted_root = root_fp(f.root);
     const auto old_active = snapshot(f, "active", 1);
     const auto newer_revoked = snapshot(f, "revoked", 8);
@@ -272,9 +306,9 @@ void test_floor_survives_restart_and_blocks_old_root_signed_active()
             == TrustCode::revoked_or_stale_or_outside_validity);
 
         const auto evidence = sha256_hex(newer_revoked);
-        assert(commit_revocation(bootstrap, f, newer_revoked)
+        assert(commit_revocation(bootstrap, f, root_pin, newer_revoked)
             == CommitCode::advanced_no_authority);
-        assert(commit_revocation(bootstrap, f, newer_revoked)
+        assert(commit_revocation(bootstrap, f, root_pin, newer_revoked)
             == CommitCode::stale_or_conflicting_floor);
         current = bootstrap.inspect(trusted_root);
         assert(current && current->minimum_generation == 8
@@ -290,12 +324,12 @@ void test_floor_survives_restart_and_blocks_old_root_signed_active()
         assert(current && current->minimum_generation == 8);
         assert(inspect_policy(f, t, old_active, current->minimum_generation)
             == TrustCode::revoked_or_stale_or_outside_validity);
-        assert(commit_revocation(reader, f, snapshot(f, "revoked", 9))
+        assert(commit_revocation(reader, f, root_pin, snapshot(f, "revoked", 9))
             == CommitCode::unavailable_or_commit_uncertain);
     }
     {
         FloorLedger writer(t.db.string(), FloorMode::existing_writer);
-        assert(commit_revocation(writer, f, snapshot(f, "revoked", 9))
+        assert(commit_revocation(writer, f, root_pin, snapshot(f, "revoked", 9))
             == CommitCode::advanced_no_authority);
         assert(writer.inspect(trusted_root)->minimum_generation == 9);
     }
@@ -307,6 +341,8 @@ void test_unverified_unsigned_or_wrong_root_cannot_advance()
 {
     Fixture f;
     Temp t("invalid");
+    write_root_pin(t.root_path, f.root);
+    const auto root_pin = load_root(t.root_path, f.root);
     const auto trusted = root_fp(f.root);
     FloorLedger floor(t.db.string(), FloorMode::create_new_isolated, trusted);
     const auto initial = floor.inspect(trusted);
@@ -316,37 +352,36 @@ void test_unverified_unsigned_or_wrong_root_cannot_advance()
 
     // The untrusted caller no longer has a public unsigned/fingerprint-only
     // SQLite update path. A fake or corrupted signature has no effect.
+    assert(!load_local_goose_dialogue_responder_retry_root_pin(
+               t.root_path.string(), std::string(64, 'f')));
+    // The old raw root-key + caller-supplied root-fingerprint mutation
+    // entrypoint no longer exists. Wrong operator trust is also refused.
     assert(commit_local_goose_dialogue_responder_retry_verified_revocation(
-               floor, revoked, f.root.pub, std::string(64, 'f'),
-               f.proof.key_fingerprint, 5000)
-        == CommitCode::invalid_signed_policy_or_root);
-    assert(commit_local_goose_dialogue_responder_retry_verified_revocation(
-               floor, revoked, f.root.pub, trusted, std::string(64, 'f'), 5000)
+               floor, revoked, root_pin, std::string(64, 'f'), 5000)
         == CommitCode::wrong_operator_key);
-    assert(commit_revocation(floor, f, snapshot(f, "active", 2))
+    assert(commit_revocation(floor, f, root_pin, snapshot(f, "active", 2))
         == CommitCode::not_a_revocation);
-    assert(commit_revocation(floor, f, snapshot(f, "revoked", 1))
+    assert(commit_revocation(floor, f, root_pin, snapshot(f, "revoked", 1))
         == CommitCode::stale_or_conflicting_floor);
     auto forged = revoked;
     const auto signature = forged.find("signature_hex=");
     assert(signature != std::string::npos);
     forged[signature + 14] =
         forged[signature + 14] == '0' ? '1' : '0';
-    assert(commit_revocation(floor, f, forged)
+    assert(commit_revocation(floor, f, root_pin, forged)
         == CommitCode::invalid_signed_policy_or_root);
     auto changed = revoked;
     const auto state = changed.find("status=revoked");
     assert(state != std::string::npos);
     changed.replace(state, 14, "status=active");
-    assert(commit_revocation(floor, f, changed)
+    assert(commit_revocation(floor, f, root_pin, changed)
         == CommitCode::invalid_signed_policy_or_root);
-    assert(commit_revocation(floor, f, revoked + "\n")
+    assert(commit_revocation(floor, f, root_pin, revoked + "\n")
         == CommitCode::invalid_signed_policy_or_root);
     assert(commit_local_goose_dialogue_responder_retry_verified_revocation(
-               floor, revoked, f.root.pub, trusted,
-               f.proof.key_fingerprint, 30000)
+               floor, revoked, root_pin, f.proof.key_fingerprint, 30000)
         == CommitCode::invalid_signed_policy_or_root);
-    assert(commit_revocation(floor, f, snapshot(f, "revoked", UINT64_MAX))
+    assert(commit_revocation(floor, f, root_pin, snapshot(f, "revoked", UINT64_MAX))
         == CommitCode::invalid_signed_policy_or_root);
 
     const auto current = floor.inspect(trusted);
@@ -358,6 +393,8 @@ void test_two_separate_writers_only_one_advance()
 {
     Fixture f;
     Temp t("race");
+    write_root_pin(t.root_path, f.root);
+    const auto root_pin = load_root(t.root_path, f.root);
     const auto trusted = root_fp(f.root);
     {
         FloorLedger initial(t.db.string(), FloorMode::create_new_isolated,
@@ -370,7 +407,7 @@ void test_two_separate_writers_only_one_advance()
     auto worker = [&]() {
         try {
             FloorLedger writer(t.db.string(), FloorMode::existing_writer);
-            const auto code = commit_revocation(writer, f, signed_revocation);
+            const auto code = commit_revocation(writer, f, root_pin, signed_revocation);
             if (code == CommitCode::advanced_no_authority) ++committed;
             else {
                 assert(code == CommitCode::stale_or_conflicting_floor
