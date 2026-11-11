@@ -1,0 +1,70 @@
+name: Retry host signed anchor receipt — source only, no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostAnchorReceipt.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostAnchorReceipt.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_anchor_receipt_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-anchor-receipt-v1.md'
+      - '.github/workflows/dialogue-responder-retry-host-anchor-receipt.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostAnchorReceipt.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostAnchorReceipt.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_anchor_receipt_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-anchor-receipt-v1.md'
+      - '.github/workflows/dialogue-responder-retry-host-anchor-receipt.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inert-receipt-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce source-only signature predicate and no automatic enrollment
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryHostAnchorReceipt.hpp
+          c=src/LocalGooseDialogueResponderRetryHostAnchorReceipt.cpp
+          t=tests/local_goose_dialogue_responder_retry_host_anchor_receipt_test.cpp
+          grep -Fq 'cryptographically_consistent_no_authority' "$h"
+          grep -Fq 'independently_pinned_host_signer_public_key' "$h"
+          grep -Fq 'host_context_sha256=' "$c"
+          grep -Fq 'EVP_DigestVerify(' "$c"
+          grep -Fq 'sha256_hex("gaudere-retry-operator-root-ed25519-key-v1|" + raw)' "$c"
+          grep -Fq 'sha256_hex("gaudere-retry-operator-ed25519-key-v1|" + raw)' "$c"
+          grep -Fq 'max_receipt_size = 1600' "$c"
+          grep -Fq 'receipt->anchor_epoch < independently_trusted_minimum_anchor_epoch' "$c"
+          grep -Fq 'test_independent_synthetic_host_signature_and_exact_manifest' "$t"
+          grep -Fq 'test_canonical_wire_constraints_and_domain_separation' "$t"
+          ! grep -Eq 'systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(|EVP_PKEY_new_raw_private_key|open\(|openat\(|chmod\(|mkdir\(|BEGIN IMMEDIATE' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostAnchorReceipt' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostAnchorReceipt' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostAnchorReceipt' Containerfile
+          echo GAUDERE_HOST_RECEIPT_PREDICATE_INERT=PASS
+
+  fedora-44-isolated-signed-host-receipt:
+    needs: inert-receipt-boundary
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - name: Install strict compiler and Ed25519 library
+        run: dnf install -y gcc-c++ openssl-devel
+      - uses: actions/checkout@v4
+      - name: Compile and prove signed host receipt has no authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_host_anchor_receipt_test.cpp \
+            src/LocalGooseDialogueResponderRetryHostAnchorReceipt.cpp \
+            src/Sha256.cpp -lcrypto \
+            -o /tmp/gaudere-retry-host-anchor-receipt-test
+          /tmp/gaudere-retry-host-anchor-receipt-test
+          echo GAUDERE_HOST_RECEIPT_SYNTHETIC_FEDORA44=PASS
