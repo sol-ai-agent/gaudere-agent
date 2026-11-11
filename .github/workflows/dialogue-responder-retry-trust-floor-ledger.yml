@@ -3,6 +3,14 @@ name: Retry operator trust floor isolated monotonic ledger — no authority
 on:
   pull_request:
     paths:
+      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.hpp'
+      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp'
+      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.hpp'
+      - 'src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.hpp'
+      - 'src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp'
       - 'src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp'
       - 'tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp'
@@ -40,10 +48,16 @@ jobs:
           grep -Fq 'require_safe_parent(path)' "$c"
           grep -Fq 'test_two_separate_writers_only_one_advance' "$t"
           grep -Fq 'test_floor_survives_restart_and_blocks_old_root_signed_active' "$t"
+          grep -Fq 'friend LocalGooseDialogueResponderRetryRevocationCommitCode' "$h"
+          grep -Fq 'verify_local_goose_dialogue_responder_retry_signed_trust_policy' src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp
+          grep -Fq 'test_unverified_unsigned_or_wrong_root_cannot_advance' "$t"
           ! grep -Eq 'systemctl|podman|curl|fork\(|execve\(|TaskStore|Runtime|dispatch\(|EVP_DigestSign|EVP_PKEY_new_raw_private_key' "$c"
           ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' src/main.cpp
           ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' src/Makefile.am
           ! grep -Fq 'LocalGooseDialogueResponderRetryOperatorTrustFloorLedger' Containerfile
+          ! grep -Fq 'LocalGooseDialogueResponderRetryVerifiedRevocation' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryVerifiedRevocation' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryVerifiedRevocation' Containerfile
           echo GAUDERE_TRUST_FLOOR_LEDGER_NO_AUTHORITY=PASS
 
   fedora-44-trust-floor-durability:
@@ -62,6 +76,7 @@ jobs:
           g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -pthread -Isrc \
             tests/local_goose_dialogue_responder_retry_operator_trust_floor_ledger_test.cpp \
             src/LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.cpp \
+            src/LocalGooseDialogueResponderRetryVerifiedRevocation.cpp \
             src/LocalGooseDialogueResponderRetryOperatorTrustSnapshot.cpp \
             src/LocalGooseDialogueResponderRetryOperatorKeyPin.cpp \
             src/LocalGooseDialogueResponderRetryExactMessageProof.cpp \
@@ -76,4 +91,16 @@ jobs:
         run: |
           set -euo pipefail
           /tmp/gaudere-retry-trust-floor-ledger-test
+          cat >/tmp/trust-floor-bypass.cpp <<'EOF'
+          #include "LocalGooseDialogueResponderRetryOperatorTrustFloorLedger.hpp"
+          void must_not_compile(gaudere_agent::LocalGooseDialogueResponderRetryTrustFloorLedger& x) {
+            (void)x.advance_after_external_signature_review(
+              std::string(64, 'a'), 1, 2, std::string(64, 'b'));
+          }
+          EOF
+          if g++ -std=c++17 -Isrc -fsyntax-only /tmp/trust-floor-bypass.cpp >/tmp/bypass.out 2>&1; then
+            echo "UNVERIFIED_FLOOR_ADVANCE_BYPASS=FAIL"
+            exit 1
+          fi
+          grep -Fq 'private within this context' /tmp/bypass.out
           echo GAUDERE_TRUST_FLOOR_LEDGER_FEDORA44=PASS
