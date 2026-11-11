@@ -321,6 +321,10 @@ void test_root_signature_and_snapshot_tampering()
     assert(check(f, path.path, changed)
         == TrustCode::invalid_root_signature);
 
+    const auto duplicate = good.substr(0, pos) + "status=active\n"
+        + good.substr(pos);
+    assert(check(f, path.path, duplicate)
+        == TrustCode::invalid_snapshot_format);
     assert(check(f, path.path, good + "\n")
         == TrustCode::invalid_snapshot_format);
     assert(check(f, path.path, good.substr(0, good.size() - 1))
