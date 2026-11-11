@@ -57,6 +57,10 @@ epoch** and **externally trusted time**. It validates:
 1. Canonical exact bytes/size/path/hex/decimal/interval; maximum signed
    lifetime 31 days.
 2. Exact host Ed25519 key/fingerprint and signature with domain separation.
+   The same underlying Ed25519 public key is also refused if its SHA-256
+   under the trust-root or operator-signing-key domains matches those
+   fingerprints in the observed manifest. Purpose prefixes alone do not
+   transform one private key into two independent identities.
 3. Root-pin path, root fingerprint, operator signing key fingerprint and
    anchor epoch exactly equal to the separately observed manifest.
 4. Host context matches the *independently expected* deployment context.
