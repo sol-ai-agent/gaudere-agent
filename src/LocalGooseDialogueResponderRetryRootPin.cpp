@@ -21,6 +21,11 @@ public:
     Fd(const Fd&) = delete;
     Fd& operator=(const Fd&) = delete;
     int get() const noexcept { return fd_; }
+    int release() noexcept { const int old = fd_; fd_ = -1; return old; }
+    void reset(const int fd) noexcept {
+        if (fd_ >= 0) close(fd_);
+        fd_ = fd;
+    }
 private:
     int fd_;
 };
@@ -89,10 +94,8 @@ std::optional<std::array<unsigned char, 32>> read_secure_root(
                        O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
         if (next.get() < 0 || !safe_ancestor(next.get(), false))
             return std::nullopt;
-        // Transfer ownership without depending on a global path canonicalizer.
-        const int dupfd = dup(next.get());
-        if (dupfd < 0) return std::nullopt;
-        directory = Fd(dupfd);
+        // Transfer the verified directory fd, never reopen by pathname.
+        directory.reset(next.release());
         offset = slash + 1;
     }
 
