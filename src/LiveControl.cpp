@@ -887,7 +887,7 @@ std::string receive_until_eof_before(
         }
         if (errno == EINTR) continue;
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            wait_until_ready(fd, POLLIN, deadline, "response");
+            wait_until_ready(fd, POLLIN, deadline, "receive");
             continue;
         }
         throw std::runtime_error(
