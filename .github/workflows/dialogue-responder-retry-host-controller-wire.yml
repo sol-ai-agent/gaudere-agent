@@ -1,0 +1,62 @@
+name: Retry host controller untrusted wire — no authority
+
+on:
+  pull_request:
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostControllerWire.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostControllerWire.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_controller_wire_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-controller-wire-v1.md'
+      - '.github/workflows/dialogue-responder-retry-host-controller-wire.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/LocalGooseDialogueResponderRetryHostControllerWire.hpp'
+      - 'src/LocalGooseDialogueResponderRetryHostControllerWire.cpp'
+      - 'tests/local_goose_dialogue_responder_retry_host_controller_wire_test.cpp'
+      - 'docs/local-goose-dialogue-responder-retry-host-controller-wire-v1.md'
+      - '.github/workflows/dialogue-responder-retry-host-controller-wire.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-only-no-controller-authority:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce no runtime wiring or ambient authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          h=src/LocalGooseDialogueResponderRetryHostControllerWire.hpp
+          c=src/LocalGooseDialogueResponderRetryHostControllerWire.cpp
+          grep -Fq 'RetryHostControllerUntrustedIntent' "$h"
+          grep -Fq 'RetryHostControllerDenial' "$h"
+          grep -Fq 'not_enrolled' "$c"
+          grep -Fq 'commit_unknown' "$c"
+          ! grep -Eq 'socket\(|connect\(|send\(|recv\(|open\(|execve\(|systemctl|podman|EVP_PKEY|sqlite3|TaskStore|dispatch\(|O_CREAT|std::system\(' "$c"
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostControllerWire' src/Makefile.am
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostControllerWire' src/main.cpp
+          ! grep -Fq 'LocalGooseDialogueResponderRetryHostControllerWire' Containerfile
+          echo GAUDERE_HOST_CONTROLLER_WIRE_NO_AUTHORITY=PASS
+
+  fedora44-closed-wire-negatives:
+    needs: source-only-no-controller-authority
+    runs-on: ubuntu-latest
+    container: fedora:44
+    timeout-minutes: 10
+    steps:
+      - name: Install compiler
+        run: dnf install -y gcc-c++
+      - uses: actions/checkout@v4
+      - name: Build and run standalone synthetic negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -Werror -Isrc \
+            tests/local_goose_dialogue_responder_retry_host_controller_wire_test.cpp \
+            src/LocalGooseDialogueResponderRetryHostControllerWire.cpp \
+            -o /tmp/gaudere-host-controller-wire-test
+          /tmp/gaudere-host-controller-wire-test
+          echo GAUDERE_HOST_CONTROLLER_WIRE_FEDORA44_SYNTHETIC=PASS
