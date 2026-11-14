@@ -1,5 +1,7 @@
 #include "LiveControl.hpp"
 
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1077,6 +1079,54 @@ void test_client_io_timeout_bounds_pending_reply()
     ::rmdir(directory.c_str());
 }
 
+void test_client_slow_trickle_does_not_extend_deadline()
+{
+    const auto directory = temporary_directory();
+    const auto socket_path = directory + "/control.sock";
+    const int listener = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (listener < 0) throw std::runtime_error("slow trickle socket creation failed");
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (socket_path.size() >= sizeof(address.sun_path))
+        throw std::runtime_error("slow trickle socket path too long");
+    std::snprintf(address.sun_path, sizeof(address.sun_path), "%s", socket_path.c_str());
+    if (::bind(listener, reinterpret_cast<const sockaddr*>(&address),
+               sizeof(address)) != 0 || ::listen(listener, 1) != 0)
+        throw std::runtime_error("slow trickle socket bind/listen failed");
+
+    std::thread server([&] {
+        const int client = ::accept(listener, nullptr, nullptr);
+        if (client >= 0) {
+            char incoming[4096];
+            while (::recv(client, incoming, sizeof(incoming), 0) > 0) {}
+            // In the old SO_RCVTIMEO implementation every 20 ms byte resets
+            // the 90 ms timeout, so this trickle keeps the call alive.
+            for (int n = 0; n < 80; ++n) {
+                constexpr char byte = 'x';
+                if (::send(client, &byte, 1, MSG_NOSIGNAL) != 1) break;
+                std::this_thread::sleep_for(20ms);
+            }
+            ::close(client);
+        }
+    });
+    std::ostringstream output;
+    std::ostringstream error;
+    const auto started = std::chrono::steady_clock::now();
+    const int result = run_live_control_client(
+        socket_path,
+        LiveControlCommand{LiveControlOperation::inspect_task, "task-trickle", {}},
+        output, error, 90ms);
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    expect(result == 1, "slow trickle must fail, not become a successful reply");
+    expect(error.str().find("receive timed out") != std::string::npos,
+           "slow trickle must reach the total-response deadline");
+    expect(elapsed < 700ms, "slow trickle must not prolong client lifetime");
+    server.join();
+    ::close(listener);
+    ::unlink(socket_path.c_str());
+    ::rmdir(directory.c_str());
+}
+
 void test_idle_server_stops_without_polling_timeout()
 {
     const auto directory = temporary_directory();
@@ -1117,6 +1167,7 @@ int main()
     test_invalid_wake_revocation_reason_is_rejected_before_connect();
     test_existing_regular_file_is_never_unlinked();
     test_client_io_timeout_bounds_pending_reply();
+    test_client_slow_trickle_does_not_extend_deadline();
     test_idle_server_stops_without_polling_timeout();
 
     if (failures != 0) {
