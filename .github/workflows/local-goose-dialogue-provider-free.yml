@@ -353,6 +353,9 @@ jobs:
           grep -q 'task_inspection_io_timeout_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq 'GaudereChatSession::inspect_task' agent/src/GaudereChat.cpp
           grep -Fq 'read_only_task_after_timeout_never_resubmits_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'wait_last_committed_recovers_canonical_response_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'wait_last_ambiguous_not_upgraded_to_commit_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq '/wait' agent/src/chat_main.cpp
           grep -Fq 'read_only_task_rejects_invalid_id_before_transport_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq '/task ID' agent/src/chat_main.cpp
           grep -Fq 'transport_(command, remaining)' agent/src/GaudereChat.cpp
