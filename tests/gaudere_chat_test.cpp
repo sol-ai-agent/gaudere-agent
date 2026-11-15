@@ -848,6 +848,114 @@ bool malformed_unverified_commit_has_no_recovery_identity_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool duplicate_head_key_rejected_before_submit_test()
+{
+    for (const auto& extra : {
+             "alias=\"main\"\n", "revision=2\n",
+             "root_task_id=\"cognition.local-goose-dialogue.v2:bad\"\n",
+             "head_task_id=\"cognition.local-goose-dialogue.v3:bad\"\n",
+             "unused=one\nunused=two\n"}) {
+        int reads = 0;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds) {
+            ++reads;
+            if (command.operation !=
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head)
+                return GaudereChatTransportReply{9, "unwanted submit"};
+            return GaudereChatTransportReply{0, head_report(2, old_head) + extra};
+        };
+        GaudereChatSession session(transport, "0123456789abcdef");
+        const auto result = session.send_turn("Salut");
+        if (reads != 1 || result.code != GaudereChatTurnCode::invalid_reply
+            || !result.task_id.empty() || result.current_revision
+            || session.has_ambiguous_attempt()) return false;
+    }
+    return true;
+}
+
+bool duplicate_commit_key_rejected_without_fake_commit_test()
+{
+    for (const auto& extra : {
+             "id=\"cognition.local-goose-dialogue.v3:bad\"\n",
+             "kind=\"cognition.local-goose-dialogue.v3\"\n",
+             "revision=3\n", "alias=\"main\"\n",
+             "status=pending\n", "attempts=0/2\n"}) {
+        int submits = 0;
+        int inspections = 0;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds) {
+            if (command.operation ==
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head)
+                return GaudereChatTransportReply{0, head_report(2, old_head)};
+            if (command.operation ==
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+                ++submits;
+                return GaudereChatTransportReply{0, submit_report(3) + extra};
+            }
+            ++inspections;
+            return GaudereChatTransportReply{9, "unwanted inspection"};
+        };
+        GaudereChatSession session(transport, "0123456789abcdef");
+        const auto result = session.send_turn("Salut");
+        const auto wait = session.wait_last_committed();
+        if (submits != 1 || inspections != 0
+            || result.code != GaudereChatTurnCode::invalid_reply
+            || !result.task_id.empty() || result.current_revision
+            || !result.response.empty()
+            || wait.code != GaudereChatTurnCode::invalid_reply
+            || !wait.task_id.empty()) return false;
+    }
+    return true;
+}
+
+bool duplicate_task_key_rejected_with_proven_identity_test()
+{
+    for (int variant = 0; variant != 5; ++variant) {
+        int submits = 0;
+        int reads = 0;
+        std::string request_id;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds) {
+            if (command.operation ==
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head)
+                return GaudereChatTransportReply{0, head_report(2, old_head)};
+            if (command.operation ==
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+                ++submits;
+                request_id = command.id;
+                return GaudereChatTransportReply{0, submit_report(3)};
+            }
+            if (command.operation != LiveControlOperation::inspect_task
+                || command.id != new_task)
+                return GaudereChatTransportReply{9, "unwanted operation"};
+            if (++reads == 2)
+                return GaudereChatTransportReply{0, succeeded_task_report(request_id)};
+            const std::string extra = variant == 0
+                ? "id=\"" + old_head + "\"\n"
+                : variant == 1 ? "status=succeeded\n"
+                : variant == 2 ? "kind=\"cognition.local-goose-dialogue.v3\"\n"
+                : variant == 3 ? "result_output=" +
+                    quote_report(response_json(request_id)) + "\n"
+                : "attempts=1/2\n";
+            const std::string base = variant == 3
+                ? succeeded_task_report(request_id) : pending_task_report();
+            return GaudereChatTransportReply{0, base + extra};
+        };
+        GaudereChatSession session(transport, "0123456789abcdef");
+        const auto invalid = session.send_turn("Salut");
+        if (invalid.code != GaudereChatTurnCode::invalid_reply
+            || invalid.task_id != new_task || !invalid.current_revision
+            || *invalid.current_revision != 3 || !invalid.response.empty()
+            || submits != 1 || reads != 1) return false;
+        const auto recovered = session.wait_last_committed();
+        if (recovered.code != GaudereChatTurnCode::succeeded
+            || recovered.task_id != new_task
+            || recovered.response != "Bonjour Bertrand."
+            || submits != 1 || reads != 2) return false;
+    }
+    return true;
+}
+
 bool noncanonical_response_test()
 {
     int step = 0;
@@ -904,6 +1012,12 @@ int main()
          malformed_post_commit_observation_preserves_recovery_test},
         {"malformed_unverified_commit_has_no_recovery_identity_test",
          malformed_unverified_commit_has_no_recovery_identity_test},
+        {"duplicate_head_key_rejected_before_submit_test",
+         duplicate_head_key_rejected_before_submit_test},
+        {"duplicate_commit_key_rejected_without_fake_commit_test",
+         duplicate_commit_key_rejected_without_fake_commit_test},
+        {"duplicate_task_key_rejected_with_proven_identity_test",
+         duplicate_task_key_rejected_with_proven_identity_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
 

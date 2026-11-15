@@ -357,6 +357,10 @@ jobs:
           grep -Fq 'slash_command_routing_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq 'malformed_post_commit_observation_preserves_recovery_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq 'malformed_unverified_commit_has_no_recovery_identity_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate_head_key_rejected_before_submit_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate_commit_key_rejected_without_fake_commit_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate_task_key_rejected_with_proven_identity_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate live-control report field' agent/src/GaudereChat.cpp
           grep -Fq 'const auto invalid_committed' agent/src/GaudereChat.cpp
           grep -Fq 'parse_gaudere_chat_input' agent/src/chat_main.cpp
           grep -Fq 'GaudereChatInputKind::unknown_command' agent/src/GaudereChatInput.hpp

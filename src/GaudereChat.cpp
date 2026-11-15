@@ -127,7 +127,13 @@ std::map<std::string, std::string> parse_report(const std::string& body)
             }
             value = *decoded;
         }
-        out[key] = std::move(value);
+        // This parser feeds both the preferred commit proof and the final
+        // V3 response verifier. Silent last-value-wins on duplicate keys
+        // could turn two contradictory identities/statuses into one trusted
+        // report. Reject ALL duplicate keys before interpreting a report.
+        if (!out.emplace(key, std::move(value)).second) {
+            throw std::invalid_argument("duplicate live-control report field");
+        }
     }
     return out;
 }
@@ -343,24 +349,8 @@ GaudereChatTaskInspection GaudereChatSession::inspect_task(
     }
 
     try {
-        // parse_report is intentionally tolerant for older control reports.
-        // This new status-only surface must not accept conflicting duplicate
-        // identity/kind/status lines that the generic map would overwrite.
-        const auto unique_field = [&](const std::string& field) {
-            std::istringstream input(reply.body);
-            const auto prefix = field + "=";
-            std::string line;
-            int occurrences = 0;
-            while (std::getline(input, line)) {
-                if (line.rfind(prefix, 0) == 0) ++occurrences;
-            }
-            return occurrences == 1;
-        };
-        if (!unique_field("id") || !unique_field("kind")
-            || !unique_field("status")) {
-            out.detail = "read-only Task report has missing or duplicated fields";
-            return out;
-        }
+        // The shared parser rejects any duplicate key, including conflicting
+        // identity/status lines. A status-only read never grants ACK authority.
         const auto fields = parse_report(reply.body);
         const auto id = fields.find("id");
         const auto kind = fields.find("kind");
