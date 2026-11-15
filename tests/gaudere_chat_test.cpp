@@ -410,6 +410,145 @@ bool overdue_success_is_not_accepted_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool read_only_task_status_test()
+{
+    for (const std::string status : {
+            "pending", "running", "cancel_requested", "succeeded",
+            "failed", "cancelled", "manual_review"}) {
+        int calls = 0;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds budget) {
+            ++calls;
+            if (command.operation != LiveControlOperation::inspect_task
+                || command.id != new_task
+                || budget != std::chrono::milliseconds{17}) {
+                return GaudereChatTransportReply{9, "wrong read-only request"};
+            }
+            return GaudereChatTransportReply{
+                0, "id=\"" + new_task + "\"\n"
+                   "kind=\"cognition.local-goose-dialogue.v3\"\n"
+                   "status=" + status + "\n"};
+        };
+        gaudere_agent::GaudereChatOptions options;
+        options.io_timeout = std::chrono::milliseconds{17};
+        GaudereChatSession session(transport, "0123456789abcdef", options);
+        const auto result = session.inspect_task(new_task);
+        if (!result.ok || result.task_id != new_task || result.status != status
+            || !result.detail.empty() || calls != 1
+            || session.has_ambiguous_attempt()) return false;
+    }
+    return true;
+}
+
+bool read_only_task_rejects_invalid_id_before_transport_test()
+{
+    int calls = 0;
+    const auto transport = [&](const LiveControlCommand&,
+                               const std::chrono::milliseconds) {
+        ++calls;
+        return GaudereChatTransportReply{0, "status=succeeded\n"};
+    };
+    GaudereChatSession session(transport, "0123456789abcdef");
+    for (const auto& id : std::vector<std::string>{
+            "", "not-a-task", root, new_task + "x",
+            "cognition.local-goose-dialogue.v3:" + std::string(64, 'A'),
+            "cognition.local-goose-dialogue.v3:" + std::string(63, 'a'),
+            new_task + "\nstatus=succeeded", new_task + " "}) {
+        const auto result = session.inspect_task(id);
+        if (result.ok || !result.status.empty() || result.task_id != id
+            || calls != 0 || session.has_ambiguous_attempt()) return false;
+    }
+    return true;
+}
+
+bool read_only_task_rejects_malformed_or_unavailable_report_test()
+{
+    const std::vector<GaudereChatTransportReply> invalid = {
+        {0, "id=\"" + old_head + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\nstatus=succeeded\n"},
+        {0, "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v2\"\nstatus=running\n"},
+        {0, "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\nstatus=granted\n"},
+        {0, "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\n"},
+        {0, "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\nstatus=\"bad\\q\"\n"},
+        {1, "gaudere-control: live control receive timed out\n"}
+    };
+    for (const auto& raw : invalid) {
+        int calls = 0;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds budget) {
+            ++calls;
+            if (command.operation != LiveControlOperation::inspect_task
+                || budget != std::chrono::milliseconds{5000}) {
+                return GaudereChatTransportReply{9, "unexpected operation"};
+            }
+            return raw;
+        };
+        GaudereChatSession session(transport, "0123456789abcdef");
+        const auto result = session.inspect_task(new_task);
+        if (result.ok || result.status != "" || result.detail.empty()
+            || calls != 1 || session.has_ambiguous_attempt()) return false;
+    }
+    return true;
+}
+
+bool read_only_task_after_timeout_never_resubmits_test()
+{
+    int calls = 0;
+    int submits = 0;
+    int inspections = 0;
+    auto now = std::chrono::steady_clock::time_point{};
+    const auto transport = [&](const LiveControlCommand& command,
+                               const std::chrono::milliseconds budget) {
+        ++calls;
+        if (command.operation == LiveControlOperation::inspect_local_goose_dialogue_thread_head)
+            return GaudereChatTransportReply{0, head_report(2, old_head)};
+        if (command.operation == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+            ++submits;
+            return GaudereChatTransportReply{0, submit_report(3)};
+        }
+        if (command.operation != LiveControlOperation::inspect_task
+            || command.id != new_task) {
+            return GaudereChatTransportReply{9, "unexpected operation"};
+        }
+        ++inspections;
+        if (inspections == 1) {
+            if (budget != std::chrono::milliseconds{3})
+                return GaudereChatTransportReply{9, "wrong wait budget"};
+            return GaudereChatTransportReply{0, pending_task_report()};
+        }
+        if (budget != std::chrono::milliseconds{7})
+            return GaudereChatTransportReply{9, "wrong lookup budget"};
+        return GaudereChatTransportReply{
+            0, "id=\"" + new_task + "\"\n"
+               "kind=\"cognition.local-goose-dialogue.v3\"\n"
+               "status=succeeded\n"};
+    };
+    gaudere_agent::GaudereChatOptions options;
+    options.timeout = std::chrono::milliseconds{3};
+    options.poll_interval = std::chrono::milliseconds{3};
+    options.io_timeout = std::chrono::milliseconds{7};
+    auto clock = [&] { return now; };
+    const auto sleeper = [&](const std::chrono::milliseconds duration) {
+        now += duration;
+    };
+    GaudereChatSession session(
+        transport, "0123456789abcdef", options, clock, sleeper);
+    const auto pending = session.send_turn("Salut");
+    if (pending.code != GaudereChatTurnCode::timeout
+        || pending.task_id != new_task || calls != 3
+        || session.has_ambiguous_attempt()) return false;
+
+    const auto lookup = session.inspect_task(pending.task_id);
+    return lookup.ok && lookup.task_id == new_task
+        && lookup.status == "succeeded" && lookup.detail.empty()
+        && calls == 4 && submits == 1 && inspections == 2
+        && !session.has_ambiguous_attempt();
+}
+
 bool noncanonical_response_test()
 {
     int step = 0;
@@ -446,6 +585,13 @@ int main()
         {"timeout_test", timeout_test},
         {"cumulative_inspection_budget_test", cumulative_inspection_budget_test},
         {"overdue_success_is_not_accepted_test", overdue_success_is_not_accepted_test},
+        {"read_only_task_status_test", read_only_task_status_test},
+        {"read_only_task_rejects_invalid_id_before_transport_test",
+         read_only_task_rejects_invalid_id_before_transport_test},
+        {"read_only_task_rejects_malformed_or_unavailable_report_test",
+         read_only_task_rejects_malformed_or_unavailable_report_test},
+        {"read_only_task_after_timeout_never_resubmits_test",
+         read_only_task_after_timeout_never_resubmits_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
 
