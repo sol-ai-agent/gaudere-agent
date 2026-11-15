@@ -10,6 +10,10 @@ on:
       - '.github/workflows/gaudere-chat-fedora45-readonly.yml'
       - 'docs/gaudere-chat-read-only-task-lookup.md'
       - 'docs/gaudere-chat-resume-last-committed-v1.md'
+      - 'src/GaudereChatInput.hpp'
+      - 'docs/gaudere-chat-slash-command-routing-v1.md'
+      - 'src/Makefile.am'
+      - 'tests/Makefile.am'
   push:
     branches: [main]
     paths:
@@ -20,6 +24,10 @@ on:
       - '.github/workflows/gaudere-chat-fedora45-readonly.yml'
       - 'docs/gaudere-chat-read-only-task-lookup.md'
       - 'docs/gaudere-chat-resume-last-committed-v1.md'
+      - 'src/GaudereChatInput.hpp'
+      - 'docs/gaudere-chat-slash-command-routing-v1.md'
+      - 'src/Makefile.am'
+      - 'tests/Makefile.am'
 
 permissions:
   contents: read
@@ -75,6 +83,14 @@ jobs:
           tests/live_control_test
           src/gaudere-chat --help 2>&1 | grep -F '/task ID'
           src/gaudere-chat --help 2>&1 | grep -F '/wait'
+          src/gaudere-chat --help 2>&1 | grep -F '//text'
+          grep -Fq 'slash_command_routing_test' ../tests/gaudere_chat_test.cpp
+          # Run the real CLI with NO socket: typos must remain purely local.
+          printf '/wai\n/retry extra\n/task extra argument\n/help now\n/quit\n' |
+            src/gaudere-chat --socket /nonexistent/gaudere-test.sock \
+              > command-routing.out 2>&1
+          test "$(grep -c 'unknown local command' command-routing.out)" = "4"
+          ! grep -E 'cannot connect|transport state is ambiguous|preferred thread advanced' command-routing.out
           grep -Fq 'LiveControlOperation::inspect_task' ../src/GaudereChat.cpp
           grep -Fq 'read_only_task_after_timeout_never_resubmits_test' \
             ../tests/gaudere_chat_test.cpp

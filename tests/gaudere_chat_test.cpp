@@ -1,4 +1,5 @@
 #include "GaudereChat.hpp"
+#include "GaudereChatInput.hpp"
 
 #include "LocalGooseDialogueV3.hpp"
 
@@ -692,6 +693,63 @@ bool wait_last_rejects_forged_v3_response_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool slash_command_routing_test()
+{
+    using gaudere_agent::GaudereChatInputKind;
+    using gaudere_agent::parse_gaudere_chat_input;
+    struct Case {
+        std::string line;
+        GaudereChatInputKind kind;
+        std::string payload;
+    };
+    const std::vector<Case> cases{
+        {"", GaudereChatInputKind::empty, ""},
+        {"Bonjour", GaudereChatInputKind::text, "Bonjour"},
+        {"  /wai", GaudereChatInputKind::text, "  /wai"},
+        {"/help", GaudereChatInputKind::help, ""},
+        {"/head", GaudereChatInputKind::head, ""},
+        {"/wait", GaudereChatInputKind::wait, ""},
+        {"/retry", GaudereChatInputKind::retry, ""},
+        {"/quit", GaudereChatInputKind::quit, ""},
+        {"/task " + new_task, GaudereChatInputKind::task, new_task},
+        {"//help", GaudereChatInputKind::text, "/help"},
+        {"//wait", GaudereChatInputKind::text, "/wait"},
+        {"//task " + new_task, GaudereChatInputKind::text, "/task " + new_task},
+        {"//", GaudereChatInputKind::text, "/"},
+        {"///bonjour", GaudereChatInputKind::text, "//bonjour"},
+        {"/", GaudereChatInputKind::unknown_command, "/"},
+        {"/wai", GaudereChatInputKind::unknown_command, "/wai"},
+        {"/HEAD", GaudereChatInputKind::unknown_command, "/HEAD"},
+        {"/help now", GaudereChatInputKind::unknown_command, "/help now"},
+        {"/head now", GaudereChatInputKind::unknown_command, "/head now"},
+        {"/wait now", GaudereChatInputKind::unknown_command, "/wait now"},
+        {"/retry now", GaudereChatInputKind::unknown_command, "/retry now"},
+        {"/quit now", GaudereChatInputKind::unknown_command, "/quit now"},
+        {"/task", GaudereChatInputKind::unknown_command, "/task"},
+        {"/task ", GaudereChatInputKind::unknown_command, "/task "},
+        {"/task  " + new_task, GaudereChatInputKind::unknown_command, "/task  " + new_task},
+        {"/task " + new_task + " extra", GaudereChatInputKind::unknown_command,
+            "/task " + new_task + " extra"},
+        {"/task\t" + new_task, GaudereChatInputKind::unknown_command, "/task\t" + new_task},
+        {"/taskx " + new_task, GaudereChatInputKind::unknown_command,
+            "/taskx " + new_task},
+        {"/provider", GaudereChatInputKind::unknown_command, "/provider"},
+        {"/ack", GaudereChatInputKind::unknown_command, "/ack"},
+        {"/send Hello", GaudereChatInputKind::unknown_command, "/send Hello"}
+    };
+    for (const auto& sample : cases) {
+        const auto parsed = parse_gaudere_chat_input(sample.line);
+        if (parsed.kind != sample.kind || parsed.value != sample.payload)
+            return false;
+        // No unescaped slash-prefixed input may become a dialogue submit.
+        if (sample.line.rfind("/", 0) == 0
+            && sample.line.rfind("//", 0) != 0
+            && parsed.kind == GaudereChatInputKind::text)
+            return false;
+    }
+    return true;
+}
+
 bool noncanonical_response_test()
 {
     int step = 0;
@@ -743,6 +801,7 @@ int main()
          wait_last_ambiguous_not_upgraded_to_commit_test},
         {"wait_last_rejects_forged_v3_response_test",
          wait_last_rejects_forged_v3_response_test},
+        {"slash_command_routing_test", slash_command_routing_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
 

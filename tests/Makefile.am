@@ -151,6 +151,7 @@ gaudere_chat_test_SOURCES = \
 	gaudere_chat_test.cpp \
 	../src/GaudereChat.cpp \
 	../src/GaudereChat.hpp \
+	../src/GaudereChatInput.hpp \
 	../src/LiveControl.hpp \
 	../src/LocalGooseDialogueV3.hpp \
 	../src/Sha256.cpp \
