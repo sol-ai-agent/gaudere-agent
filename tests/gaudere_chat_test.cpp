@@ -750,6 +750,104 @@ bool slash_command_routing_test()
     return true;
 }
 
+bool malformed_post_commit_observation_preserves_recovery_test()
+{
+    // Every malformed or non-canonical Task report is an observation failure,
+    // not evidence that the previously verified durable submit did not happen.
+    const std::vector<std::string> bad_reports{
+        "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\n"
+            "status=\"bad\\q\"\n",  // malformed escaped field
+        "id=\"" + old_head + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\n"
+            "status=running\n",   // wrong Task ID
+        "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\n"
+            "status=succeeded\n", // absent result envelope
+        succeeded_task_report("wrong-request-id"),  // non-canonical reply
+        "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\n"
+            "status=unexpected\n" // unknown Task status
+    };
+    for (const auto& bad_report : bad_reports) {
+        int submissions = 0;
+        int inspections = 0;
+        std::string request_id;
+        auto transport = [&](const LiveControlCommand& command,
+                             const std::chrono::milliseconds) {
+            if (command.operation
+                == LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+                return GaudereChatTransportReply{0, head_report(2, old_head)};
+            }
+            if (command.operation
+                == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+                ++submissions;
+                request_id = command.id;
+                return GaudereChatTransportReply{0, submit_report(3)};
+            }
+            if (command.operation != LiveControlOperation::inspect_task
+                || command.id != new_task) {
+                return GaudereChatTransportReply{9, "unexpected operation"};
+            }
+            ++inspections;
+            if (inspections == 1)
+                return GaudereChatTransportReply{0, bad_report};
+            return GaudereChatTransportReply{
+                0, succeeded_task_report(request_id)};
+        };
+        GaudereChatSession session(transport, "0123456789abcdef");
+        const auto bad = session.send_turn("Salut");
+        if (bad.code != GaudereChatTurnCode::invalid_reply
+            || bad.task_id != new_task || bad.request_id != request_id
+            || bad.expected_revision != 2
+            || !bad.current_revision || *bad.current_revision != 3
+            || !bad.response.empty()
+            || bad.detail.empty() || submissions != 1
+            || inspections != 1 || session.has_ambiguous_attempt())
+            return false;
+
+        // A deliberate read-only re-observation of exactly the same commit
+        // can retrieve a later canonical result; it must NEVER re-submit.
+        const auto recovered = session.wait_last_committed();
+        if (recovered.code != GaudereChatTurnCode::succeeded
+            || recovered.task_id != new_task
+            || recovered.request_id != request_id
+            || recovered.response != "Bonjour Bertrand."
+            || submissions != 1 || inspections != 2
+            || session.has_ambiguous_attempt())
+            return false;
+    }
+    return true;
+}
+
+bool malformed_unverified_commit_has_no_recovery_identity_test()
+{
+    int submissions = 0;
+    auto transport = [&](const LiveControlCommand& command,
+                         const std::chrono::milliseconds) {
+        if (command.operation
+            == LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+            return GaudereChatTransportReply{0, head_report(2, old_head)};
+        }
+        if (command.operation
+            == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+            ++submissions;
+            return GaudereChatTransportReply{0, "status=pending\n"};
+        }
+        return GaudereChatTransportReply{9, "unexpected operation"};
+    };
+    GaudereChatSession session(transport, "0123456789abcdef");
+    const auto bad = session.send_turn("Salut");
+    if (bad.code != GaudereChatTurnCode::invalid_reply
+        || !bad.task_id.empty() || bad.current_revision
+        || bad.response != "" || submissions != 1)
+        return false;
+    const auto wait = session.wait_last_committed();
+    return wait.code == GaudereChatTurnCode::invalid_reply
+        && wait.task_id.empty() && submissions == 1
+        && !session.has_ambiguous_attempt();
+}
+
 bool noncanonical_response_test()
 {
     int step = 0;
@@ -802,6 +900,10 @@ int main()
         {"wait_last_rejects_forged_v3_response_test",
          wait_last_rejects_forged_v3_response_test},
         {"slash_command_routing_test", slash_command_routing_test},
+        {"malformed_post_commit_observation_preserves_recovery_test",
+         malformed_post_commit_observation_preserves_recovery_test},
+        {"malformed_unverified_commit_has_no_recovery_identity_test",
+         malformed_unverified_commit_has_no_recovery_identity_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
 
