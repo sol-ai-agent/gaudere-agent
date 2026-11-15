@@ -1,4 +1,5 @@
 #include "GaudereChat.hpp"
+#include "GaudereChatInput.hpp"
 
 #include "LiveControl.hpp"
 
@@ -39,7 +40,8 @@ void help()
         << "/task ID  inspect one previously submitted V3 Task (read-only)\n"
         << "/wait   wait again for the last verified committed Task (read-only)\n"
         << "/retry  explicitly retry the last conflicting or ambiguous message\n"
-        << "/quit   leave gaudere-chat without submitting anything\n";
+        << "/quit   leave gaudere-chat without submitting anything\n"
+        << "//text  send text starting with a literal / (escape commands)\n";
 }
 
 void print_head(const gaudere_agent::GaudereChatHead& head)
@@ -115,25 +117,22 @@ int main(int argc, char* argv[])
                 std::cout << '\n';
                 break;
             }
-            if (line.empty()) continue;
-            if (line == "/quit") break;
-            if (line == "/help") {
+            const auto input = gaudere_agent::parse_gaudere_chat_input(line);
+            using InputKind = gaudere_agent::GaudereChatInputKind;
+            if (input.kind == InputKind::empty) continue;
+            if (input.kind == InputKind::quit) break;
+            if (input.kind == InputKind::help) {
                 help();
                 continue;
             }
-            if (line == "/head") {
+            if (input.kind == InputKind::head) {
                 const auto head = session.inspect_head();
                 if (head.ok) print_head(head.head);
                 else std::cerr << "gaudere-chat: " << head.detail;
                 continue;
             }
-
-            // Reserve the whole /task command prefix: a typo must not
-            // accidentally turn a local inspection into a new V3 submit.
-            if (line.rfind("/task", 0) == 0) {
-                const auto id = line.size() > 6 && line[5] == ' '
-                    ? line.substr(6) : std::string{};
-                const auto report = session.inspect_task(id);
+            if (input.kind == InputKind::task) {
+                const auto report = session.inspect_task(input.value);
                 if (report.ok) {
                     std::cout << "task=" << report.task_id
                               << " status=" << report.status << '\n';
@@ -143,17 +142,18 @@ int main(int argc, char* argv[])
                 }
                 continue;
             }
+            if (input.kind == InputKind::unknown_command) {
+                std::cerr << "gaudere-chat: unknown local command; "
+                             "use /help (or // to send a literal slash)\n";
+                continue;
+            }
 
             gaudere_agent::GaudereChatTurnResult result;
             std::string attempted_message;
-            if (line.rfind("/wait", 0) == 0) {
-                if (line != "/wait") {
-                    std::cerr << "gaudere-chat: usage: /wait\n";
-                    continue;
-                }
+            if (input.kind == InputKind::wait) {
                 // Read-only bounded re-observation; no submit and no ACK.
                 result = session.wait_last_committed();
-            } else if (line == "/retry") {
+            } else if (input.kind == InputKind::retry) {
                 if (session.has_ambiguous_attempt()) {
                     attempted_message = session.ambiguous_message();
                     result = session.retry_ambiguous();
@@ -173,7 +173,7 @@ int main(int argc, char* argv[])
                     continue;
                 }
                 conflict_message.clear();
-                attempted_message = line;
+                attempted_message = input.value;
                 result = session.send_turn(attempted_message);
             }
 
