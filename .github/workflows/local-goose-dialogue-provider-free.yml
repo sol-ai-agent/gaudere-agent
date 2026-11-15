@@ -351,6 +351,11 @@ jobs:
           grep -q 'test_client_slow_trickle_does_not_extend_deadline' agent/tests/live_control_test.cpp
           grep -q -- '--io-timeout-ms' agent/src/chat_main.cpp
           grep -q 'task_inspection_io_timeout_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'transport_(command, remaining)' agent/src/GaudereChat.cpp
+          grep -Fq 'std::min(options_.poll_interval, sleep_budget)' agent/src/GaudereChat.cpp
+          grep -Fq 'cumulative_inspection_budget_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'overdue_success_is_not_accepted_test' agent/tests/gaudere_chat_test.cpp
+          ! grep -Fq 'command.operation == gaudere_agent::LiveControlOperation::inspect_task' agent/src/chat_main.cpp
           grep -q 'test_client_io_timeout_bounds_pending_reply' agent/tests/live_control_test.cpp
 
       - name: Prove gaudere-chat remains bounded human V3 only
