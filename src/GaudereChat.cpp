@@ -552,6 +552,16 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
 {
     const auto deadline = clock_() + options_.timeout;
     // A committed Task must never be resubmitted after observation times out.
+    // The Task ID was proven by the preferred-thread commit report before
+    // entering this read-only loop. Even a malformed later response must not
+    // erase that durable identity or imply it is safe to re-submit.
+    const auto invalid_committed = [&](std::string detail) {
+        auto out = malformed(attempt.request_id, attempt.head.revision,
+                             std::move(detail));
+        out.task_id = task_id;
+        out.current_revision = attempt.head.revision + 1;
+        return out;
+    };
     const auto timed_out = [&]() {
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::timeout;
@@ -597,7 +607,7 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         try {
             fields = parse_report(reply.body);
         } catch (...) {
-            return malformed(attempt.request_id, attempt.head.revision, "submitted Task report is invalid");
+            return invalid_committed("submitted Task report is invalid");
         }
         const auto id = fields.find("id");
         const auto kind = fields.find("kind");
@@ -605,7 +615,7 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         if (id == fields.end() || kind == fields.end() || status == fields.end()
             || id->second != task_id
             || kind->second != local_goose_dialogue_v3_task_kind) {
-            return malformed(attempt.request_id, attempt.head.revision, "submitted Task identity differs");
+            return invalid_committed("submitted Task identity differs");
         }
 
         if (status->second == "succeeded") {
@@ -613,12 +623,12 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
             const auto output = fields.find("result_output");
             if (type == fields.end() || output == fields.end()
                 || type->second != local_goose_dialogue_v3_response_content_type) {
-                return malformed(attempt.request_id, attempt.head.revision, "successful Task result envelope differs");
+                return invalid_committed("successful Task result envelope differs");
             }
             const auto response = canonical_response(
                 output->second, attempt.request_id, attempt.head);
             if (!response) {
-                return malformed(attempt.request_id, attempt.head.revision, "successful Task response is not canonical v3");
+                return invalid_committed("successful Task response is not canonical v3");
             }
             GaudereChatTurnResult out;
             out.code = GaudereChatTurnCode::succeeded;
@@ -640,7 +650,7 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
             return out;
         }
         if (!active_status(status->second)) {
-            return malformed(attempt.request_id, attempt.head.revision, "submitted Task status is unknown");
+            return invalid_committed("submitted Task status is unknown");
         }
 
         const auto after = clock_();
