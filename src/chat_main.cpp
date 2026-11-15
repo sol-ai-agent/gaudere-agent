@@ -231,6 +231,15 @@ int main(int argc, char* argv[])
                 break;
             case gaudere_agent::GaudereChatTurnCode::invalid_reply:
                 std::cerr << "gaudere-chat: " << result.detail << '\n';
+                if (!result.task_id.empty()) {
+                    // The commit was confirmed before observation failed.
+                    // Do NOT interpret invalid response syntax as no submit.
+                    std::cerr << "gaudere-chat: Task " << result.task_id
+                              << " was durably submitted; do not resubmit. "
+                              << "Use /wait in this session or /task "
+                              << result.task_id
+                              << " to inspect its status read-only.\n";
+                }
                 break;
             }
         }
