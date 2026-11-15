@@ -12,6 +12,7 @@ on:
       - 'docs/gaudere-chat-resume-last-committed-v1.md'
       - 'src/GaudereChatInput.hpp'
       - 'docs/gaudere-chat-slash-command-routing-v1.md'
+      - 'docs/gaudere-chat-preserve-task-recovery-on-invalid-reply.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
   push:
@@ -26,6 +27,7 @@ on:
       - 'docs/gaudere-chat-resume-last-committed-v1.md'
       - 'src/GaudereChatInput.hpp'
       - 'docs/gaudere-chat-slash-command-routing-v1.md'
+      - 'docs/gaudere-chat-preserve-task-recovery-on-invalid-reply.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
 
@@ -85,6 +87,11 @@ jobs:
           src/gaudere-chat --help 2>&1 | grep -F '/wait'
           src/gaudere-chat --help 2>&1 | grep -F '//text'
           grep -Fq 'slash_command_routing_test' ../tests/gaudere_chat_test.cpp
+          grep -Fq 'malformed_post_commit_observation_preserves_recovery_test' \
+            ../tests/gaudere_chat_test.cpp
+          grep -Fq 'malformed_unverified_commit_has_no_recovery_identity_test' \
+            ../tests/gaudere_chat_test.cpp
+          grep -Fq 'do not resubmit' ../src/chat_main.cpp
           # Run the real CLI with NO socket: typos must remain purely local.
           printf '/wai\n/retry extra\n/task extra argument\n/help now\n/quit\n' |
             src/gaudere-chat --socket /nonexistent/gaudere-test.sock \
