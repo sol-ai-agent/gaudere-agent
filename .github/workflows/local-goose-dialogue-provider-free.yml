@@ -351,6 +351,10 @@ jobs:
           grep -q 'test_client_slow_trickle_does_not_extend_deadline' agent/tests/live_control_test.cpp
           grep -q -- '--io-timeout-ms' agent/src/chat_main.cpp
           grep -q 'task_inspection_io_timeout_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'GaudereChatSession::inspect_task' agent/src/GaudereChat.cpp
+          grep -Fq 'read_only_task_after_timeout_never_resubmits_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'read_only_task_rejects_invalid_id_before_transport_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq '/task ID' agent/src/chat_main.cpp
           grep -Fq 'transport_(command, remaining)' agent/src/GaudereChat.cpp
           grep -Fq 'std::min(options_.poll_interval, sleep_budget)' agent/src/GaudereChat.cpp
           grep -Fq 'cumulative_inspection_budget_test' agent/tests/gaudere_chat_test.cpp
