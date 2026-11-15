@@ -86,6 +86,7 @@ public:
     [[nodiscard]] GaudereChatTaskInspection inspect_task(const std::string& task_id) const;
     [[nodiscard]] GaudereChatTurnResult send_turn(const std::string& message);
     [[nodiscard]] GaudereChatTurnResult retry_ambiguous();
+    [[nodiscard]] GaudereChatTurnResult wait_last_committed();
 
     [[nodiscard]] bool has_ambiguous_attempt() const noexcept;
     [[nodiscard]] std::string ambiguous_message() const;
@@ -96,6 +97,13 @@ private:
         std::string request_id;
         std::string message;
         GaudereChatHead head;
+    };
+
+    // In-memory, verified-commit context. Never reconstructed from a
+    // status-only Task report, and never persisted without an opt-in gate.
+    struct CommittedAttempt {
+        Attempt attempt;
+        std::string task_id;
     };
 
     [[nodiscard]] GaudereChatTurnResult submit_attempt(const Attempt& attempt);
@@ -111,6 +119,7 @@ private:
     GaudereChatSleeper sleeper_;
     std::uint64_t next_turn_ = 1;
     std::optional<Attempt> ambiguous_attempt_;
+    std::optional<CommittedAttempt> last_committed_;
 };
 
 [[nodiscard]] std::string random_gaudere_chat_session_nonce();

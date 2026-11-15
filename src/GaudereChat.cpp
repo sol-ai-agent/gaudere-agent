@@ -435,6 +435,23 @@ GaudereChatTurnResult GaudereChatSession::retry_ambiguous()
     return submit_attempt(attempt);
 }
 
+GaudereChatTurnResult GaudereChatSession::wait_last_committed()
+{
+    if (!last_committed_) {
+        GaudereChatTurnResult out;
+        out.code = GaudereChatTurnCode::invalid_reply;
+        out.detail = "no verified committed V3 Task in this chat session; "
+            "use /task ID for status-only lookup after reopening";
+        return out;
+    }
+
+    // The original request_id, predecessor head and task_id come only from
+    // the actual verified commit of this session. A status-only lookup
+    // cannot populate this proof context. Never re-submit or ACK here.
+    const auto recorded = *last_committed_;
+    return wait_for_task(recorded.attempt, recorded.task_id);
+}
+
 GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
 {
     LiveControlCommand command;
@@ -523,6 +540,9 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         return malformed(attempt.request_id, attempt.head.revision, "preferred dialogue committed revision differs");
     }
 
+    // Record only AFTER parsing and verifying the durable commit response.
+    // A timeout of subsequent observation must never erase this identity.
+    last_committed_ = CommittedAttempt{attempt, id->second};
     return wait_for_task(attempt, id->second);
 }
 

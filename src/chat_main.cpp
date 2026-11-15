@@ -37,6 +37,7 @@ void help()
         << "/help   show local commands\n"
         << "/head   inspect the current preferred thread head\n"
         << "/task ID  inspect one previously submitted V3 Task (read-only)\n"
+        << "/wait   wait again for the last verified committed Task (read-only)\n"
         << "/retry  explicitly retry the last conflicting or ambiguous message\n"
         << "/quit   leave gaudere-chat without submitting anything\n";
 }
@@ -145,7 +146,14 @@ int main(int argc, char* argv[])
 
             gaudere_agent::GaudereChatTurnResult result;
             std::string attempted_message;
-            if (line == "/retry") {
+            if (line.rfind("/wait", 0) == 0) {
+                if (line != "/wait") {
+                    std::cerr << "gaudere-chat: usage: /wait\n";
+                    continue;
+                }
+                // Read-only bounded re-observation; no submit and no ACK.
+                result = session.wait_last_committed();
+            } else if (line == "/retry") {
                 if (session.has_ambiguous_attempt()) {
                     attempted_message = session.ambiguous_message();
                     result = session.retry_ambiguous();
@@ -211,8 +219,9 @@ int main(int argc, char* argv[])
                     << "gaudere-chat: Task " << result.task_id
                     << " is durably submitted but could not be observed as "
                     << "terminal within the bounded wait. Do not resubmit this "
-                    << "message. Use /task " << result.task_id
-                    << " to inspect its status read-only.\n";
+                    << "message. Use /wait to await the last verified "
+                    << "commit again in this session, or /task "
+                    << result.task_id << " to inspect its status read-only.\n";
                 break;
             case gaudere_agent::GaudereChatTurnCode::terminal_failure:
                 std::cerr
