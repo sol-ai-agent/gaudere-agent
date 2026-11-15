@@ -36,6 +36,7 @@ void help()
     std::cout
         << "/help   show local commands\n"
         << "/head   inspect the current preferred thread head\n"
+        << "/task ID  inspect one previously submitted V3 Task (read-only)\n"
         << "/retry  explicitly retry the last conflicting or ambiguous message\n"
         << "/quit   leave gaudere-chat without submitting anything\n";
 }
@@ -126,6 +127,22 @@ int main(int argc, char* argv[])
                 continue;
             }
 
+            // Reserve the whole /task command prefix: a typo must not
+            // accidentally turn a local inspection into a new V3 submit.
+            if (line.rfind("/task", 0) == 0) {
+                const auto id = line.size() > 6 && line[5] == ' '
+                    ? line.substr(6) : std::string{};
+                const auto report = session.inspect_task(id);
+                if (report.ok) {
+                    std::cout << "task=" << report.task_id
+                              << " status=" << report.status << '\n';
+                } else {
+                    std::cerr << "gaudere-chat: read-only Task inspection failed: "
+                              << report.detail << '\n';
+                }
+                continue;
+            }
+
             gaudere_agent::GaudereChatTurnResult result;
             std::string attempted_message;
             if (line == "/retry") {
@@ -194,7 +211,8 @@ int main(int argc, char* argv[])
                     << "gaudere-chat: Task " << result.task_id
                     << " is durably submitted but could not be observed as "
                     << "terminal within the bounded wait. Do not resubmit this "
-                    << "message.\n";
+                    << "message. Use /task " << result.task_id
+                    << " to inspect its status read-only.\n";
                 break;
             case gaudere_agent::GaudereChatTurnCode::terminal_failure:
                 std::cerr
