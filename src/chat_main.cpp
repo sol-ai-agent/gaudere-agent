@@ -37,6 +37,7 @@ void help()
     std::cout
         << "/help   show local commands\n"
         << "/head   inspect the current preferred thread head\n"
+        << "/last   show the last locally verified committed Task ID (no I/O)\n"
         << "/task ID  inspect one previously submitted V3 Task (read-only)\n"
         << "/wait   wait again for the last verified committed Task (read-only)\n"
         << "/retry  explicitly retry the last conflicting or ambiguous message\n"
@@ -129,6 +130,19 @@ int main(int argc, char* argv[])
                 const auto head = session.inspect_head();
                 if (head.ok) print_head(head.head);
                 else std::cerr << "gaudere-chat: " << head.detail;
+                continue;
+            }
+            if (input.kind == InputKind::last) {
+                // Snapshot solely of this process's already verified commit.
+                // Neither query the socket nor infer a commit from status.
+                const auto task_id = session.last_verified_committed_task_id();
+                if (task_id) {
+                    std::cout << "last verified committed task=" << *task_id
+                              << " (in-memory only; /wait to resume, /task "
+                              << *task_id << " for status only)\n";
+                } else {
+                    std::cout << "gaudere-chat: no verified committed Task in this session\n";
+                }
                 continue;
             }
             if (input.kind == InputKind::task) {

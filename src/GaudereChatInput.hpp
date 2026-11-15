@@ -15,6 +15,7 @@ enum class GaudereChatInputKind {
     text,
     help,
     head,
+    last,
     task,
     wait,
     retry,
@@ -38,6 +39,7 @@ struct GaudereChatInput {
 
     if (line == "/help") return {GaudereChatInputKind::help, {}};
     if (line == "/head") return {GaudereChatInputKind::head, {}};
+    if (line == "/last") return {GaudereChatInputKind::last, {}};
     if (line == "/wait") return {GaudereChatInputKind::wait, {}};
     if (line == "/retry") return {GaudereChatInputKind::retry, {}};
     if (line == "/quit") return {GaudereChatInputKind::quit, {}};

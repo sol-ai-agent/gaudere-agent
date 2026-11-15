@@ -87,6 +87,8 @@ public:
     [[nodiscard]] GaudereChatTurnResult send_turn(const std::string& message);
     [[nodiscard]] GaudereChatTurnResult retry_ambiguous();
     [[nodiscard]] GaudereChatTurnResult wait_last_committed();
+    // Local memory only: never populate this from a status-only Task lookup.
+    [[nodiscard]] std::optional<std::string> last_verified_committed_task_id() const;
 
     [[nodiscard]] bool has_ambiguous_attempt() const noexcept;
     [[nodiscard]] std::string ambiguous_message() const;

@@ -160,6 +160,8 @@ bool successful_turn_test()
         && result.request_id == request_id
         && result.task_id == new_task
         && result.response == "Bonjour Bertrand."
+        && session.last_verified_committed_task_id()
+        && *session.last_verified_committed_task_id() == new_task
         && result.current_revision
         && *result.current_revision == 3
         && request_id.rfind("chat-v1-0011223344556677-1-", 0) == 0;
@@ -617,7 +619,8 @@ bool wait_last_without_commit_fails_closed_test()
     };
     GaudereChatSession session(transport, "0123456789abcdef");
     const auto result = session.wait_last_committed();
-    return calls == 0 && result.code == GaudereChatTurnCode::invalid_reply
+    return calls == 0 && !session.last_verified_committed_task_id()
+        && result.code == GaudereChatTurnCode::invalid_reply
         && result.task_id.empty() && result.response.empty()
         && result.detail.find("no verified committed") != std::string::npos;
 }
@@ -647,6 +650,7 @@ bool wait_last_ambiguous_not_upgraded_to_commit_test()
     const auto wait = session.wait_last_committed();
     return wait.code == GaudereChatTurnCode::invalid_reply
         && calls == 2 && submits == 1 && session.has_ambiguous_attempt()
+        && !session.last_verified_committed_task_id()
         && session.ambiguous_message() == "Salut";
 }
 
@@ -693,6 +697,25 @@ bool wait_last_rejects_forged_v3_response_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool status_only_lookup_cannot_create_last_verified_commit_test()
+{
+    int calls = 0;
+    auto transport = [&](const LiveControlCommand& command,
+                         const std::chrono::milliseconds) {
+        ++calls;
+        if (command.operation != LiveControlOperation::inspect_task)
+            return GaudereChatTransportReply{9, "unexpected mutation"};
+        return GaudereChatTransportReply{0, pending_task_report()};
+    };
+    GaudereChatSession session(transport, "0123456789abcdef");
+    if (session.last_verified_committed_task_id() || calls != 0) return false;
+    const auto status = session.inspect_task(new_task);
+    if (!status.ok || status.status != "running" || calls != 1)
+        return false;
+    // Task status is not proof that THIS session committed it.
+    return !session.last_verified_committed_task_id() && calls == 1;
+}
+
 bool slash_command_routing_test()
 {
     using gaudere_agent::GaudereChatInputKind;
@@ -708,12 +731,14 @@ bool slash_command_routing_test()
         {"  /wai", GaudereChatInputKind::text, "  /wai"},
         {"/help", GaudereChatInputKind::help, ""},
         {"/head", GaudereChatInputKind::head, ""},
+        {"/last", GaudereChatInputKind::last, ""},
         {"/wait", GaudereChatInputKind::wait, ""},
         {"/retry", GaudereChatInputKind::retry, ""},
         {"/quit", GaudereChatInputKind::quit, ""},
         {"/task " + new_task, GaudereChatInputKind::task, new_task},
         {"//help", GaudereChatInputKind::text, "/help"},
         {"//wait", GaudereChatInputKind::text, "/wait"},
+        {"//last", GaudereChatInputKind::text, "/last"},
         {"//task " + new_task, GaudereChatInputKind::text, "/task " + new_task},
         {"//", GaudereChatInputKind::text, "/"},
         {"///bonjour", GaudereChatInputKind::text, "//bonjour"},
@@ -722,6 +747,8 @@ bool slash_command_routing_test()
         {"/HEAD", GaudereChatInputKind::unknown_command, "/HEAD"},
         {"/help now", GaudereChatInputKind::unknown_command, "/help now"},
         {"/head now", GaudereChatInputKind::unknown_command, "/head now"},
+        {"/last now", GaudereChatInputKind::unknown_command, "/last now"},
+        {"/LAST", GaudereChatInputKind::unknown_command, "/LAST"},
         {"/wait now", GaudereChatInputKind::unknown_command, "/wait now"},
         {"/retry now", GaudereChatInputKind::unknown_command, "/retry now"},
         {"/quit now", GaudereChatInputKind::unknown_command, "/quit now"},
@@ -1008,6 +1035,8 @@ int main()
         {"wait_last_rejects_forged_v3_response_test",
          wait_last_rejects_forged_v3_response_test},
         {"slash_command_routing_test", slash_command_routing_test},
+        {"status_only_lookup_cannot_create_last_verified_commit_test",
+         status_only_lookup_cannot_create_last_verified_commit_test},
         {"malformed_post_commit_observation_preserves_recovery_test",
          malformed_post_commit_observation_preserves_recovery_test},
         {"malformed_unverified_commit_has_no_recovery_identity_test",
