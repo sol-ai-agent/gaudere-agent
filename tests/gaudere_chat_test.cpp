@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -121,7 +122,7 @@ bool successful_turn_test()
 {
     int step = 0;
     std::string request_id;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             if (command.operation
@@ -167,7 +168,7 @@ bool conflict_test()
 {
     int step = 0;
     int submit_count = 0;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -209,7 +210,7 @@ bool ambiguous_exact_retry_test()
 {
     int step = 0;
     std::string first_request;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -261,7 +262,7 @@ bool ambiguous_exact_retry_test()
 bool task_inspection_io_timeout_test()
 {
     int step = 0;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -290,7 +291,7 @@ bool timeout_test()
 {
     int step = 0;
     auto now = std::chrono::steady_clock::time_point{};
-    auto transport = [&](const LiveControlCommand&) {
+    auto transport = [&](const LiveControlCommand&, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -311,9 +312,101 @@ bool timeout_test()
     GaudereChatSession session(
         transport, "0123456789abcdef", options, clock, sleeper);
     const auto result = session.send_turn("Salut");
-    return step == 5
+    return step == 4
         && result.code == GaudereChatTurnCode::timeout
         && result.task_id == new_task
+        && !session.has_ambiguous_attempt();
+}
+
+bool cumulative_inspection_budget_test()
+{
+    int step = 0;
+    int submit_count = 0;
+    auto now = std::chrono::steady_clock::time_point{};
+    std::vector<std::chrono::milliseconds> budgets;
+    auto transport = [&](const LiveControlCommand& command,
+                         const std::chrono::milliseconds budget) {
+        ++step;
+        if (step == 1) {
+            if (command.operation != LiveControlOperation::inspect_local_goose_dialogue_thread_head
+                || budget != std::chrono::milliseconds{4}) {
+                return GaudereChatTransportReply{9, "wrong head budget"};
+            }
+            return GaudereChatTransportReply{0, head_report(2, old_head)};
+        }
+        if (step == 2) {
+            ++submit_count;
+            if (command.operation != LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next
+                || budget != std::chrono::milliseconds{4}) {
+                return GaudereChatTransportReply{9, "wrong submit budget"};
+            }
+            return GaudereChatTransportReply{0, submit_report(3)};
+        }
+        if (command.operation != LiveControlOperation::inspect_task) {
+            return GaudereChatTransportReply{9, "wrong Task inspection"};
+        }
+        budgets.push_back(budget);
+        const auto simulated_work = std::min(budget, std::chrono::milliseconds{3});
+        now += simulated_work; // fake each network call consumes its own budget
+        return GaudereChatTransportReply{0, pending_task_report()};
+    };
+    const auto clock = [&] { return now; };
+    const auto sleeper = [&](const std::chrono::milliseconds duration) {
+        now += duration;
+    };
+    gaudere_agent::GaudereChatOptions options;
+    options.poll_interval = std::chrono::milliseconds{2};
+    options.timeout = std::chrono::milliseconds{12};
+    options.io_timeout = std::chrono::milliseconds{4};
+    GaudereChatSession session(
+        transport, "0011223344556677", options, clock, sleeper);
+    const auto result = session.send_turn("Salut");
+    return step == 5 // head, submit, only THREE inspections
+        && submit_count == 1
+        && budgets == std::vector<std::chrono::milliseconds>{
+            std::chrono::milliseconds{12}, std::chrono::milliseconds{7},
+            std::chrono::milliseconds{2}}
+        && now.time_since_epoch() == std::chrono::milliseconds{12}
+        && result.code == GaudereChatTurnCode::timeout
+        && result.task_id == new_task
+        && result.current_revision && *result.current_revision == 3
+        && !session.has_ambiguous_attempt();
+}
+
+bool overdue_success_is_not_accepted_test()
+{
+    int step = 0;
+    int submit_count = 0;
+    auto now = std::chrono::steady_clock::time_point{};
+    std::string request_id;
+    auto transport = [&](const LiveControlCommand& command,
+                         const std::chrono::milliseconds budget) {
+        ++step;
+        if (step == 1) {
+            return GaudereChatTransportReply{0, head_report(2, old_head)};
+        }
+        if (step == 2) {
+            ++submit_count;
+            request_id = command.id;
+            return GaudereChatTransportReply{0, submit_report(3)};
+        }
+        if (command.operation != LiveControlOperation::inspect_task
+            || budget != std::chrono::milliseconds{10}) {
+            return GaudereChatTransportReply{9, "wrong Task inspection"};
+        }
+        now += std::chrono::milliseconds{11}; // malicious/broken fake transport
+        return GaudereChatTransportReply{0, succeeded_task_report(request_id)};
+    };
+    auto clock = [&] { return now; };
+    gaudere_agent::GaudereChatOptions options;
+    options.timeout = std::chrono::milliseconds{10};
+    GaudereChatSession session(
+        transport, "0011223344556677", options, clock);
+    const auto result = session.send_turn("Salut");
+    return step == 3 && submit_count == 1
+        && result.code == GaudereChatTurnCode::timeout
+        && result.task_id == new_task && result.request_id == request_id
+        && result.response.empty()
         && !session.has_ambiguous_attempt();
 }
 
@@ -321,7 +414,7 @@ bool noncanonical_response_test()
 {
     int step = 0;
     std::string request_id;
-    auto transport = [&](const LiveControlCommand& command) {
+    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
         ++step;
         if (step == 1) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
@@ -351,6 +444,8 @@ int main()
         {"ambiguous_exact_retry_test", ambiguous_exact_retry_test},
         {"task_inspection_io_timeout_test", task_inspection_io_timeout_test},
         {"timeout_test", timeout_test},
+        {"cumulative_inspection_budget_test", cumulative_inspection_budget_test},
+        {"overdue_success_is_not_accepted_test", overdue_success_is_not_accepted_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
 
