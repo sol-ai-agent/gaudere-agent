@@ -652,6 +652,12 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
     }
 }
 
+std::optional<std::string> GaudereChatSession::last_verified_committed_task_id() const
+{
+    if (!last_committed_) return std::nullopt;
+    return last_committed_->task_id;
+}
+
 bool GaudereChatSession::has_ambiguous_attempt() const noexcept
 {
     return ambiguous_attempt_.has_value();
