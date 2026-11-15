@@ -53,6 +53,15 @@ enum class GaudereChatTurnCode {
     invalid_reply
 };
 
+// A bounded, read-only snapshot of an existing V3 dialogue Task.
+// A status alone is NOT a verified/canonical dialogue response or an ACK.
+struct GaudereChatTaskInspection {
+    bool ok = false;
+    std::string task_id;
+    std::string status;
+    std::string detail;
+};
+
 struct GaudereChatTurnResult {
     GaudereChatTurnCode code = GaudereChatTurnCode::invalid_reply;
     std::string request_id;
@@ -74,6 +83,7 @@ public:
         GaudereChatSleeper sleeper = {});
 
     [[nodiscard]] GaudereChatHeadResult inspect_head() const;
+    [[nodiscard]] GaudereChatTaskInspection inspect_task(const std::string& task_id) const;
     [[nodiscard]] GaudereChatTurnResult send_turn(const std::string& message);
     [[nodiscard]] GaudereChatTurnResult retry_ambiguous();
 
