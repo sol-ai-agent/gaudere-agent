@@ -84,16 +84,13 @@ int main(int argc, char* argv[])
             }
         }
 
-        auto transport = [&socket_path, &options](
-            const gaudere_agent::LiveControlCommand& command) {
+        auto transport = [&socket_path](
+            const gaudere_agent::LiveControlCommand& command,
+            const std::chrono::milliseconds remaining_budget) {
             std::ostringstream output;
             std::ostringstream error;
-            const auto io_timeout =
-                command.operation == gaudere_agent::LiveControlOperation::inspect_task
-                    ? options.timeout
-                    : options.io_timeout;
             const int code = gaudere_agent::run_live_control_client(
-                socket_path, command, output, error, io_timeout);
+                socket_path, command, output, error, remaining_budget);
             std::string body = code == 0 ? output.str() : error.str();
             if (body.empty()) body = output.str() + error.str();
             return gaudere_agent::GaudereChatTransportReply{
