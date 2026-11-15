@@ -471,6 +471,12 @@ bool read_only_task_rejects_malformed_or_unavailable_report_test()
         {0, "id=\"" + new_task + "\"\n"
             "kind=\"cognition.local-goose-dialogue.v3\"\nstatus=granted\n"},
         {0, "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\n"
+            "status=running\nstatus=succeeded\n"},
+        {0, "id=\"" + old_head + "\"\n"
+            "id=\"" + new_task + "\"\n"
+            "kind=\"cognition.local-goose-dialogue.v3\"\nstatus=running\n"},
+        {0, "id=\"" + new_task + "\"\n"
             "kind=\"cognition.local-goose-dialogue.v3\"\n"},
         {0, "id=\"" + new_task + "\"\n"
             "kind=\"cognition.local-goose-dialogue.v3\"\nstatus=\"bad\\q\"\n"},
