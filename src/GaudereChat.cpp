@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -300,7 +301,7 @@ GaudereChatHeadResult GaudereChatSession::inspect_head() const
     LiveControlCommand command;
     command.operation = LiveControlOperation::inspect_local_goose_dialogue_thread_head;
     command.id = options_.thread_alias;
-    const auto reply = transport_(command);
+    const auto reply = transport_(command, options_.io_timeout);
     if (reply.code != 0) {
         return GaudereChatHeadResult{
             false, {}, reply.body.empty()
@@ -380,7 +381,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     command.message_kind = local_goose_dialogue_v3_message_dialogue;
     command.text = attempt.message;
 
-    const auto reply = transport_(command);
+    const auto reply = transport_(command, options_.io_timeout);
     if (reply.code == 1) {
         ambiguous_attempt_ = attempt;
         GaudereChatTurnResult out;
@@ -463,11 +464,33 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
     const std::string& task_id)
 {
     const auto deadline = clock_() + options_.timeout;
+    // A committed Task must never be resubmitted after observation times out.
+    const auto timed_out = [&]() {
+        GaudereChatTurnResult out;
+        out.code = GaudereChatTurnCode::timeout;
+        out.request_id = attempt.request_id;
+        out.task_id = task_id;
+        out.expected_revision = attempt.head.revision;
+        out.current_revision = attempt.head.revision + 1;
+        out.detail = "submitted Task is still non-terminal after bounded wait";
+        return out;
+    };
     for (;;) {
+        const auto now = clock_();
+        if (now >= deadline) return timed_out();
+        // Round down to avoid exceeding the remaining monotonic budget.
+        // If less than 1 ms remains, fail closed instead of issuing a fresh RPC.
+        const auto remaining = std::chrono::duration_cast<
+            std::chrono::milliseconds>(deadline - now);
+        if (remaining.count() <= 0) return timed_out();
+
         LiveControlCommand command;
         command.operation = LiveControlOperation::inspect_task;
         command.id = task_id;
-        const auto reply = transport_(command);
+        const auto reply = transport_(command, remaining);
+        // A test transport can violate its budget; refuse an overdue
+        // success just as the production transport would time out.
+        if (clock_() >= deadline) return timed_out();
         if (reply.code != 0) {
             GaudereChatTurnResult out;
             out.code = reply.code == 1
@@ -533,17 +556,12 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
             return malformed(attempt.request_id, attempt.head.revision, "submitted Task status is unknown");
         }
 
-        if (clock_() >= deadline) {
-            GaudereChatTurnResult out;
-            out.code = GaudereChatTurnCode::timeout;
-            out.request_id = attempt.request_id;
-            out.task_id = task_id;
-            out.expected_revision = attempt.head.revision;
-            out.current_revision = attempt.head.revision + 1;
-            out.detail = "submitted Task is still non-terminal after bounded wait";
-            return out;
-        }
-        sleeper_(options_.poll_interval);
+        const auto after = clock_();
+        if (after >= deadline) return timed_out();
+        const auto sleep_budget = std::chrono::duration_cast<
+            std::chrono::milliseconds>(deadline - after);
+        if (sleep_budget.count() <= 0) return timed_out();
+        sleeper_(std::min(options_.poll_interval, sleep_budget));
     }
 }
 
