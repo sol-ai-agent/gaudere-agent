@@ -316,6 +316,55 @@ GaudereChatHeadResult GaudereChatSession::inspect_head() const
     return GaudereChatHeadResult{true, *head, {}};
 }
 
+GaudereChatTaskInspection GaudereChatSession::inspect_task(
+    const std::string& task_id) const
+{
+    GaudereChatTaskInspection out;
+    out.task_id = task_id;
+    // Only a canonical durable dialogue V3 Task ID is accepted. No
+    // arbitrary local Task IDs or user-selected operations are forwarded.
+    constexpr const char* v3_prefix = "cognition.local-goose-dialogue.v3:";
+    if (task_id.rfind(v3_prefix, 0) != 0 || !dialogue_task_id(task_id)) {
+        out.detail = "expected a canonical local-goose-dialogue V3 Task ID";
+        return out;
+    }
+
+    LiveControlCommand command;
+    command.operation = LiveControlOperation::inspect_task;
+    command.id = task_id;
+    // Unlike the post-commit polling loop, this is exactly one read-only
+    // request and uses the independent --io-timeout-ms bound.
+    const auto reply = transport_(command, options_.io_timeout);
+    if (reply.code != 0) {
+        out.detail = reply.body.empty()
+            ? "read-only Task inspection did not complete"
+            : reply.body;
+        return out;
+    }
+
+    try {
+        const auto fields = parse_report(reply.body);
+        const auto id = fields.find("id");
+        const auto kind = fields.find("kind");
+        const auto status = fields.find("status");
+        if (id == fields.end() || kind == fields.end() || status == fields.end()
+            || id->second != task_id
+            || kind->second != local_goose_dialogue_v3_task_kind
+            || (!active_status(status->second) && !terminal_status(status->second))) {
+            out.detail = "read-only Task identity, kind or status is invalid";
+            return out;
+        }
+        out.ok = true;
+        out.status = status->second;
+        // Deliberately do not decode or display result_output. The report's
+        // status is not proof of a canonical V3 reply, an ACK, or authority.
+        return out;
+    } catch (const std::exception&) {
+        out.detail = "read-only Task report is malformed";
+        return out;
+    }
+}
+
 std::string GaudereChatSession::next_request_id(const std::string& message)
 {
     if (next_turn_ == std::numeric_limits<std::uint64_t>::max()) {
