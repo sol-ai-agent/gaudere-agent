@@ -13,6 +13,7 @@ on:
       - 'src/GaudereChatInput.hpp'
       - 'docs/gaudere-chat-slash-command-routing-v1.md'
       - 'docs/gaudere-chat-preserve-task-recovery-on-invalid-reply.md'
+      - 'docs/gaudere-chat-unique-report-fields-v1.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
   push:
@@ -28,6 +29,7 @@ on:
       - 'src/GaudereChatInput.hpp'
       - 'docs/gaudere-chat-slash-command-routing-v1.md'
       - 'docs/gaudere-chat-preserve-task-recovery-on-invalid-reply.md'
+      - 'docs/gaudere-chat-unique-report-fields-v1.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
 
@@ -91,6 +93,10 @@ jobs:
             ../tests/gaudere_chat_test.cpp
           grep -Fq 'malformed_unverified_commit_has_no_recovery_identity_test' \
             ../tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate_head_key_rejected_before_submit_test' ../tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate_commit_key_rejected_without_fake_commit_test' ../tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate_task_key_rejected_with_proven_identity_test' ../tests/gaudere_chat_test.cpp
+          grep -Fq 'duplicate live-control report field' ../src/GaudereChat.cpp
           grep -Fq 'do not resubmit' ../src/chat_main.cpp
           # Run the real CLI with NO socket: typos must remain purely local.
           printf '/wai\n/retry extra\n/task extra argument\n/help now\n/quit\n' |
