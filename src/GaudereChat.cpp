@@ -343,6 +343,24 @@ GaudereChatTaskInspection GaudereChatSession::inspect_task(
     }
 
     try {
+        // parse_report is intentionally tolerant for older control reports.
+        // This new status-only surface must not accept conflicting duplicate
+        // identity/kind/status lines that the generic map would overwrite.
+        const auto unique_field = [&](const std::string& field) {
+            std::istringstream input(reply.body);
+            const auto prefix = field + "=";
+            std::string line;
+            int occurrences = 0;
+            while (std::getline(input, line)) {
+                if (line.rfind(prefix, 0) == 0) ++occurrences;
+            }
+            return occurrences == 1;
+        };
+        if (!unique_field("id") || !unique_field("kind")
+            || !unique_field("status")) {
+            out.detail = "read-only Task report has missing or duplicated fields";
+            return out;
+        }
         const auto fields = parse_report(reply.body);
         const auto id = fields.find("id");
         const auto kind = fields.find("kind");
