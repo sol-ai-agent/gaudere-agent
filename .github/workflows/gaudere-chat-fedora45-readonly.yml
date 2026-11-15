@@ -1,0 +1,78 @@
+name: Fedora 45 gaudere-chat read-only recovery
+
+on:
+  pull_request:
+    paths:
+      - 'src/GaudereChat.hpp'
+      - 'src/GaudereChat.cpp'
+      - 'src/chat_main.cpp'
+      - 'tests/gaudere_chat_test.cpp'
+      - '.github/workflows/gaudere-chat-fedora45-readonly.yml'
+      - 'docs/gaudere-chat-read-only-task-lookup.md'
+  push:
+    branches: [main]
+    paths:
+      - 'src/GaudereChat.hpp'
+      - 'src/GaudereChat.cpp'
+      - 'src/chat_main.cpp'
+      - 'tests/gaudere_chat_test.cpp'
+      - '.github/workflows/gaudere-chat-fedora45-readonly.yml'
+      - 'docs/gaudere-chat-read-only-task-lookup.md'
+
+permissions:
+  contents: read
+
+jobs:
+  fedora45-chat-unit:
+    runs-on: ubuntu-latest
+    container: fedora:45
+    timeout-minutes: 30
+    steps:
+      - name: Fedora 45 build prerequisites
+        run: >
+          dnf install -y
+          autoconf automake gcc-c++ git json-devel libcurl-devel
+          libtool make pkgconf-pkg-config sqlite-devel
+      - uses: actions/checkout@v4
+        with:
+          path: agent
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: sol-ai-agent/gaudere
+          path: gaudere
+          fetch-depth: 0
+      - name: Build pinned Gaudere core (Fedora 45)
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_ref=$(tr -d '\r\n' < agent/gaudere.ref)
+          git -C gaudere checkout --detach "$core_ref"
+          cd gaudere
+          autoreconf --install --force
+          mkdir build
+          cd build
+          ../configure --prefix="$GITHUB_WORKSPACE/prefix" \
+            CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2
+          make install
+      - name: Compile gaudere-chat and test real syntax and read-only semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
+          cd agent
+          autoreconf --install --force
+          mkdir build-chat
+          cd build-chat
+          ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
+          make --jobs=2 -C src gaudere-chat
+          make --jobs=2 -C tests gaudere_chat_test live_control_test
+          tests/gaudere_chat_test
+          tests/live_control_test
+          src/gaudere-chat --help 2>&1 | grep -F '/task ID'
+          grep -Fq 'LiveControlOperation::inspect_task' ../src/GaudereChat.cpp
+          grep -Fq 'read_only_task_after_timeout_never_resubmits_test' \
+            ../tests/gaudere_chat_test.cpp
+          echo GAUDERE_CHAT_FEDORA45_READ_ONLY_RECOVERY=PASS
