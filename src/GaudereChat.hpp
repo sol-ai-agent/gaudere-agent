@@ -17,7 +17,8 @@ struct GaudereChatTransportReply {
 };
 
 using GaudereChatTransport =
-    std::function<GaudereChatTransportReply(const LiveControlCommand&)>;
+    std::function<GaudereChatTransportReply(
+        const LiveControlCommand&, std::chrono::milliseconds io_budget)>;
 using GaudereChatClock =
     std::function<std::chrono::steady_clock::time_point()>;
 using GaudereChatSleeper =
