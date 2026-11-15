@@ -161,6 +161,7 @@ gaudere_chat_SOURCES = \
 	chat_main.cpp \
 	GaudereChat.cpp \
 	GaudereChat.hpp \
+	GaudereChatInput.hpp \
 	LiveControl.cpp \
 	LiveControl.hpp \
 	LocalGooseDialogueV3.hpp \
