@@ -89,6 +89,9 @@ public:
     [[nodiscard]] GaudereChatTurnResult wait_last_committed();
     // Local memory only: never populate this from a status-only Task lookup.
     [[nodiscard]] std::optional<std::string> last_verified_committed_task_id() const;
+    // Canonically validated answer of the last committed Task, in this process.
+    // No transport, status-only lookup, disk state or provider side effects.
+    [[nodiscard]] std::optional<std::string> last_verified_response() const;
 
     [[nodiscard]] bool has_ambiguous_attempt() const noexcept;
     [[nodiscard]] std::string ambiguous_message() const;
@@ -106,6 +109,7 @@ private:
     struct CommittedAttempt {
         Attempt attempt;
         std::string task_id;
+        std::optional<std::string> verified_response;
     };
 
     [[nodiscard]] GaudereChatTurnResult submit_attempt(const Attempt& attempt);
