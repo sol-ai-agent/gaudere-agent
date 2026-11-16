@@ -412,16 +412,25 @@ void test_stop_cancels_cooperative_running_handler()
            "blocking task is submitted");
     expect(harness.controller.start(), "controller starts for blocking task");
 
+    // A failed dispatch must not leave the test's helper thread spinning
+    // forever. If the handler is never entered, request stop after a bounded
+    // deadline and report the missing dispatch as a test failure.
+    std::atomic_bool handler_entered_before_stop{false};
     std::thread stopper([&] {
-        while (!harness.blocking.entered.load()) {
+        const auto deadline = std::chrono::steady_clock::now() + 5s;
+        while (!harness.blocking.entered.load()
+               && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(1ms);
         }
+        handler_entered_before_stop.store(harness.blocking.entered.load());
         harness.controller.stop();
     });
 
     expect(harness.controller.wait_and_run() == WorkCycleResult::stopped,
            "worker drains after cooperative handler observes stop");
     stopper.join();
+    expect(handler_entered_before_stop.load(),
+           "cooperative handler entered before bounded stop deadline");
 
     const auto task = harness.store.find("blocking");
     expect(task && task->status == TaskStatus::cancelled && task->result
