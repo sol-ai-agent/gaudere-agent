@@ -625,6 +625,12 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
             out.request_id = attempt.request_id;
             out.task_id = task_id;
             out.response = *response;
+            // Only this fully canonical V3 response can populate /again.
+            // A new verified commit always resets the old answer cache.
+            if (last_committed_ && last_committed_->task_id == task_id
+                && last_committed_->attempt.request_id == attempt.request_id) {
+                last_committed_->verified_response = *response;
+            }
             out.expected_revision = attempt.head.revision;
             out.current_revision = attempt.head.revision + 1;
             return out;
@@ -656,6 +662,12 @@ std::optional<std::string> GaudereChatSession::last_verified_committed_task_id()
 {
     if (!last_committed_) return std::nullopt;
     return last_committed_->task_id;
+}
+
+std::optional<std::string> GaudereChatSession::last_verified_response() const
+{
+    if (!last_committed_) return std::nullopt;
+    return last_committed_->verified_response;
 }
 
 bool GaudereChatSession::has_ambiguous_attempt() const noexcept
