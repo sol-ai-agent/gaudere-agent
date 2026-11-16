@@ -160,6 +160,8 @@ bool successful_turn_test()
         && result.request_id == request_id
         && result.task_id == new_task
         && result.response == "Bonjour Bertrand."
+        && session.last_verified_response()
+        && *session.last_verified_response() == "Bonjour Bertrand."
         && session.last_verified_committed_task_id()
         && *session.last_verified_committed_task_id() == new_task
         && result.current_revision
@@ -599,8 +601,11 @@ bool wait_last_committed_recovers_canonical_response_test()
         || first.request_id != request_id || calls != 3 || submits != 1
         || inspections != 1 || session.has_ambiguous_attempt()) return false;
 
+    if (session.last_verified_response()) return false;
     const auto resumed = session.wait_last_committed();
     return resumed.code == GaudereChatTurnCode::succeeded
+        && session.last_verified_response()
+        && *session.last_verified_response() == "Bonjour Bertrand."
         && resumed.response == "Bonjour Bertrand."
         && resumed.task_id == new_task && resumed.request_id == request_id
         && resumed.current_revision && *resumed.current_revision == 3
@@ -619,7 +624,8 @@ bool wait_last_without_commit_fails_closed_test()
     };
     GaudereChatSession session(transport, "0123456789abcdef");
     const auto result = session.wait_last_committed();
-    return calls == 0 && !session.last_verified_committed_task_id()
+    return calls == 0 && !session.last_verified_response()
+        && !session.last_verified_committed_task_id()
         && result.code == GaudereChatTurnCode::invalid_reply
         && result.task_id.empty() && result.response.empty()
         && result.detail.find("no verified committed") != std::string::npos;
@@ -651,6 +657,7 @@ bool wait_last_ambiguous_not_upgraded_to_commit_test()
     return wait.code == GaudereChatTurnCode::invalid_reply
         && calls == 2 && submits == 1 && session.has_ambiguous_attempt()
         && !session.last_verified_committed_task_id()
+        && !session.last_verified_response()
         && session.ambiguous_message() == "Salut";
 }
 
@@ -693,6 +700,7 @@ bool wait_last_rejects_forged_v3_response_test()
     return reads == 2 && submits == 1
         && resumed.code == GaudereChatTurnCode::invalid_reply
         && resumed.response.empty()
+        && !session.last_verified_response()
         && resumed.detail.find("not canonical v3") != std::string::npos
         && !session.has_ambiguous_attempt();
 }
@@ -713,7 +721,80 @@ bool status_only_lookup_cannot_create_last_verified_commit_test()
     if (!status.ok || status.status != "running" || calls != 1)
         return false;
     // Task status is not proof that THIS session committed it.
-    return !session.last_verified_committed_task_id() && calls == 1;
+    return !session.last_verified_committed_task_id()
+        && !session.last_verified_response() && calls == 1;
+}
+
+bool canonical_cache_cleared_by_new_verified_commit_test()
+{
+    const std::string second_task =
+        "cognition.local-goose-dialogue.v3:" + std::string(64, 'a');
+    auto now = std::chrono::steady_clock::time_point{};
+    int heads = 0;
+    int submits = 0;
+    int inspections = 0;
+    std::string first_request;
+    const auto transport = [&](const LiveControlCommand& command,
+                               const std::chrono::milliseconds) {
+        if (command.operation
+                == LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+            ++heads;
+            return GaudereChatTransportReply{
+                0, heads == 1 ? head_report(2, old_head)
+                              : head_report(3, new_task)};
+        }
+        if (command.operation
+                == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+            ++submits;
+            if (submits == 1) {
+                first_request = command.id;
+                return GaudereChatTransportReply{0, submit_report(3)};
+            }
+            std::string report = submit_report(4);
+            const auto pos = report.find(new_task);
+            if (pos == std::string::npos)
+                return GaudereChatTransportReply{9, "bad fixture"};
+            // Replace both commit id and preferred head ID; do not
+            // manufacture a success response for the second Task.
+            for (std::size_t at = report.find(new_task);
+                 at != std::string::npos;
+                 at = report.find(new_task, at + second_task.size())) {
+                report.replace(at, new_task.size(), second_task);
+            }
+            return GaudereChatTransportReply{0, report};
+        }
+        if (command.operation == LiveControlOperation::inspect_task) {
+            ++inspections;
+            if (command.id == new_task)
+                return GaudereChatTransportReply{
+                    0, succeeded_task_report(first_request)};
+            std::string pending = pending_task_report();
+            const auto pos = pending.find(new_task);
+            if (pos == std::string::npos)
+                return GaudereChatTransportReply{9, "bad fixture"};
+            pending.replace(pos, new_task.size(), second_task);
+            return GaudereChatTransportReply{0, pending};
+        }
+        return GaudereChatTransportReply{9, "unexpected operation"};
+    };
+    gaudere_agent::GaudereChatOptions options;
+    options.timeout = std::chrono::milliseconds{2};
+    options.poll_interval = std::chrono::milliseconds{2};
+    const auto clock = [&] { return now; };
+    const auto sleeper = [&](std::chrono::milliseconds delay) { now += delay; };
+    GaudereChatSession session(transport, "0123456789abcdef", options, clock, sleeper);
+
+    const auto first = session.send_turn("Salut");
+    if (first.code != GaudereChatTurnCode::succeeded
+        || session.last_verified_response() != "Bonjour Bertrand."
+        || session.last_verified_committed_task_id() != new_task)
+        return false;
+    const auto second = session.send_turn("Autre");
+    return second.code == GaudereChatTurnCode::timeout
+        && second.task_id == second_task
+        && session.last_verified_committed_task_id() == second_task
+        && !session.last_verified_response()
+        && heads == 2 && submits == 2 && inspections == 2;
 }
 
 bool slash_command_routing_test()
@@ -732,6 +813,7 @@ bool slash_command_routing_test()
         {"/help", GaudereChatInputKind::help, ""},
         {"/head", GaudereChatInputKind::head, ""},
         {"/last", GaudereChatInputKind::last, ""},
+        {"/again", GaudereChatInputKind::again, ""},
         {"/wait", GaudereChatInputKind::wait, ""},
         {"/retry", GaudereChatInputKind::retry, ""},
         {"/quit", GaudereChatInputKind::quit, ""},
@@ -739,6 +821,7 @@ bool slash_command_routing_test()
         {"//help", GaudereChatInputKind::text, "/help"},
         {"//wait", GaudereChatInputKind::text, "/wait"},
         {"//last", GaudereChatInputKind::text, "/last"},
+        {"//again", GaudereChatInputKind::text, "/again"},
         {"//task " + new_task, GaudereChatInputKind::text, "/task " + new_task},
         {"//", GaudereChatInputKind::text, "/"},
         {"///bonjour", GaudereChatInputKind::text, "//bonjour"},
@@ -748,6 +831,8 @@ bool slash_command_routing_test()
         {"/help now", GaudereChatInputKind::unknown_command, "/help now"},
         {"/head now", GaudereChatInputKind::unknown_command, "/head now"},
         {"/last now", GaudereChatInputKind::unknown_command, "/last now"},
+        {"/again now", GaudereChatInputKind::unknown_command, "/again now"},
+        {"/AGAIN", GaudereChatInputKind::unknown_command, "/AGAIN"},
         {"/LAST", GaudereChatInputKind::unknown_command, "/LAST"},
         {"/wait now", GaudereChatInputKind::unknown_command, "/wait now"},
         {"/retry now", GaudereChatInputKind::unknown_command, "/retry now"},
@@ -1035,6 +1120,8 @@ int main()
         {"wait_last_rejects_forged_v3_response_test",
          wait_last_rejects_forged_v3_response_test},
         {"slash_command_routing_test", slash_command_routing_test},
+        {"canonical_cache_cleared_by_new_verified_commit_test",
+         canonical_cache_cleared_by_new_verified_commit_test},
         {"status_only_lookup_cannot_create_last_verified_commit_test",
          status_only_lookup_cannot_create_last_verified_commit_test},
         {"malformed_post_commit_observation_preserves_recovery_test",
