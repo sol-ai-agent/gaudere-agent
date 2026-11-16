@@ -236,10 +236,10 @@ int main(int argc, char* argv[])
                 break;
             case gaudere_agent::GaudereChatTurnCode::transport_ambiguous:
                 std::cerr
-                    << "gaudere-chat: submission/inspection transport state is "
+                    << "gaudere-chat: submission or commit verification is "
                     << "ambiguous. Do not create a new message; use /retry for "
-                    << "the exact preserved attempt.\n"
-                    << result.detail;
+                    << "the exact preserved request identity.\n"
+                    << result.detail << '\n';
                 break;
             case gaudere_agent::GaudereChatTurnCode::timeout:
                 std::cerr
