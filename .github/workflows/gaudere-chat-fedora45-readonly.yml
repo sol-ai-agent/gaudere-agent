@@ -16,6 +16,7 @@ on:
       - 'docs/gaudere-chat-unique-report-fields-v1.md'
       - 'docs/gaudere-chat-last-verified-task-v1.md'
       - 'docs/gaudere-chat-repeat-canonical-response-v1.md'
+      - 'docs/gaudere-chat-unverified-positive-commit-v1.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
   push:
@@ -34,6 +35,7 @@ on:
       - 'docs/gaudere-chat-unique-report-fields-v1.md'
       - 'docs/gaudere-chat-last-verified-task-v1.md'
       - 'docs/gaudere-chat-repeat-canonical-response-v1.md'
+      - 'docs/gaudere-chat-unverified-positive-commit-v1.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
 
@@ -98,6 +100,8 @@ jobs:
           grep -Fq 'status_only_lookup_cannot_create_last_verified_commit_test' \
             ../tests/gaudere_chat_test.cpp
           grep -Fq 'canonical_cache_cleared_by_new_verified_commit_test' \
+            ../tests/gaudere_chat_test.cpp
+          grep -Fq 'mismatched_positive_commit_report_remains_ambiguous_test' \
             ../tests/gaudere_chat_test.cpp
           grep -Fq 'malformed_post_commit_observation_preserves_recovery_test' \
             ../tests/gaudere_chat_test.cpp
