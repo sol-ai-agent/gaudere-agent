@@ -934,30 +934,71 @@ bool malformed_post_commit_observation_preserves_recovery_test()
 
 bool malformed_unverified_commit_has_no_recovery_identity_test()
 {
+    int heads = 0;
     int submissions = 0;
+    int inspections = 0;
+    std::string first_request;
     auto transport = [&](const LiveControlCommand& command,
                          const std::chrono::milliseconds) {
         if (command.operation
             == LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+            ++heads;
             return GaudereChatTransportReply{0, head_report(2, old_head)};
         }
         if (command.operation
             == LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
             ++submissions;
-            return GaudereChatTransportReply{0, "status=pending\n"};
+            if (submissions == 1) {
+                first_request = command.id;
+                return GaudereChatTransportReply{0, "status=pending\n"};
+            }
+            if (command.id != first_request
+                || !check_command_common(command, first_request)) {
+                return GaudereChatTransportReply{9, "retry changed request identity"};
+            }
+            return GaudereChatTransportReply{0, submit_report(3)};
         }
-        return GaudereChatTransportReply{9, "unexpected operation"};
+        ++inspections;
+        if (command.operation != LiveControlOperation::inspect_task
+            || command.id != new_task) {
+            return GaudereChatTransportReply{9, "unexpected Task inspection"};
+        }
+        return GaudereChatTransportReply{
+            0, succeeded_task_report(first_request)};
     };
     GaudereChatSession session(transport, "0123456789abcdef");
     const auto bad = session.send_turn("Salut");
-    if (bad.code != GaudereChatTurnCode::invalid_reply
+    if (bad.code != GaudereChatTurnCode::transport_ambiguous
         || !bad.task_id.empty() || bad.current_revision
-        || bad.response != "" || submissions != 1)
-        return false;
+        || !bad.response.empty() || submissions != 1 || heads != 1
+        || inspections != 0 || bad.request_id != first_request
+        || !session.has_ambiguous_attempt()
+        || session.ambiguous_message() != "Salut"
+        || session.last_verified_committed_task_id()
+        || session.last_verified_response()) return false;
+
+    // A successful transport response with an unverifiable commit is NOT
+    // proof that it was rejected. Blocking a different message must be local.
+    const auto blocked = session.send_turn("Autre");
     const auto wait = session.wait_last_committed();
-    return wait.code == GaudereChatTurnCode::invalid_reply
-        && wait.task_id.empty() && submissions == 1
-        && !session.has_ambiguous_attempt();
+    if (blocked.code != GaudereChatTurnCode::transport_ambiguous
+        || blocked.request_id != first_request
+        || wait.code != GaudereChatTurnCode::invalid_reply
+        || !wait.task_id.empty()
+        || heads != 1 || submissions != 1 || inspections != 0)
+        return false;
+
+    // Only the user's explicit retry can resend, and it must preserve all
+    // original submission fields and idempotency key exactly.
+    const auto retried = session.retry_ambiguous();
+    return retried.code == GaudereChatTurnCode::succeeded
+        && retried.request_id == first_request
+        && retried.task_id == new_task
+        && retried.response == "Bonjour Bertrand."
+        && heads == 1 && submissions == 2 && inspections == 1
+        && !session.has_ambiguous_attempt()
+        && session.last_verified_committed_task_id() == new_task
+        && session.last_verified_response() == "Bonjour Bertrand.";
 }
 
 bool duplicate_head_key_rejected_before_submit_test()
@@ -1010,12 +1051,68 @@ bool duplicate_commit_key_rejected_without_fake_commit_test()
         GaudereChatSession session(transport, "0123456789abcdef");
         const auto result = session.send_turn("Salut");
         const auto wait = session.wait_last_committed();
+        const auto blocked = session.send_turn("Autre");
         if (submits != 1 || inspections != 0
-            || result.code != GaudereChatTurnCode::invalid_reply
+            || result.code != GaudereChatTurnCode::transport_ambiguous
             || !result.task_id.empty() || result.current_revision
             || !result.response.empty()
+            || !session.has_ambiguous_attempt()
+            || blocked.code != GaudereChatTurnCode::transport_ambiguous
+            || blocked.request_id != result.request_id
             || wait.code != GaudereChatTurnCode::invalid_reply
-            || !wait.task_id.empty()) return false;
+            || !wait.task_id.empty()
+            || session.last_verified_committed_task_id()
+            || session.last_verified_response()) return false;
+    }
+    return true;
+}
+
+bool mismatched_positive_commit_report_remains_ambiguous_test()
+{
+    // A syntactically sound but semantically wrong success report is still
+    // possibly post-side-effect. Never upgrade it to a verified commit.
+    const std::vector<std::string> wrong_reports{
+        submit_report(4), // wrong committed revision
+        "id=\"" + new_task + "\"\n"
+        "kind=\"cognition.local-goose-dialogue.v3\"\n"
+        "alias=\"other\"\n"
+        "revision=3\n"
+        "root_task_id=\"" + old_head + "\"\n"
+        "head_task_id=\"" + new_task + "\"\n",
+        "id=\"" + new_task + "\"\n"
+        "kind=\"cognition.local-goose-dialogue.v3\"\n"
+        "alias=\"main\"\n"
+        "revision=3\n"
+        "root_task_id=\"" + old_head + "\"\n"
+        "head_task_id=\"" + old_head + "\"\n"
+    };
+    for (const auto& wrong : wrong_reports) {
+        int calls = 0;
+        std::string request_id;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds) {
+            ++calls;
+            if (command.operation ==
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head)
+                return GaudereChatTransportReply{0, head_report(2, old_head)};
+            if (command.operation ==
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+                request_id = command.id;
+                return GaudereChatTransportReply{0, wrong};
+            }
+            return GaudereChatTransportReply{9, "unexpected Task inspection"};
+        };
+        GaudereChatSession session(transport, "0123456789abcdef");
+        const auto result = session.send_turn("Salut");
+        const auto blocked = session.send_turn("Autre");
+        if (calls != 2 || result.code != GaudereChatTurnCode::transport_ambiguous
+            || result.request_id != request_id || result.task_id != ""
+            || !session.has_ambiguous_attempt()
+            || blocked.code != GaudereChatTurnCode::transport_ambiguous
+            || blocked.request_id != request_id
+            || session.last_verified_committed_task_id()
+            || session.last_verified_response())
+            return false;
     }
     return true;
 }
@@ -1128,6 +1225,8 @@ int main()
          malformed_post_commit_observation_preserves_recovery_test},
         {"malformed_unverified_commit_has_no_recovery_identity_test",
          malformed_unverified_commit_has_no_recovery_identity_test},
+        {"mismatched_positive_commit_report_remains_ambiguous_test",
+         mismatched_positive_commit_report_remains_ambiguous_test},
         {"duplicate_head_key_rejected_before_submit_test",
          duplicate_head_key_rejected_before_submit_test},
         {"duplicate_commit_key_rejected_without_fake_commit_test",

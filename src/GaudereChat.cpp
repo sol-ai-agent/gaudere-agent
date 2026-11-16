@@ -468,9 +468,9 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         return out;
     }
 
-    ambiguous_attempt_.reset();
-
     if (reply.code != 0) {
+        // Definite non-timeout rejection: no successful commit report.
+        ambiguous_attempt_.reset();
         if (reply.code != 4) {
             return malformed(
                 attempt.request_id,
@@ -500,11 +500,26 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         return out;
     }
 
+    // A code=0 reply is not enough to prove a preferred-thread commit:
+    // the server may already have persisted a Task before the report was
+    // truncated or corrupted. Preserve the exact idempotent request for an
+    // explicit retry, and refuse all NEW dialogue submissions in the meantime.
+    const auto unverified_commit = [&](const char* reason) {
+        ambiguous_attempt_ = attempt;
+        GaudereChatTurnResult out;
+        out.code = GaudereChatTurnCode::transport_ambiguous;
+        out.request_id = attempt.request_id;
+        out.expected_revision = attempt.head.revision;
+        out.detail = std::string{reason}
+            + "; a durable commit may exist; retry only the exact request";
+        return out;
+    };
+
     std::map<std::string, std::string> fields;
     try {
         fields = parse_report(reply.body);
     } catch (...) {
-        return malformed(attempt.request_id, attempt.head.revision, "preferred dialogue submission report is invalid");
+        return unverified_commit("preferred dialogue submission report is invalid");
     }
 
     const auto id = fields.find("id");
@@ -521,18 +536,19 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         || alias->second != attempt.head.alias
         || root->second != attempt.head.root_task_id
         || head_task->second != id->second) {
-        return malformed(attempt.request_id, attempt.head.revision, "preferred dialogue commit report differs");
+        return unverified_commit("preferred dialogue commit report differs");
     }
     const auto committed_revision = parse_uint64(revision->second);
     if (!committed_revision
         || attempt.head.revision == std::numeric_limits<std::uint64_t>::max()
         || *committed_revision != attempt.head.revision + 1) {
-        return malformed(attempt.request_id, attempt.head.revision, "preferred dialogue committed revision differs");
+        return unverified_commit("preferred dialogue committed revision differs");
     }
 
     // Record only AFTER parsing and verifying the durable commit response.
     // A timeout of subsequent observation must never erase this identity.
     last_committed_ = CommittedAttempt{attempt, id->second, std::nullopt};
+    ambiguous_attempt_.reset();
     return wait_for_task(attempt, id->second);
 }
 
