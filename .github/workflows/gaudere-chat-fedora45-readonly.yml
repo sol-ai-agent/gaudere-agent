@@ -15,6 +15,7 @@ on:
       - 'docs/gaudere-chat-preserve-task-recovery-on-invalid-reply.md'
       - 'docs/gaudere-chat-unique-report-fields-v1.md'
       - 'docs/gaudere-chat-last-verified-task-v1.md'
+      - 'docs/gaudere-chat-repeat-canonical-response-v1.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
   push:
@@ -32,6 +33,7 @@ on:
       - 'docs/gaudere-chat-preserve-task-recovery-on-invalid-reply.md'
       - 'docs/gaudere-chat-unique-report-fields-v1.md'
       - 'docs/gaudere-chat-last-verified-task-v1.md'
+      - 'docs/gaudere-chat-repeat-canonical-response-v1.md'
       - 'src/Makefile.am'
       - 'tests/Makefile.am'
 
@@ -90,9 +92,12 @@ jobs:
           src/gaudere-chat --help 2>&1 | grep -F '/task ID'
           src/gaudere-chat --help 2>&1 | grep -F '/wait'
           src/gaudere-chat --help 2>&1 | grep -F '/last'
+          src/gaudere-chat --help 2>&1 | grep -F '/again'
           src/gaudere-chat --help 2>&1 | grep -F '//text'
           grep -Fq 'slash_command_routing_test' ../tests/gaudere_chat_test.cpp
           grep -Fq 'status_only_lookup_cannot_create_last_verified_commit_test' \
+            ../tests/gaudere_chat_test.cpp
+          grep -Fq 'canonical_cache_cleared_by_new_verified_commit_test' \
             ../tests/gaudere_chat_test.cpp
           grep -Fq 'malformed_post_commit_observation_preserves_recovery_test' \
             ../tests/gaudere_chat_test.cpp
@@ -115,6 +120,13 @@ jobs:
           grep -Fq 'no verified committed Task in this session' local-last.out
           test "$(grep -c 'unknown local command' local-last.out)" = "1"
           ! grep -E 'cannot connect|transport state is ambiguous' local-last.out
+          # /again cannot open a socket, even with no prior verified reply.
+          printf '/again\n/again extra\n/quit\n' |
+            src/gaudere-chat --socket /nonexistent/gaudere-test.sock \
+              > local-again.out 2>&1
+          grep -Fq 'no canonically verified reply' local-again.out
+          test "$(grep -c 'unknown local command' local-again.out)" = "1"
+          ! grep -E 'cannot connect|transport state is ambiguous' local-again.out
           ! grep -E 'cannot connect|transport state is ambiguous|preferred thread advanced' command-routing.out
           grep -Fq 'LiveControlOperation::inspect_task' ../src/GaudereChat.cpp
           grep -Fq 'read_only_task_after_timeout_never_resubmits_test' \
