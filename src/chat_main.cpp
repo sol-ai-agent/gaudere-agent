@@ -38,6 +38,7 @@ void help()
         << "/help   show local commands\n"
         << "/head   inspect the current preferred thread head\n"
         << "/last   show the last locally verified committed Task ID (no I/O)\n"
+        << "/again  reprint the last canonically verified V3 answer (no I/O)\n"
         << "/task ID  inspect one previously submitted V3 Task (read-only)\n"
         << "/wait   wait again for the last verified committed Task (read-only)\n"
         << "/retry  explicitly retry the last conflicting or ambiguous message\n"
@@ -142,6 +143,18 @@ int main(int argc, char* argv[])
                               << *task_id << " for status only)\n";
                 } else {
                     std::cout << "gaudere-chat: no verified committed Task in this session\n";
+                }
+                continue;
+            }
+            if (input.kind == InputKind::again) {
+                // A canonical answer is kept only in the current session;
+                // this is not a new reply from a Task or provider.
+                const auto answer = session.last_verified_response();
+                if (answer) {
+                    std::cout << "Gaudere (cached)> " << *answer << '\n';
+                } else {
+                    std::cout << "gaudere-chat: no canonically verified reply "
+                                 "for the last committed Task in this session\n";
                 }
                 continue;
             }
