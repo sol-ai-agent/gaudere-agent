@@ -532,7 +532,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
 
     // Record only AFTER parsing and verifying the durable commit response.
     // A timeout of subsequent observation must never erase this identity.
-    last_committed_ = CommittedAttempt{attempt, id->second};
+    last_committed_ = CommittedAttempt{attempt, id->second, std::nullopt};
     return wait_for_task(attempt, id->second);
 }
 
