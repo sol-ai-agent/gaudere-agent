@@ -1305,6 +1305,66 @@ bool duplicate_task_key_rejected_with_proven_identity_test()
     return true;
 }
 
+bool zero_turn_successor_response_never_populates_cache_test()
+{
+    int heads = 0;
+    int submissions = 0;
+    int inspections = 0;
+    std::string request_id;
+    const auto transport = [&](const LiveControlCommand& command,
+                               const std::chrono::milliseconds) {
+        if (command.operation ==
+            LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+            ++heads;
+            return GaudereChatTransportReply{0, head_report(2, old_head)};
+        }
+        if (command.operation ==
+            LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+            ++submissions;
+            request_id = command.id;
+            return GaudereChatTransportReply{0, submit_report(3)};
+        }
+        if (command.operation != LiveControlOperation::inspect_task
+            || command.id != new_task)
+            return GaudereChatTransportReply{9, "unexpected operation"};
+        ++inspections;
+        if (inspections == 1) {
+            auto forged = Json::parse(response_json(request_id));
+            forged["turn_index"] = 0;
+            // JSON is canonical and all request/lineage IDs are unchanged.
+            // Only the root-only index violates a preferred-next successor.
+            return GaudereChatTransportReply{0,
+                "id=\"" + new_task + "\"\n"
+                "kind=\"cognition.local-goose-dialogue.v3\"\n"
+                "status=succeeded\n"
+                "result_content_type=\"application/vnd.gaudere.local-goose-dialogue-v3-response+json\"\n"
+                "result_output=" + quote_report(forged.dump()) + "\n"};
+        }
+        return GaudereChatTransportReply{
+            0, succeeded_task_report(request_id)};
+    };
+
+    GaudereChatSession session(transport, "0123456789abcdef");
+    const auto first = session.send_turn("Salut");
+    if (first.code != GaudereChatTurnCode::invalid_reply
+        || first.task_id != new_task || !first.response.empty()
+        || first.detail.find("not canonical v3") == std::string::npos
+        || heads != 1 || submissions != 1 || inspections != 1
+        || session.has_ambiguous_attempt()
+        || session.last_verified_committed_task_id() != new_task
+        || session.last_verified_response())
+        return false;
+
+    // /wait is read-only, uses the same proven commit, and can recover a
+    // later genuinely canonical reply without a second provider submit.
+    const auto recovered = session.wait_last_committed();
+    return recovered.code == GaudereChatTurnCode::succeeded
+        && recovered.task_id == new_task
+        && recovered.response == "Bonjour Bertrand."
+        && session.last_verified_response() == "Bonjour Bertrand."
+        && heads == 1 && submissions == 1 && inspections == 2;
+}
+
 bool noncanonical_response_test()
 {
     int step = 0;
@@ -1377,6 +1437,8 @@ int main()
          duplicate_commit_key_rejected_without_fake_commit_test},
         {"duplicate_task_key_rejected_with_proven_identity_test",
          duplicate_task_key_rejected_with_proven_identity_test},
+        {"zero_turn_successor_response_never_populates_cache_test",
+         zero_turn_successor_response_never_populates_cache_test},
         {"noncanonical_response_test", noncanonical_response_test}
     };
 

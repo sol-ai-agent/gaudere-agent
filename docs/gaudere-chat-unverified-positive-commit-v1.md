@@ -49,6 +49,20 @@ A code-4 conflict can only advertise a possible V3 orphan ID if its
 format is actually V3; it never promotes an unrelated V2 ID to a V3
 orphan identity.
 
+## Successor-only result envelope
+
+For `submit_local_goose_dialogue_v3_preferred_next`, a successful V3
+reply must describe a **successor turn**. `turn_index=0` is reserved for
+root dialogue Tasks and cannot be replayed as a successor answer, even if
+the JSON bytes are canonical and request/root/predecessor fields match.
+The session rejects a root-only response without clearing the already
+verified durable Task identity or populating the `/again` cache. A later
+explicit, read-only `/wait` may recover the correctly validated V3 reply
+without submitting another Task. This protects the client against a bogus
+success report; it does not independently prove the model SHA, predecessor
+result hash or the exact positive turn index without the canonical Task
+input (which the chat client does not retrieve).
+
 ## Non-success transport replies
 
 Only explicit server rejection `code=4` means the preferred-thread
