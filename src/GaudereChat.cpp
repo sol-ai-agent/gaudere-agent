@@ -235,6 +235,9 @@ std::optional<std::string> canonical_response(
             || parsed.value("message_kind", "") != local_goose_dialogue_v3_message_dialogue
             || !parsed.at("response").is_string()
             || !parsed.at("turn_index").is_number_unsigned()
+            // Preferred-next always commits a successor, never a root Task.
+            // Turn zero must not be promoted to a verified V3 reply.
+            || parsed.at("turn_index").get<std::uint64_t>() == 0
             || !parsed.at("root_task_id").is_string()
             || !parsed.at("predecessor_task_id").is_string()
             || !parsed.at("predecessor_result_sha256").is_string()
