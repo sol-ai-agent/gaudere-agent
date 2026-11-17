@@ -456,29 +456,26 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     command.text = attempt.message;
 
     const auto reply = transport_(command, options_.io_timeout);
-    if (reply.code == 1) {
+    // Only code 4 is a definite negative result for the preferred submit.
+    // In particular, code 2 can mean a server-side protocol/response-size
+    // failure AFTER it has made a durable change. Treat any other error as
+    // ambiguous and keep the exact request for explicit idempotent retry.
+    if (reply.code != 0 && reply.code != 4) {
         ambiguous_attempt_ = attempt;
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::transport_ambiguous;
         out.request_id = attempt.request_id;
         out.expected_revision = attempt.head.revision;
         out.detail = reply.body.empty()
-            ? "submission transport state is ambiguous"
+            ? "submission transport/protocol outcome is ambiguous"
             : reply.body;
         return out;
     }
 
-    if (reply.code != 0) {
-        // Definite non-timeout rejection: no successful commit report.
+    if (reply.code == 4) {
+        // The server explicitly rejected the preferred-thread commit; a
+        // durable orphan Task may still exist and is reported separately.
         ambiguous_attempt_.reset();
-        if (reply.code != 4) {
-            return malformed(
-                attempt.request_id,
-                attempt.head.revision,
-                reply.body.empty()
-                    ? "preferred dialogue submission failed"
-                    : reply.body);
-        }
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::conflict;
         out.request_id = attempt.request_id;

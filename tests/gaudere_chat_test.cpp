@@ -264,6 +264,90 @@ bool ambiguous_exact_retry_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool submit_protocol_error_retains_exact_retry_test()
+{
+    // A code-2 error can be emitted after the server changes durable state:
+    // response-too-large / protocol framing is not a reliable NO-COMMIT proof.
+    // Codes without an explicit rejection contract fail closed as well.
+    for (const int first_code : {1, 2, 3, 9}) {
+        int heads = 0;
+        int submits = 0;
+        int inspections = 0;
+        std::string original_request;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds) {
+            if (command.operation ==
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+                ++heads;
+                return GaudereChatTransportReply{0, head_report(2, old_head)};
+            }
+            if (command.operation ==
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+                ++submits;
+                if (submits == 1) {
+                    original_request = command.id;
+                    if (!check_command_common(command, original_request))
+                        return GaudereChatTransportReply{9, "bad original request"};
+                    return GaudereChatTransportReply{
+                        first_code, "protocol error after possible Task persistence"};
+                }
+                if (command.id != original_request
+                    || !check_command_common(command, original_request))
+                    return GaudereChatTransportReply{9, "retry changed identity"};
+                if (first_code == 2 && submits == 2)
+                    return GaudereChatTransportReply{
+                        2, "protocol error repeated after possible commit"};
+                return GaudereChatTransportReply{0, submit_report(3)};
+            }
+            ++inspections;
+            if (command.operation != LiveControlOperation::inspect_task
+                || command.id != new_task)
+                return GaudereChatTransportReply{9, "unexpected Task inspection"};
+            return GaudereChatTransportReply{
+                0, succeeded_task_report(original_request)};
+        };
+
+        GaudereChatSession session(transport, "0011223344556677");
+        const auto first = session.send_turn("Salut");
+        const auto blocked = session.send_turn("Autre");
+        const auto wait = session.wait_last_committed();
+        if (first.code != GaudereChatTurnCode::transport_ambiguous
+            || first.request_id != original_request || !first.task_id.empty()
+            || !session.has_ambiguous_attempt()
+            || session.ambiguous_message() != "Salut"
+            || blocked.code != GaudereChatTurnCode::transport_ambiguous
+            || blocked.request_id != original_request
+            || wait.code != GaudereChatTurnCode::invalid_reply
+            || !wait.task_id.empty()
+            || heads != 1 || submits != 1 || inspections != 0
+            || session.last_verified_committed_task_id()
+            || session.last_verified_response())
+            return false;
+
+        if (first_code == 2) {
+            const auto repeated = session.retry_ambiguous();
+            if (repeated.code != GaudereChatTurnCode::transport_ambiguous
+                || repeated.request_id != original_request
+                || heads != 1 || submits != 2 || inspections != 0
+                || !session.has_ambiguous_attempt())
+                return false;
+        }
+
+        const auto recovered = session.retry_ambiguous();
+        if (recovered.code != GaudereChatTurnCode::succeeded
+            || recovered.request_id != original_request
+            || recovered.task_id != new_task
+            || recovered.response != "Bonjour Bertrand."
+            || session.has_ambiguous_attempt()
+            || session.last_verified_committed_task_id() != new_task
+            || session.last_verified_response() != "Bonjour Bertrand."
+            || heads != 1 || submits != (first_code == 2 ? 3 : 2)
+            || inspections != 1)
+            return false;
+    }
+    return true;
+}
+
 bool task_inspection_io_timeout_test()
 {
     int step = 0;
@@ -1197,6 +1281,8 @@ int main()
         {"successful_turn_test", successful_turn_test},
         {"conflict_test", conflict_test},
         {"ambiguous_exact_retry_test", ambiguous_exact_retry_test},
+        {"submit_protocol_error_retains_exact_retry_test",
+         submit_protocol_error_retains_exact_retry_test},
         {"task_inspection_io_timeout_test", task_inspection_io_timeout_test},
         {"timeout_test", timeout_test},
         {"cumulative_inspection_budget_test", cumulative_inspection_budget_test},

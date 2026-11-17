@@ -35,6 +35,18 @@ first resolving a previous potentially committed submission.
 This is an *in-session* preservation mechanism, not a durable journal
 across process restart and not proof that the uncertain Task was committed.
 
+## Non-success transport replies
+
+Only explicit server rejection `code=4` means the preferred-thread
+commit did not succeed (although a separate orphan Task may still exist).
+`code=1` is a transport failure and `code=2` is a protocol error:
+a response could have been too large **after** the server had persisted
+the Task. Unknown nonzero codes are also not a reliable no-side-effect
+proof. All nonzero codes other than 4 now retain the original request
+and demand an explicit, same-identity `/retry` before new text.
+Repeated errors retain the same request rather than incrementing its
+turn counter. This in-memory protection does not survive process exit.
+
 ## Regression evidence
 
 The synthetic transport tests cover a positive report with only `status`,
