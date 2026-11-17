@@ -211,6 +211,38 @@ bool conflict_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool v2_task_id_in_conflict_is_not_v3_orphan_test()
+{
+    int heads = 0;
+    int submits = 0;
+    const auto v2_task = "cognition.local-goose-dialogue.v2:"
+        + std::string(64, 'd');
+    const auto transport = [&](const LiveControlCommand& command,
+                               const std::chrono::milliseconds) {
+        if (command.operation ==
+            LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+            ++heads;
+            return GaudereChatTransportReply{
+                0, head_report(heads == 1 ? 2 : 3, old_head)};
+        }
+        if (command.operation ==
+            LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+            ++submits;
+            return GaudereChatTransportReply{
+                4, "id=\"" + v2_task + "\"\n"};
+        }
+        return GaudereChatTransportReply{9, "unexpected I/O"};
+    };
+    GaudereChatSession session(transport, "0123456789abcdef");
+    const auto result = session.send_turn("Salut");
+    return heads == 2 && submits == 1
+        && result.code == GaudereChatTurnCode::conflict
+        && !result.orphan_task_may_exist
+        && result.task_id.empty()
+        && !session.has_ambiguous_attempt()
+        && !session.last_verified_committed_task_id();
+}
+
 bool ambiguous_exact_retry_test()
 {
     int step = 0;
@@ -1305,6 +1337,8 @@ int main()
         {"successful_turn_test", successful_turn_test},
         {"conflict_test", conflict_test},
         {"ambiguous_exact_retry_test", ambiguous_exact_retry_test},
+        {"v2_task_id_in_conflict_is_not_v3_orphan_test",
+         v2_task_id_in_conflict_is_not_v3_orphan_test},
         {"submit_protocol_error_retains_exact_retry_test",
          submit_protocol_error_retains_exact_retry_test},
         {"task_inspection_io_timeout_test", task_inspection_io_timeout_test},
