@@ -1160,27 +1160,27 @@ bool mismatched_positive_commit_report_remains_ambiguous_test()
     const std::vector<std::string> wrong_reports{
         submit_report(4), // wrong committed revision
         // An ID with valid V2 syntax cannot represent a new V3 commit.
-        "id=\\"" + false_v2_task + "\\"\n"
-        "kind=\\"cognition.local-goose-dialogue.v3\\"\n"
+        "id=\"" + false_v2_task + "\"\n"
+        "kind=\"cognition.local-goose-dialogue.v3\"\n"
         "status=pending\n"
-        "alias=\\"main\\"\n"
+        "alias=\"main\"\n"
         "revision=3\n"
-        "root_task_id=\\"" + root + "\\"\n"
-        "head_task_id=\\"" + false_v2_task + "\\"\n",
-        // A truncated or unrecognized Task status must not grant commit proof.
-        "id=\\"" + new_task + "\\"\n"
-        "kind=\\"cognition.local-goose-dialogue.v3\\"\n"
-        "alias=\\"main\\"\n"
+        "root_task_id=\"" + root + "\"\n"
+        "head_task_id=\"" + false_v2_task + "\"\n",
+        // Truncated or unrecognized status cannot grant commit proof.
+        "id=\"" + new_task + "\"\n"
+        "kind=\"cognition.local-goose-dialogue.v3\"\n"
+        "alias=\"main\"\n"
         "revision=3\n"
-        "root_task_id=\\"" + root + "\\"\n"
-        "head_task_id=\\"" + new_task + "\\"\n",
-        "id=\\"" + new_task + "\\"\n"
-        "kind=\\"cognition.local-goose-dialogue.v3\\"\n"
+        "root_task_id=\"" + root + "\"\n"
+        "head_task_id=\"" + new_task + "\"\n",
+        "id=\"" + new_task + "\"\n"
+        "kind=\"cognition.local-goose-dialogue.v3\"\n"
         "status=unverified\n"
-        "alias=\\"main\\"\n"
+        "alias=\"main\"\n"
         "revision=3\n"
-        "root_task_id=\\"" + root + "\\"\n"
-        "head_task_id=\\"" + new_task + "\\"\n",
+        "root_task_id=\"" + root + "\"\n"
+        "head_task_id=\"" + new_task + "\"\n",
         "id=\"" + new_task + "\"\n"
         "kind=\"cognition.local-goose-dialogue.v3\"\n"
         "alias=\"other\"\n"
