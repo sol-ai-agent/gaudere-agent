@@ -35,6 +35,20 @@ first resolving a previous potentially committed submission.
 This is an *in-session* preservation mechanism, not a durable journal
 across process restart and not proof that the uncertain Task was committed.
 
+## Strict V3 commit identity
+
+A preferred V3 commit report must carry a **V3-formatted** Task ID
+(`cognition.local-goose-dialogue.v3:` + 64 lowercase hex digits), a
+matching `head_task_id`, the expected V3 Task kind, and a present, known
+Task status. A syntactically valid **V2** Task ID is valid as a possible
+historical root/predecessor, but never proves a newly committed V3 Task.
+Likewise a truncated report without `status`, or one with an unknown
+status, cannot grant `/wait` or `/last` authority. Such a positive
+report keeps the same ambiguous request for explicit `/retry`.
+A code-4 conflict can only advertise a possible V3 orphan ID if its
+format is actually V3; it never promotes an unrelated V2 ID to a V3
+orphan identity.
+
 ## Non-success transport replies
 
 Only explicit server rejection `code=4` means the preferred-thread
