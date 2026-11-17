@@ -105,6 +105,8 @@ jobs:
             ../tests/gaudere_chat_test.cpp
           grep -Fq 'v2_task_id_in_conflict_is_not_v3_orphan_test' \
             ../tests/gaudere_chat_test.cpp
+          grep -Fq 'zero_turn_successor_response_never_populates_cache_test' \
+            ../tests/gaudere_chat_test.cpp
           grep -Fq 'submit_protocol_error_retains_exact_retry_test' \
             ../tests/gaudere_chat_test.cpp
           grep -Fq 'malformed_post_commit_observation_preserves_recovery_test' \
