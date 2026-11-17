@@ -51,6 +51,15 @@ bool dialogue_task_id(const std::string& value) noexcept
     return false;
 }
 
+bool v3_dialogue_task_id(const std::string& value) noexcept
+{
+    constexpr const char* prefix = "cognition.local-goose-dialogue.v3:";
+    const std::string p{prefix};
+    return value.size() == p.size() + 64
+        && value.compare(0, p.size(), p) == 0
+        && lowercase_hex(value.substr(p.size()), 64);
+}
+
 bool safe_alias(const std::string& value) noexcept
 {
     if (value.empty() || value.size() > 128) return false;
@@ -329,8 +338,7 @@ GaudereChatTaskInspection GaudereChatSession::inspect_task(
     out.task_id = task_id;
     // Only a canonical durable dialogue V3 Task ID is accepted. No
     // arbitrary local Task IDs or user-selected operations are forwarded.
-    constexpr const char* v3_prefix = "cognition.local-goose-dialogue.v3:";
-    if (task_id.rfind(v3_prefix, 0) != 0 || !dialogue_task_id(task_id)) {
+    if (!v3_dialogue_task_id(task_id)) {
         out.detail = "expected a canonical local-goose-dialogue V3 Task ID";
         return out;
     }
@@ -483,7 +491,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         try {
             const auto fields = parse_report(reply.body);
             const auto task = fields.find("id");
-            if (task != fields.end() && dialogue_task_id(task->second)) {
+            if (task != fields.end() && v3_dialogue_task_id(task->second)) {
                 out.task_id = task->second;
                 out.orphan_task_may_exist = true;
             }
@@ -521,14 +529,16 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
 
     const auto id = fields.find("id");
     const auto kind = fields.find("kind");
+    const auto status = fields.find("status");
     const auto alias = fields.find("alias");
     const auto revision = fields.find("revision");
     const auto root = fields.find("root_task_id");
     const auto head_task = fields.find("head_task_id");
-    if (id == fields.end() || kind == fields.end()
+    if (id == fields.end() || kind == fields.end() || status == fields.end()
         || alias == fields.end() || revision == fields.end()
         || root == fields.end() || head_task == fields.end()
-        || !dialogue_task_id(id->second)
+        || !v3_dialogue_task_id(id->second)
+        || (!active_status(status->second) && !terminal_status(status->second))
         || kind->second != local_goose_dialogue_v3_task_kind
         || alias->second != attempt.head.alias
         || root->second != attempt.head.root_task_id
