@@ -370,7 +370,9 @@ jobs:
           grep -Fq '/wait' agent/src/chat_main.cpp
           grep -Fq 'read_only_task_rejects_invalid_id_before_transport_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq '/task ID' agent/src/chat_main.cpp
-          grep -Fq 'transport_(command, remaining)' agent/src/GaudereChat.cpp
+          grep -Fq 'const auto io_budget = std::min(options_.io_timeout, remaining)' agent/src/GaudereChat.cpp
+          grep -Fq 'transport_(command, io_budget)' agent/src/GaudereChat.cpp
+          ! grep -Fq 'transport_(command, remaining)' agent/src/GaudereChat.cpp
           grep -Fq 'std::min(options_.poll_interval, sleep_budget)' agent/src/GaudereChat.cpp
           grep -Fq 'cumulative_inspection_budget_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq 'overdue_success_is_not_accepted_test' agent/tests/gaudere_chat_test.cpp
