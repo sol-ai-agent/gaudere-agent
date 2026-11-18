@@ -383,29 +383,64 @@ bool submit_protocol_error_retains_exact_retry_test()
 bool task_inspection_io_timeout_test()
 {
     int step = 0;
-    auto transport = [&](const LiveControlCommand& command, const std::chrono::milliseconds) {
+    int submits = 0;
+    std::string request_id;
+    const auto transport = [&](const LiveControlCommand& command,
+                               const std::chrono::milliseconds budget) {
         ++step;
-        if (step == 1) {
+        if (budget != std::chrono::milliseconds{3})
+            return GaudereChatTransportReply{9, "per-call I/O bound was exceeded"};
+        if (step == 1
+            && command.operation ==
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
             return GaudereChatTransportReply{0, head_report(2, old_head)};
         }
-        if (step == 2) {
+        if (step == 2
+            && command.operation ==
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+            ++submits;
+            request_id = command.id;
             return GaudereChatTransportReply{0, submit_report(3)};
         }
-        if (step == 3 && command.operation == LiveControlOperation::inspect_task) {
+        if (step == 3 && command.operation == LiveControlOperation::inspect_task
+            && command.id == new_task) {
             return GaudereChatTransportReply{
                 1, "gaudere-control: live control receive timed out\n"};
+        }
+        if (step == 4 && command.operation == LiveControlOperation::inspect_task
+            && command.id == new_task) {
+            return GaudereChatTransportReply{
+                0, succeeded_task_report(request_id)};
         }
         return GaudereChatTransportReply{9, "unexpected command"};
     };
 
+    gaudere_agent::GaudereChatOptions options;
+    options.io_timeout = std::chrono::milliseconds{3};
+    options.timeout = std::chrono::milliseconds{100};
     GaudereChatSession session(
-        transport, "0011aabbccddeeff");
-    const auto result = session.send_turn("Salut");
-    return step == 3
-        && result.code == GaudereChatTurnCode::timeout
-        && result.task_id == new_task
-        && !session.has_ambiguous_attempt()
-        && result.detail.find("receive timed out") != std::string::npos;
+        transport, "0011aabbccddeeff", options);
+    const auto first = session.send_turn("Salut");
+    if (step != 3 || submits != 1
+        || first.code != GaudereChatTurnCode::timeout
+        || first.task_id != new_task || first.request_id != request_id
+        || !session.last_verified_committed_task_id()
+        || *session.last_verified_committed_task_id() != new_task
+        || session.last_verified_response()
+        || !first.response.empty() || session.has_ambiguous_attempt()
+        || first.detail.find("receive timed out") == std::string::npos)
+        return false;
+
+    // A per-socket timeout is not evidence of missing durable commit.
+    // An explicit /wait recovers the same Task without another submit.
+    const auto resumed = session.wait_last_committed();
+    return step == 4 && submits == 1
+        && resumed.code == GaudereChatTurnCode::succeeded
+        && resumed.task_id == new_task
+        && resumed.request_id == request_id
+        && resumed.response == "Bonjour Bertrand."
+        && session.last_verified_response() == "Bonjour Bertrand."
+        && !session.has_ambiguous_attempt();
 }
 
 bool timeout_test()
@@ -485,7 +520,9 @@ bool cumulative_inspection_budget_test()
     return step == 5 // head, submit, only THREE inspections
         && submit_count == 1
         && budgets == std::vector<std::chrono::milliseconds>{
-            std::chrono::milliseconds{12}, std::chrono::milliseconds{7},
+            // Each socket I/O is limited to 4 ms, while the aggregate
+            // monotonic wait still expires after exactly 12 ms.
+            std::chrono::milliseconds{4}, std::chrono::milliseconds{4},
             std::chrono::milliseconds{2}}
         && now.time_since_epoch() == std::chrono::milliseconds{12}
         && result.code == GaudereChatTurnCode::timeout
