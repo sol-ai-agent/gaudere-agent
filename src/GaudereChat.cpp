@@ -600,7 +600,11 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         LiveControlCommand command;
         command.operation = LiveControlOperation::inspect_task;
         command.id = task_id;
-        const auto reply = transport_(command, remaining);
+        // Keep the per-socket I/O limit independent from the overall wait.
+        // A slow peer must not turn --io-timeout-ms into --timeout-ms.
+        // The monotonic remaining budget still caps the final partial poll.
+        const auto io_budget = std::min(options_.io_timeout, remaining);
+        const auto reply = transport_(command, io_budget);
         // A test transport can violate its budget; refuse an overdue
         // success just as the production transport would time out.
         if (clock_() >= deadline) return timed_out();
