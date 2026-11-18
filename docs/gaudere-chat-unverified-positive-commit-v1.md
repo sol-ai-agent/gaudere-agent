@@ -75,6 +75,19 @@ and demand an explicit, same-identity `/retry` before new text.
 Repeated errors retain the same request rather than incrementing its
 turn counter. This in-memory protection does not survive process exit.
 
+## Exceptions from the submit transport
+
+An injected transport or a future socket-adapter layer may **throw** rather
+than return a numeric status, potentially after sending the V3 request or
+receiving a server-side durable commit. Both standard C++ exceptions and
+unknown exception types therefore produce `transport_ambiguous`, not an
+uncaught termination. The session retains the exact request ID, text,
+preferred-thread alias, root and predecessor revision in process memory.
+A new message is blocked, `/wait` cannot invent a committed Task identity,
+and only explicit `/retry` can re-issue the same idempotent request.
+Repeated throws cannot allocate a fresh request ID. This protection is
+in-memory only: it does **not** constitute a durable crash/restart journal.
+
 ## Regression evidence
 
 The synthetic transport tests cover a positive report with only `status`,
