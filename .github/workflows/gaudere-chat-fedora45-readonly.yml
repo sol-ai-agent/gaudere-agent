@@ -109,6 +109,8 @@ jobs:
             ../tests/gaudere_chat_test.cpp
           grep -Fq 'submit_protocol_error_retains_exact_retry_test' \
             ../tests/gaudere_chat_test.cpp
+          grep -Fq 'thrown_submit_transport_preserves_exact_retry_test' \
+            ../tests/gaudere_chat_test.cpp
           grep -Fq 'task_inspection_io_timeout_test' ../tests/gaudere_chat_test.cpp
           grep -Fq 'cumulative_inspection_budget_test' ../tests/gaudere_chat_test.cpp
           grep -Fq 'malformed_post_commit_observation_preserves_recovery_test' \

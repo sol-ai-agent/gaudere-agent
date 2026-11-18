@@ -466,21 +466,39 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     command.message_kind = local_goose_dialogue_v3_message_dialogue;
     command.text = attempt.message;
 
-    const auto reply = transport_(command, options_.io_timeout);
-    // Only code 4 is a definite negative result for the preferred submit.
-    // In particular, code 2 can mean a server-side protocol/response-size
-    // failure AFTER it has made a durable change. Treat any other error as
-    // ambiguous and keep the exact request for explicit idempotent retry.
-    if (reply.code != 0 && reply.code != 4) {
+    // An exception from an injected or future transport has the same
+    // uncertain side-effect semantics as a broken socket response. The
+    // server may have committed the Task before the transport threw.
+    const auto ambiguous_submission = [&](std::string detail) {
         ambiguous_attempt_ = attempt;
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::transport_ambiguous;
         out.request_id = attempt.request_id;
         out.expected_revision = attempt.head.revision;
-        out.detail = reply.body.empty()
-            ? "submission transport/protocol outcome is ambiguous"
-            : reply.body;
+        out.detail = std::move(detail);
         return out;
+    };
+
+    GaudereChatTransportReply reply;
+    try {
+        reply = transport_(command, options_.io_timeout);
+    } catch (const std::exception& error) {
+        return ambiguous_submission(
+            std::string{"submission transport threw: "} + error.what()
+            + "; a durable commit may exist; retry only the exact request");
+    } catch (...) {
+        return ambiguous_submission(
+            "submission transport threw an unknown exception; "
+            "a durable commit may exist; retry only the exact request");
+    }
+    // Only code 4 is a definite negative result for the preferred submit.
+    // In particular, code 2 can mean a server-side protocol/response-size
+    // failure AFTER it has made a durable change. Treat any other error as
+    // ambiguous and keep the exact request for explicit idempotent retry.
+    if (reply.code != 0 && reply.code != 4) {
+        return ambiguous_submission(reply.body.empty()
+            ? "submission transport/protocol outcome is ambiguous"
+            : reply.body);
     }
 
     if (reply.code == 4) {
@@ -513,14 +531,8 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     // truncated or corrupted. Preserve the exact idempotent request for an
     // explicit retry, and refuse all NEW dialogue submissions in the meantime.
     const auto unverified_commit = [&](const char* reason) {
-        ambiguous_attempt_ = attempt;
-        GaudereChatTurnResult out;
-        out.code = GaudereChatTurnCode::transport_ambiguous;
-        out.request_id = attempt.request_id;
-        out.expected_revision = attempt.head.revision;
-        out.detail = std::string{reason}
-            + "; a durable commit may exist; retry only the exact request";
-        return out;
+        return ambiguous_submission(std::string{reason}
+            + "; a durable commit may exist; retry only the exact request");
     };
 
     std::map<std::string, std::string> fields;

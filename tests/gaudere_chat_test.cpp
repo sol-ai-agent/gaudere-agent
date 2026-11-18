@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -294,6 +295,99 @@ bool ambiguous_exact_retry_test()
         && retry.code == GaudereChatTurnCode::succeeded
         && retry.request_id == first_request
         && !session.has_ambiguous_attempt();
+}
+
+bool thrown_submit_transport_preserves_exact_retry_test()
+{
+    // A transport callback can throw after a remote durable mutation.
+    // Catch both std::exception and an unknown exception type. A repeated
+    // exception must also preserve the same request/predecessor identity.
+    for (const int variant : {0, 1}) {
+        int heads = 0;
+        int submits = 0;
+        int inspections = 0;
+        std::string original_request;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds) {
+            if (command.operation ==
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+                ++heads;
+                return GaudereChatTransportReply{0, head_report(2, old_head)};
+            }
+            if (command.operation ==
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+                ++submits;
+                if (submits == 1) original_request = command.id;
+                if (!check_command_common(command, original_request)) {
+                    return GaudereChatTransportReply{9, "retry changed payload"};
+                }
+                if (submits == 1) {
+                    if (variant == 0) {
+                        throw std::runtime_error("transport failed after send");
+                    }
+                    throw 42;
+                }
+                if (variant == 1 && submits == 2) {
+                    throw std::runtime_error("repeated post-send exception");
+                }
+                return GaudereChatTransportReply{0, submit_report(3)};
+            }
+            ++inspections;
+            if (command.operation != LiveControlOperation::inspect_task
+                || command.id != new_task) {
+                return GaudereChatTransportReply{9, "unexpected Task inspection"};
+            }
+            return GaudereChatTransportReply{
+                0, succeeded_task_report(original_request)};
+        };
+
+        GaudereChatSession session(transport, "0011223344556677");
+        const auto first = session.send_turn("Salut");
+        const auto blocked = session.send_turn("Autre");
+        const auto wait = session.wait_last_committed();
+        if (first.code != GaudereChatTurnCode::transport_ambiguous
+            || first.request_id != original_request
+            || first.detail.find("threw") == std::string::npos
+            || !first.task_id.empty() || first.current_revision
+            || !first.response.empty()
+            || !session.has_ambiguous_attempt()
+            || session.ambiguous_message() != "Salut"
+            || blocked.code != GaudereChatTurnCode::transport_ambiguous
+            || blocked.request_id != original_request
+            || wait.code != GaudereChatTurnCode::invalid_reply
+            || !wait.task_id.empty()
+            || session.last_verified_committed_task_id()
+            || session.last_verified_response()
+            || heads != 1 || submits != 1 || inspections != 0) {
+            return false;
+        }
+
+        if (variant == 1) {
+            const auto again = session.retry_ambiguous();
+            if (again.code != GaudereChatTurnCode::transport_ambiguous
+                || again.request_id != original_request
+                || again.detail.find("repeated post-send exception")
+                    == std::string::npos
+                || !session.has_ambiguous_attempt()
+                || heads != 1 || submits != 2 || inspections != 0) {
+                return false;
+            }
+        }
+
+        const auto recovered = session.retry_ambiguous();
+        if (recovered.code != GaudereChatTurnCode::succeeded
+            || recovered.request_id != original_request
+            || recovered.task_id != new_task
+            || recovered.response != "Bonjour Bertrand."
+            || session.has_ambiguous_attempt()
+            || session.last_verified_committed_task_id() != new_task
+            || session.last_verified_response() != "Bonjour Bertrand."
+            || heads != 1 || submits != (variant == 1 ? 3 : 2)
+            || inspections != 1) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool submit_protocol_error_retains_exact_retry_test()
@@ -1438,6 +1532,8 @@ int main()
          v2_task_id_in_conflict_is_not_v3_orphan_test},
         {"submit_protocol_error_retains_exact_retry_test",
          submit_protocol_error_retains_exact_retry_test},
+        {"thrown_submit_transport_preserves_exact_retry_test",
+         thrown_submit_transport_preserves_exact_retry_test},
         {"task_inspection_io_timeout_test", task_inspection_io_timeout_test},
         {"timeout_test", timeout_test},
         {"cumulative_inspection_budget_test", cumulative_inspection_budget_test},
