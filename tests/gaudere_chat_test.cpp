@@ -474,6 +474,89 @@ bool submit_protocol_error_retains_exact_retry_test()
     return true;
 }
 
+bool thrown_read_only_transport_preserves_session_test()
+{
+    // Read-only exceptions must not terminate chat or erase a proven commit.
+    // Exercise both std::exception and unknown throws at every observation.
+    for (const int variant : {0, 1}) {
+        int heads = 0;
+        int submits = 0;
+        int inspections = 0;
+        std::string request_id;
+        const auto transport = [&](const LiveControlCommand& command,
+                                   const std::chrono::milliseconds budget)
+            -> GaudereChatTransportReply {
+            if (budget <= std::chrono::milliseconds{0})
+                return {9, "unbounded read"};
+            if (command.operation ==
+                LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+                ++heads;
+                if (heads == 1) {
+                    if (variant == 0) throw std::runtime_error("head unavailable");
+                    throw 42;
+                }
+                return {0, head_report(2, old_head)};
+            }
+            if (command.operation ==
+                LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+                ++submits;
+                request_id = command.id;
+                if (!check_command_common(command, request_id))
+                    return {9, "unexpected submit"};
+                return {0, submit_report(3)};
+            }
+            if (command.operation == LiveControlOperation::inspect_task
+                && command.id == new_task) {
+                ++inspections;
+                if (inspections <= 2) {
+                    if ((inspections + variant) % 2 == 0)
+                        throw std::runtime_error("read-only transport unavailable");
+                    throw 42;
+                }
+                return {0, succeeded_task_report(request_id)};
+            }
+            return {9, "unexpected operation"};
+        };
+
+        GaudereChatSession session(transport, "0123456789abcdef");
+        const auto before_submit = session.send_turn("Salut");
+        if (before_submit.code != GaudereChatTurnCode::invalid_reply
+            || before_submit.detail.find("head inspection transport threw")
+                == std::string::npos
+            || !before_submit.task_id.empty() || !before_submit.request_id.empty()
+            || submits != 0 || session.last_verified_committed_task_id()
+            || session.has_ambiguous_attempt()) return false;
+
+        const auto committed = session.send_turn("Salut");
+        if (committed.code != GaudereChatTurnCode::invalid_reply
+            || committed.detail.find("Task inspection transport threw")
+                == std::string::npos
+            || committed.task_id != new_task || committed.request_id != request_id
+            || !committed.current_revision || *committed.current_revision != 3
+            || session.last_verified_committed_task_id() != new_task
+            || session.last_verified_response()
+            || session.has_ambiguous_attempt()
+            || heads != 2 || submits != 1 || inspections != 1) return false;
+
+        // /task ID is status-only and must not manufacture /again proof.
+        const auto status = session.inspect_task(new_task);
+        if (status.ok || status.task_id != new_task
+            || status.detail.find("transport threw") == std::string::npos
+            || session.last_verified_response()
+            || heads != 2 || submits != 1 || inspections != 2) return false;
+
+        // /wait uses the verified original identity, never another submit.
+        const auto resumed = session.wait_last_committed();
+        if (resumed.code != GaudereChatTurnCode::succeeded
+            || resumed.task_id != new_task || resumed.request_id != request_id
+            || resumed.response != "Bonjour Bertrand."
+            || session.last_verified_response() != "Bonjour Bertrand."
+            || heads != 2 || submits != 1 || inspections != 3
+            || session.has_ambiguous_attempt()) return false;
+    }
+    return true;
+}
+
 bool task_inspection_io_timeout_test()
 {
     int step = 0;
@@ -1534,6 +1617,8 @@ int main()
          submit_protocol_error_retains_exact_retry_test},
         {"thrown_submit_transport_preserves_exact_retry_test",
          thrown_submit_transport_preserves_exact_retry_test},
+        {"thrown_read_only_transport_preserves_session_test",
+         thrown_read_only_transport_preserves_session_test},
         {"task_inspection_io_timeout_test", task_inspection_io_timeout_test},
         {"timeout_test", timeout_test},
         {"cumulative_inspection_budget_test", cumulative_inspection_budget_test},

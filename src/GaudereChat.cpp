@@ -319,7 +319,18 @@ GaudereChatHeadResult GaudereChatSession::inspect_head() const
     LiveControlCommand command;
     command.operation = LiveControlOperation::inspect_local_goose_dialogue_thread_head;
     command.id = options_.thread_alias;
-    const auto reply = transport_(command, options_.io_timeout);
+    // Head inspection is read-only. A throwing adapter must not terminate the
+    // interactive session or manufacture a preferred commit.
+    GaudereChatTransportReply reply;
+    try {
+        reply = transport_(command, options_.io_timeout);
+    } catch (const std::exception&) {
+        return GaudereChatHeadResult{
+            false, {}, "preferred dialogue head inspection transport threw"};
+    } catch (...) {
+        return GaudereChatHeadResult{
+            false, {}, "preferred dialogue head inspection transport threw"};
+    }
     if (reply.code != 0) {
         return GaudereChatHeadResult{
             false, {}, reply.body.empty()
@@ -351,7 +362,16 @@ GaudereChatTaskInspection GaudereChatSession::inspect_task(
     command.id = task_id;
     // Unlike the post-commit polling loop, this is exactly one read-only
     // request and uses the independent --io-timeout-ms bound.
-    const auto reply = transport_(command, options_.io_timeout);
+    GaudereChatTransportReply reply;
+    try {
+        reply = transport_(command, options_.io_timeout);
+    } catch (const std::exception&) {
+        out.detail = "read-only Task inspection transport threw";
+        return out;
+    } catch (...) {
+        out.detail = "read-only Task inspection transport threw";
+        return out;
+    }
     if (reply.code != 0) {
         out.detail = reply.body.empty()
             ? "read-only Task inspection did not complete"
@@ -616,7 +636,18 @@ GaudereChatTurnResult GaudereChatSession::wait_for_task(
         // A slow peer must not turn --io-timeout-ms into --timeout-ms.
         // The monotonic remaining budget still caps the final partial poll.
         const auto io_budget = std::min(options_.io_timeout, remaining);
-        const auto reply = transport_(command, io_budget);
+        // The commit is already proven. Failure of this read-only RPC must
+        // retain the Task identity so /wait can recover without re-submission.
+        GaudereChatTransportReply reply;
+        try {
+            reply = transport_(command, io_budget);
+        } catch (const std::exception&) {
+            return invalid_committed(
+                "submitted Task inspection transport threw");
+        } catch (...) {
+            return invalid_committed(
+                "submitted Task inspection transport threw");
+        }
         // A test transport can violate its budget; refuse an overdue
         // success just as the production transport would time out.
         if (clock_() >= deadline) return timed_out();
