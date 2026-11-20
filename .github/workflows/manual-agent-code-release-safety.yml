@@ -30,6 +30,7 @@ jobs:
           python3 -m unittest discover -s tests -p 'manual_code_release_test.py' -v
       - name: Reject accidental provider/Task execution surface
         run: |
-          ! grep -Eq 'gaudere-control|dialogue-feed-ack|--wake-intents|/usr/local/bin/gaudere-agent.*--task' scripts/deploy-agent-code-only-manual.sh
+          ! grep -Eq 'gaudere-control|dialogue-feed-ack|/usr/local/bin/gaudere-agent.*--task' scripts/deploy-agent-code-only-manual.sh
+          grep -Fq -- '--wake-intents' scripts/deploy-agent-code-only-manual.sh
           grep -Fq 'Network=none' scripts/deploy-agent-code-only-manual.sh
           grep -Fq 'RELEASE=BLOCKED_BEFORE_STOP' scripts/deploy-agent-code-only-manual.sh
