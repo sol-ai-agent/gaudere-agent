@@ -351,6 +351,7 @@ jobs:
           grep -q 'test_client_slow_trickle_does_not_extend_deadline' agent/tests/live_control_test.cpp
           grep -q -- '--io-timeout-ms' agent/src/chat_main.cpp
           grep -q 'task_inspection_io_timeout_test' agent/tests/gaudere_chat_test.cpp
+          grep -Fq 'thrown_read_only_transport_preserves_session_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq 'GaudereChatSession::inspect_task' agent/src/GaudereChat.cpp
           grep -Fq 'read_only_task_after_timeout_never_resubmits_test' agent/tests/gaudere_chat_test.cpp
           grep -Fq 'wait_last_committed_recovers_canonical_response_test' agent/tests/gaudere_chat_test.cpp
