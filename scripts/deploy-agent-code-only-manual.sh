@@ -22,6 +22,8 @@ VERIFY_TOOL="$CHECKOUT/scripts/verify-image-provenance.sh"
 WORK_ROOT="$HOME/.local/share/gaudere/manual-releases"
 WORK=""
 BACKUP=""
+NEXT_QUADLET=""
+STAGING_CREATED=0
 ARMED=0
 NEW_STARTED=0
 COMMITTED=0
@@ -68,10 +70,10 @@ on_exit() {
         fi
         return 0
     fi
+    if [[ "$STAGING_CREATED" == 1 && -n "$NEXT_QUADLET" ]]; then
+        rm -f -- "$NEXT_QUADLET" 2>/dev/null || :
+    fi
     if [[ "$ARMED" == 0 ]]; then
-        if [[ -n "$WORK" && -f "$WORK/quadlet.before" ]]; then
-            rm -f -- "$NEXT_QUADLET" 2>/dev/null || :
-        fi
         printf 'RELEASE=BLOCKED_BEFORE_STOP\n' >&2
         return "$code"
     fi
@@ -156,9 +158,16 @@ exec 9>> "$WORK_ROOT/.release.lock"
 chmod 0600 "$WORK_ROOT/.release.lock"
 flock -n 9 || fail 'another manual release is active'
 WORK=$(mktemp -d "$WORK_ROOT/release.XXXXXXXX")
+# Revalidate the current host state after taking the exclusive release lock.
+# Nothing is stopped if another operator changed the running image in between.
+service_active || fail 'agent stopped between preflight and release lock'
+[[ "$(running_image)" == "$OLD" ]] || fail 'running image changed before release lock'
+grep -Fxq "Image=$OLD_IMAGE" "$QUADLET" || fail 'Quadlet changed before release lock'
 install -m 0600 "$QUADLET" "$WORK/quadlet.before"
-NEXT_QUADLET="$QUADLET.manual-release.tmp"
-[[ ! -e "$NEXT_QUADLET" ]] || fail 'staging Quadlet already exists'
+# mktemp atomically claims a unique staged path; never remove another
+# operator's pre-existing predictable .tmp file.
+NEXT_QUADLET=$(mktemp "$QUADLET.manual-release.XXXXXXXX")
+STAGING_CREATED=1
 python3 - "$QUADLET" "$NEXT_QUADLET" "$OLD_IMAGE" "$IMAGE" <<'PY'
 from pathlib import Path
 import os, sys
@@ -170,7 +179,7 @@ if text.count('Image=') != 1 or ('Image=' + old + '\n') not in text:
 replacement = text.replace('Image=' + old + '\n', 'Image=' + new + '\n', 1)
 if replacement.replace('Image=' + new + '\n', 'Image=' + old + '\n', 1) != text:
     raise SystemExit('Quadlet mutation beyond Image=')
-with dest.open('x', encoding='utf-8') as fh:
+with dest.open('w', encoding='utf-8') as fh:
     fh.write(replacement)
 os.chmod(dest, 0o600)
 PY
@@ -189,6 +198,7 @@ state_signature > "$WORK/state.before.sha256"
 
 # Only the Image= line changes, using an atomic rename in the same directory.
 mv "$NEXT_QUADLET" "$QUADLET"
+STAGING_CREATED=0
 systemctl --user daemon-reload
 NEW_STARTED=1
 systemctl --user start "$UNIT"
