@@ -79,6 +79,27 @@ on_exit() {
     fi
     printf 'RELEASE=ROLLBACK_ATTEMPT (reason exit=%s)\n' "$code" >&2
     systemctl --user stop "$UNIT" || restored=0
+    # A successful stop command alone does not prove that the candidate is
+    # gone. Never restore its mounted SQLite state while it may still run.
+    local container_state exists_rc=0
+    [[ "$(systemctl --user is-active "$UNIT" 2>/dev/null || :)" == inactive ]] || restored=0
+    if [[ "$restored" == 1 ]]; then
+        if container_state=$(podman inspect gaudere-agent --format '{{.State.Status}}' 2>/dev/null); then
+            case "$container_state" in
+                exited|stopped) ;;
+                *) restored=0 ;;
+            esac
+        else
+            # A Quadlet may remove the stopped container. Only the exact
+            # exit code 1 proves absence; 125 denotes a Podman store error.
+            podman container exists gaudere-agent >/dev/null 2>&1 || exists_rc=$?
+            [[ "$exists_rc" == 1 ]] || restored=0
+        fi
+    fi
+    if [[ "$restored" != 1 ]]; then
+        printf 'ROLLBACK=MANUAL_REVIEW_REQUIRED; candidate stop unverified, Quadlet and state left intact: %s\n' "$WORK" >&2
+        return 1
+    fi
     if [[ -n "$WORK" && -f "$WORK/quadlet.before" ]]; then
         install -m 0600 "$WORK/quadlet.before" "$QUADLET" || restored=0
         systemctl --user daemon-reload || restored=0
