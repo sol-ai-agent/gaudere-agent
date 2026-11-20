@@ -1,0 +1,35 @@
+name: Manual agent code-only release safety
+
+on:
+  pull_request:
+    paths:
+      - scripts/deploy-agent-code-only-manual.sh
+      - tests/manual_code_release_test.py
+      - docs/manual-agent-code-release.md
+      - .github/workflows/manual-agent-code-release-safety.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/deploy-agent-code-only-manual.sh
+      - tests/manual_code_release_test.py
+      - docs/manual-agent-code-release.md
+      - .github/workflows/manual-agent-code-release-safety.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Bash syntax and provider-free simulated release/rollback
+        run: |
+          bash -n scripts/deploy-agent-code-only-manual.sh
+          python3 -m unittest discover -s tests -p 'manual_code_release_test.py' -v
+      - name: Reject accidental provider/Task execution surface
+        run: |
+          ! grep -Eq 'gaudere-control|dialogue-feed-ack|--wake-intents|/usr/local/bin/gaudere-agent.*--task' scripts/deploy-agent-code-only-manual.sh
+          grep -Fq 'Network=none' scripts/deploy-agent-code-only-manual.sh
+          grep -Fq 'RELEASE=BLOCKED_BEFORE_STOP' scripts/deploy-agent-code-only-manual.sh
