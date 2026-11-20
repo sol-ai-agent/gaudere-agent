@@ -1,5 +1,6 @@
 #include "GaudereChat.hpp"
 #include "GaudereChatInput.hpp"
+#include "GaudereChatOutput.hpp"
 
 #include "LocalGooseDialogueV3.hpp"
 
@@ -1127,6 +1128,27 @@ bool canonical_cache_cleared_by_new_verified_commit_test()
         && heads == 2 && submits == 2 && inspections == 2;
 }
 
+bool terminal_control_presentation_escape_test()
+{
+    using gaudere_agent::gaudere_chat_terminal_safe;
+    // The CLI must not execute ANSI colors, OSC, CR cursor movement or BEL
+    // from a provider response or a transport error. Keep human UTF-8 intact.
+    const std::string normal = "Bonjour, été !\\n\\t";
+    if (gaudere_chat_terminal_safe(normal) != normal
+        || gaudere_chat_terminal_safe("").size() != 0)
+        return false;
+    const std::string hostile = normal + "\\x1B[31m\\r\\a\\b\\x7F"
+        + std::string{"\\xC2\\x9B", 2} + "CSI";
+    const std::string expected = normal
+        + "\\\\x1B[31m\\\\x0D\\\\x07\\\\x08\\\\x7F"
+        + "\\\\xC2\\\\x9BCSI";
+    const auto display = gaudere_chat_terminal_safe(hostile);
+    return display == expected
+        && gaudere_chat_terminal_safe(display) == display
+        && hostile.find('\\x1B') != std::string::npos
+        && display.find('\\x1B') == std::string::npos;
+}
+
 bool slash_command_routing_test()
 {
     using gaudere_agent::GaudereChatInputKind;
@@ -1638,6 +1660,8 @@ int main()
          wait_last_ambiguous_not_upgraded_to_commit_test},
         {"wait_last_rejects_forged_v3_response_test",
          wait_last_rejects_forged_v3_response_test},
+        {"terminal_control_presentation_escape_test",
+         terminal_control_presentation_escape_test},
         {"slash_command_routing_test", slash_command_routing_test},
         {"canonical_cache_cleared_by_new_verified_commit_test",
          canonical_cache_cleared_by_new_verified_commit_test},
