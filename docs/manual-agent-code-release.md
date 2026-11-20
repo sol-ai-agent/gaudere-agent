@@ -46,6 +46,14 @@ backup with the existing SQLite lock, verifies SHA-256, swaps the Quadlet image
 atomically, reloads systemd, starts the candidate, verifies active image and
 logical `.db` dumps have not changed, and retains the old image for rollback.
 
+**Rollback safety:** a failed release never assumes that a successful
+`systemctl --user stop` response means the candidate is quiescent. The
+rollback path requires the unit to be inactive and the Podman container to
+be stopped/exited or provably absent (`podman container exists` returns exactly
+`1`). An active/paused candidate or Podman storage error (`125`) produces
+`ROLLBACK=MANUAL_REVIEW_REQUIRED` **before** modifying the Quadlet or
+restoring the SQLite state. Keep the failed state and backup for inspection;
+do not relaunch blindly.
 **Do not remove either the old Podman image or the backup.** `RELEASE=PASS`
 means the internal release checks passed. `ROLLBACK=MANUAL_REVIEW_REQUIRED`
 requires the operator to stop and inspect the preserved workspace; never blindly
