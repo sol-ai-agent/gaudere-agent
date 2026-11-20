@@ -4,6 +4,7 @@
 from pathlib import Path
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -51,6 +52,11 @@ class ManualCodeReleaseTests(unittest.TestCase):
 if [[ "$1" == -C && "$3" == rev-parse ]]; then echo '{AGENT}'; exit; fi
 if [[ "$1" == -C && "$3" == status ]]; then exit; fi
 exit 99
+''')
+        # Only the Quadlet staging script calls python3; inject an early failure.
+        write_executable(self.bin / 'python3', f'''
+if [[ "${{TEST_FAIL_STAGE:-}}" == 1 ]]; then exit 71; fi
+exec '{sys.executable}' "$@"
 ''')
         write_executable(self.bin / 'systemctl', '''
 [[ "$1" == --user ]] || exit 99
@@ -156,6 +162,27 @@ echo 'image_provenance=PASS'
         self.assertEqual(self.quadlet.read_text(), self.original_quadlet.replace(OLD, NEW))
         self.assertEqual((self.state / 'state.db').read_text(), 'durable-data')
         self.assertTrue((self.home / '.local/share/gaudere/backups/test-state.tar.gz.sha256').exists())
+
+    def test_stage_failure_cleans_only_owned_temp_and_never_stops(self):
+        result = self.run_script('--apply', env=dict(self.env,
+            GAUDERE_MANUAL_RELEASE_ACK='APPLY_GAUDERE_AGENT_CODE_ONLY',
+            TEST_FAIL_STAGE='1'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('BLOCKED_BEFORE_STOP', result.stderr)
+        self.assert_old_running()
+        self.assertEqual((self.root / 'actions').read_text(), '')
+        self.assertEqual(list(self.settings.glob('gaudere-agent.container.manual-release.*')), [])
+
+    def test_existing_legacy_temp_is_not_removed_by_release(self):
+        foreign = self.settings / 'gaudere-agent.container.manual-release.tmp'
+        foreign.write_text('somebody-elses-content')
+        result = self.run_script('--apply', env=dict(self.env,
+            GAUDERE_MANUAL_RELEASE_ACK='APPLY_GAUDERE_AGENT_CODE_ONLY',
+            TEST_FAIL_STAGE='1'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(foreign.read_text(), 'somebody-elses-content')
+        self.assert_old_running()
+        self.assertEqual((self.root / 'actions').read_text(), '')
 
     def test_failed_backup_restores_original_service(self):
         result = self.run_script('--apply', env=dict(self.env,
