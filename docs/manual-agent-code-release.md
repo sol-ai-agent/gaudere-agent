@@ -1,0 +1,55 @@
+# Manual, code-only gaudere-agent release on Fedora
+
+A pinned replacement for one-off manual release snippets, *not* a command
+executor and *not* a B10 repair. No Task, provider call, ACK, model turn or
+schema migration is authorized. This procedure is deliberately limited to the
+known non-networked rootless Quadlet profile:
+
+- `~/.config/containers/systemd/gaudere-agent.container`, mode `0600`;
+- `Network=none` and volume `%h/.local/share/gaudere/state:/var/lib/gaudere:Z`;
+- `gaudere-agent.service` initially active and backed by an immutable old
+  image ID;
+- candidate image already built from a clean, pinned checkout by
+  `scripts/build-image.sh`, with `image_provenance=PASS`.
+
+The script **fails closed** if the profile differs. The older, Stage9J6-specific
+`scripts/deploy-gaudere-chat-code-production.sh` is *not* an appropriate general
+release entrypoint: its hardcoded predecessor, provider and Task count invariants
+may be obsolete.
+
+## Operator procedure
+
+Verify the actual running image ID, source checkout Git SHA and `gaudere.ref`.
+Do not use a tag instead of a full immutable `sha256:<64 hex>` image ID. Export
+four pinned values from independently verified evidence (the placeholders are
+**not executable**):
+
+```
+GAUDERE_MANUAL_OLD_IMAGE=sha256:<observed-old-image-id>
+GAUDERE_MANUAL_NEW_IMAGE=sha256:<proven-candidate-image-id>
+GAUDERE_MANUAL_AGENT_REF=<pinned-agent-commit>
+GAUDERE_MANUAL_CORE_REF=<pinned-gaudere-core-commit>
+```
+
+With all four values exported, execute `bash scripts/deploy-agent-code-only-manual.sh`
+for a **non-disruptive preflight**. It checks the active service and Quadlet,
+source provenance, exact candidate image labels, and `gaudere-chat --help` in
+an isolated, no-network, read-only disposable container. Expect
+`RELEASE=PRECHECK_PASS`. It does **not** stop or restart production.
+
+Only after an explicitly approved maintenance window, set
+`GAUDERE_MANUAL_RELEASE_ACK=APPLY_GAUDERE_AGENT_CODE_ONLY` and execute
+`bash scripts/deploy-agent-code-only-manual.sh --apply`. The script acquires a
+private non-blocking release lock, copies the original Quadlet, prepares a
+candidate differing only in `Image=`, stops the agent service, creates a state
+backup with the existing SQLite lock, verifies SHA-256, swaps the Quadlet image
+atomically, reloads systemd, starts the candidate, verifies active image and
+logical `.db` dumps have not changed, and retains the old image for rollback.
+
+**Do not remove either the old Podman image or the backup.** `RELEASE=PASS`
+means the internal release checks passed. `ROLLBACK=MANUAL_REVIEW_REQUIRED`
+requires the operator to stop and inspect the preserved workspace; never blindly
+retry an unknown-effect transition. This script does not replace a separate
+post-deployment host inspection or permission to activate new capabilities.
+
+No part of this procedure touches the B10 gateway or its Drive mailboxes.
