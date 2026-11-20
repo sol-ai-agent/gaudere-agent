@@ -83,7 +83,7 @@ case "$1:$2" in
     esac ;;
  'image:inspect')
      [[ "$3" == "$GAUDERE_MANUAL_NEW_IMAGE" ]] || exit 98
-     printf '%s\n' "$GAUDERE_MANUAL_NEW_IMAGE" ;;
+     printf '%s\\n' "$GAUDERE_MANUAL_NEW_IMAGE" ;;
  'run:--rm')
      echo 'Usage: /usr/local/bin/gaudere-chat [--io-timeout-ms N]' >&2 ;;
  'exec:gaudere-agent')
@@ -103,7 +103,7 @@ mkdir -p "$back"
 archive="$back/test-state.tar.gz"
 tar -czf "$archive" -C "$root" .
 (cd "$back" && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
-printf '%s\n' "$archive"
+printf '%s\\n' "$archive"
 ''')
         write_executable(self.checkout / 'scripts' / 'verify-image-provenance.sh', '''
 [ "$1" = "$GAUDERE_MANUAL_NEW_IMAGE" ] && [ "$2" = "$GAUDERE_MANUAL_AGENT_REF" ] && [ "$3" = "$GAUDERE_MANUAL_CORE_REF" ] && [ "$4" = "$GAUDERE_MANUAL_NEW_IMAGE" ] || exit 98
