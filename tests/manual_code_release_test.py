@@ -63,7 +63,15 @@ exec '{sys.executable}' "$@"
 shift
 case "$1" in
  is-active) cat "$TEST_ROOT/service" ;;
- stop) echo stop >> "$TEST_ROOT/actions"; printf 'inactive' > "$TEST_ROOT/service" ;;
+ stop)
+   echo stop >> "$TEST_ROOT/actions"
+   if [[ "$(cat "$TEST_ROOT/running_image")" == "$GAUDERE_MANUAL_NEW_IMAGE" ]]; then
+     if [[ "${TEST_ROLLBACK_STOP_STUCK:-}" == 1 ]]; then exit 0; fi
+     if [[ "${TEST_ROLLBACK_INSPECT_UNKNOWN:-}" == 1 ]]; then
+       : > "$TEST_ROOT/inspect_unknown"
+     fi
+   fi
+   printf 'inactive' > "$TEST_ROOT/service" ;;
  daemon-reload) echo daemon-reload >> "$TEST_ROOT/actions" ;;
  start)
    echo start >> "$TEST_ROOT/actions"
@@ -84,9 +92,13 @@ case "$1:$2" in
       '{{.Image}}') cat "$TEST_ROOT/running_image" ;;
       '{{.HostConfig.NetworkMode}}') echo none ;;
       '{{.State.Status}}')
+         [[ ! -f "$TEST_ROOT/inspect_unknown" ]] || exit 125
          [[ "$(cat "$TEST_ROOT/service")" == active ]] && echo running || echo exited ;;
       *) exit 99 ;;
     esac ;;
+ 'container:exists')
+     [[ ! -f "$TEST_ROOT/inspect_unknown" ]] || exit 125
+     exit 0 ;;
  'image:inspect')
      [[ "$3" == "$GAUDERE_MANUAL_NEW_IMAGE" ]] || exit 98
      printf '%s\\n' "$GAUDERE_MANUAL_NEW_IMAGE" ;;
@@ -200,6 +212,31 @@ echo 'image_provenance=PASS'
         self.assertIn('ROLLBACK=PASS', result.stderr)
         self.assert_old_running()
         self.assertEqual((self.state / 'state.db').read_text(), 'durable-data')
+
+    def test_unconfirmed_candidate_stop_keeps_image_and_state_for_review(self):
+        result = self.run_script('--apply', env=dict(self.env,
+            GAUDERE_MANUAL_RELEASE_ACK='APPLY_GAUDERE_AGENT_CODE_ONLY',
+            TEST_MUTATE_NEW='1', TEST_ROLLBACK_STOP_STUCK='1'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('ROLLBACK=MANUAL_REVIEW_REQUIRED', result.stderr)
+        self.assertNotIn('ROLLBACK=PASS', result.stderr)
+        self.assertEqual((self.root / 'service').read_text(), 'active')
+        self.assertEqual((self.root / 'running_image').read_text(), NEW)
+        self.assertEqual(self.quadlet.read_text(), self.original_quadlet.replace(OLD, NEW))
+        self.assertEqual((self.state / 'state.db').read_text(), 'changed')
+        self.assertTrue((self.home / '.local/share/gaudere/backups/test-state.tar.gz').exists())
+
+    def test_podman_store_error_blocks_rollback_restoration(self):
+        result = self.run_script('--apply', env=dict(self.env,
+            GAUDERE_MANUAL_RELEASE_ACK='APPLY_GAUDERE_AGENT_CODE_ONLY',
+            TEST_MUTATE_NEW='1', TEST_ROLLBACK_INSPECT_UNKNOWN='1'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('ROLLBACK=MANUAL_REVIEW_REQUIRED', result.stderr)
+        self.assertNotIn('ROLLBACK=PASS', result.stderr)
+        self.assertEqual((self.root / 'service').read_text(), 'inactive')
+        self.assertEqual(self.quadlet.read_text(), self.original_quadlet.replace(OLD, NEW))
+        self.assertEqual((self.state / 'state.db').read_text(), 'changed')
+        self.assertTrue((self.home / '.local/share/gaudere/backups/test-state.tar.gz').exists())
 
     def test_failed_candidate_start_recovers_original_service(self):
         result = self.run_script('--apply', env=dict(self.env,
