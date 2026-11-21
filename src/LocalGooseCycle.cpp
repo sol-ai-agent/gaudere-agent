@@ -261,7 +261,12 @@ bool canonical_local_goose_cycle_success(const Task& task) noexcept
         || !task.result->failure_code.empty() || !task.result->failure_message.empty()) {
         return false;
     }
-    return inspect_local_goose_decision(task.result->output).eligible;
+    // Raw model responses may be normalized by the handler. Durable results
+    // must already have exactly those canonical bytes before they are used as
+    // lineage evidence or hashed into a successor opportunity.
+    const auto decision = inspect_local_goose_decision(task.result->output);
+    return decision.eligible
+        && decision.decision.canonical_json == task.result->output;
 }
 
 std::string local_goose_cycle_prompt(const LocalGooseCycleInspection& cycle)
