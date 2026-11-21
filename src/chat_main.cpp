@@ -109,7 +109,6 @@ int main(int argc, char* argv[])
             gaudere_agent::random_gaudere_chat_session_nonce(),
             options);
 
-        std::string conflict_message;
         std::cout << "gaudere-chat thread=" << options.thread_alias
                   << " (type /help for local commands)\n";
 
@@ -182,18 +181,14 @@ int main(int argc, char* argv[])
             }
 
             gaudere_agent::GaudereChatTurnResult result;
-            std::string attempted_message;
             if (input.kind == InputKind::wait) {
                 // Read-only bounded re-observation; no submit and no ACK.
                 result = session.wait_last_committed();
             } else if (input.kind == InputKind::retry) {
                 if (session.has_ambiguous_attempt()) {
-                    attempted_message = session.ambiguous_message();
                     result = session.retry_ambiguous();
-                } else if (!conflict_message.empty()) {
-                    attempted_message = conflict_message;
-                    conflict_message.clear();
-                    result = session.send_turn(attempted_message);
+                } else if (session.has_conflict_message()) {
+                    result = session.retry_conflict();
                 } else {
                     std::cerr << "gaudere-chat: nothing requires an explicit retry\n";
                     continue;
@@ -205,9 +200,7 @@ int main(int argc, char* argv[])
                         << "transport state; use /retry before sending new text\n";
                     continue;
                 }
-                conflict_message.clear();
-                attempted_message = input.value;
-                result = session.send_turn(attempted_message);
+                result = session.send_turn(input.value);
             }
 
             if (verbose) {
@@ -225,13 +218,11 @@ int main(int argc, char* argv[])
 
             switch (result.code) {
             case gaudere_agent::GaudereChatTurnCode::succeeded:
-                conflict_message.clear();
                 std::cout << "Gaudere> "
                           << gaudere_agent::gaudere_chat_terminal_safe(result.response)
                           << '\n';
                 break;
             case gaudere_agent::GaudereChatTurnCode::conflict:
-                conflict_message = attempted_message;
                 std::cerr
                     << "gaudere-chat: preferred thread advanced concurrently; "
                     << "the message was not committed to the preferred thread";
@@ -270,6 +261,10 @@ int main(int argc, char* argv[])
                 std::cerr << "gaudere-chat: "
                           << gaudere_agent::gaudere_chat_terminal_safe(result.detail)
                           << '\n';
+                if (input.kind == InputKind::retry && session.has_conflict_message()) {
+                    std::cerr << "gaudere-chat: the rejected message is still saved; "
+                                 "use /retry again when the head is available.\n";
+                }
                 if (!result.task_id.empty()) {
                     // The commit was confirmed before observation failed.
                     // Do NOT interpret invalid response syntax as no submit.

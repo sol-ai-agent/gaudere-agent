@@ -425,6 +425,14 @@ GaudereChatTurnResult GaudereChatSession::send_turn(const std::string& message)
             "an earlier submission has ambiguous transport state; retry it exactly first";
         return out;
     }
+    // A new explicit message supersedes a previously rejected message.
+    // The separate retry_conflict() path never discards it on a head error.
+    conflict_message_.reset();
+    return start_turn(message);
+}
+
+GaudereChatTurnResult GaudereChatSession::start_turn(const std::string& message)
+{
     if (message.empty() || message.size() > 4096) {
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::invalid_reply;
@@ -454,6 +462,26 @@ GaudereChatTurnResult GaudereChatSession::retry_ambiguous()
     }
     const auto attempt = *ambiguous_attempt_;
     return submit_attempt(attempt);
+}
+
+bool GaudereChatSession::has_conflict_message() const noexcept
+{
+    return conflict_message_.has_value();
+}
+
+GaudereChatTurnResult GaudereChatSession::retry_conflict()
+{
+    // An uncertain side effect always takes precedence over a fresh request.
+    if (ambiguous_attempt_ || !conflict_message_) {
+        GaudereChatTurnResult out;
+        out.code = GaudereChatTurnCode::invalid_reply;
+        out.detail = "no definite conflict available for retry; "
+                     "resolve any ambiguous submission exactly first";
+        return out;
+    }
+    // Copy before submission, which may reset or replace the saved message.
+    const auto message = *conflict_message_;
+    return start_turn(message);
 }
 
 GaudereChatTurnResult GaudereChatSession::wait_last_committed()
@@ -491,6 +519,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     // server may have committed the Task before the transport threw.
     const auto ambiguous_submission = [&](std::string detail) {
         ambiguous_attempt_ = attempt;
+        conflict_message_.reset();
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::transport_ambiguous;
         out.request_id = attempt.request_id;
@@ -525,6 +554,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
         // The server explicitly rejected the preferred-thread commit; a
         // durable orphan Task may still exist and is reported separately.
         ambiguous_attempt_.reset();
+        conflict_message_ = attempt.message;
         GaudereChatTurnResult out;
         out.code = GaudereChatTurnCode::conflict;
         out.request_id = attempt.request_id;
@@ -591,6 +621,7 @@ GaudereChatTurnResult GaudereChatSession::submit_attempt(const Attempt& attempt)
     // A timeout of subsequent observation must never erase this identity.
     last_committed_ = CommittedAttempt{attempt, id->second, std::nullopt};
     ambiguous_attempt_.reset();
+    conflict_message_.reset();
     return wait_for_task(attempt, id->second);
 }
 

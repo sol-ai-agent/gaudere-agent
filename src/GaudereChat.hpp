@@ -86,6 +86,10 @@ public:
     [[nodiscard]] GaudereChatTaskInspection inspect_task(const std::string& task_id) const;
     [[nodiscard]] GaudereChatTurnResult send_turn(const std::string& message);
     [[nodiscard]] GaudereChatTurnResult retry_ambiguous();
+    // Retry a definitively rejected preferred-head submission only on an
+    // explicit operator request. A failed head read retains this message.
+    [[nodiscard]] GaudereChatTurnResult retry_conflict();
+    [[nodiscard]] bool has_conflict_message() const noexcept;
     [[nodiscard]] GaudereChatTurnResult wait_last_committed();
     // Local memory only: never populate this from a status-only Task lookup.
     [[nodiscard]] std::optional<std::string> last_verified_committed_task_id() const;
@@ -112,6 +116,7 @@ private:
         std::optional<std::string> verified_response;
     };
 
+    [[nodiscard]] GaudereChatTurnResult start_turn(const std::string& message);
     [[nodiscard]] GaudereChatTurnResult submit_attempt(const Attempt& attempt);
     [[nodiscard]] GaudereChatTurnResult wait_for_task(
         const Attempt& attempt,
@@ -125,6 +130,8 @@ private:
     GaudereChatSleeper sleeper_;
     std::uint64_t next_turn_ = 1;
     std::optional<Attempt> ambiguous_attempt_;
+    // Independent of read-only /wait and /again; no durable persistence.
+    std::optional<std::string> conflict_message_;
     std::optional<CommittedAttempt> last_committed_;
 };
 
