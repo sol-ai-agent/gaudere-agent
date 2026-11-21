@@ -173,6 +173,23 @@ int main()
     bad_result.result->output = "not-json";
     assert(!canonical_local_goose_cycle_success(bad_result));
 
+
+    // The model response parser intentionally normalizes formatting, but a
+    // persisted succeeded result is evidence and must already be canonical.
+    auto formatted_result = succeeded_first;
+    formatted_result.result->output += "\n";
+    assert(inspect_local_goose_decision(formatted_result.result->output).eligible);
+    assert(!canonical_local_goose_cycle_success(formatted_result));
+    assert(throws_make(anchor, model, 2, 20'000, 20'001, formatted_result));
+
+    auto fenced_result = succeeded_first;
+    fenced_result.result->output = std::string(3, char(96)) + "json\n"
+        + succeeded_first.result->output + "\n" + std::string(3, char(96));
+    assert(inspect_local_goose_decision(fenced_result.result->output).eligible);
+    assert(!canonical_local_goose_cycle_success(fenced_result));
+    assert(throws_make(anchor, model, 2, 20'000, 20'001, fenced_result));
+    assert(canonical_local_goose_cycle_success(succeeded_first));
+
     std::cout << "local Goose cycle contract: ok\n";
     return 0;
 }
