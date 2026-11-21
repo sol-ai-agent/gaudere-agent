@@ -46,6 +46,16 @@ backup with the existing SQLite lock, verifies SHA-256, swaps the Quadlet image
 atomically, reloads systemd, starts the candidate, verifies active image and
 logical `.db` dumps have not changed, and retains the old image for rollback.
 
+**Forward stop safety:** before any state backup or live Quadlet replacement,
+require the old agent unit to be inactive and independently confirm its Podman
+container is stopped/exited or provably absent (exact `podman container exists`
+exit code `1`). An active/paused container, uninspectable existing container,
+Podman store error, or failed stop command leaves the original Quadlet and data
+intact and reports `ROLLBACK=MANUAL_REVIEW_REQUIRED`. The script does not issue
+another stop or attempt a blind restart in this uncertain state. Inspect the
+original service/container before deciding how to recover. This is a local
+stop-state observation, not exclusion against unrelated external operators.
+
 **Rollback safety:** a failed release never assumes that a successful
 `systemctl --user stop` response means the candidate is quiescent. The
 rollback path requires the unit to be inactive and the Podman container to
