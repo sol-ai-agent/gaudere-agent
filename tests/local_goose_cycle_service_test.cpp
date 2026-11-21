@@ -170,6 +170,124 @@ std::int64_t milliseconds(
         point.time_since_epoch()).count();
 }
 
+
+void settlement_decision_test(const std::string& decision,
+                              const std::optional<std::int64_t> delay,
+                              const std::optional<std::int64_t> expected_delay,
+                              const std::string& suffix)
+{
+    const auto first = observation(1);
+    const auto second = observation(2, first);
+    const auto anchor = observation(3, second);
+    MemoryTaskStore tasks;
+    tasks.save(anchor);
+    std::int64_t now_ms = 10'000;
+    gaudere::work::Runtime runtime(tasks, [&now_ms] {
+        return TimePoint{std::chrono::milliseconds{now_ms}};
+    });
+    runtime.recover();
+
+    FakeRunner runner;
+    runner.answer = {LocalGooseRunOutcome::succeeded,
+        "{\"assessment\":\"Synthetic settlement\",\"decision\":\"" + decision
+        + "\",\"next_wake_after_ms\":"
+        + (delay ? std::to_string(*delay) : "null")
+        + ",\"openai_request\":"
+        + (decision == "request_openai" ? "\"Bounded test request\"" : "null")
+        + ",\"reason\":\"Synthetic regression\","
+          "\"schema\":\"gaudere.cognition.local-goose.decision.v1\"}", {}};
+    const auto model_sha = hex('f');
+    LocalGooseCycleHandler handler(runner, "/test/local-goose-cycle", model_sha);
+    const auto path = temp_path() + "." + suffix;
+    std::remove(path.c_str());
+    std::string completed_id;
+    std::string completed_sha;
+    {
+        LocalGooseCycleStore store(path);
+        LocalGooseCycleCursor seed;
+        seed.anchor_observation_task_id = anchor.id;
+        seed.anchor_observation_result_sha256 = sha256_hex(anchor.result->output);
+        assert(store.seed(seed).result == LocalGooseCycleStoreResult::accepted);
+        auto armed = seed;
+        armed.revision = 1;
+        armed.generation = 1;
+        armed.state = LocalGooseCycleState::scheduled;
+        armed.due_at_ms = now_ms;
+        assert(store.replace(seed, armed).result
+               == LocalGooseCycleStoreResult::accepted);
+
+        LocalGooseCycleService service(store, tasks, runtime, handler, model_sha,
+                                      [&now_ms] { return now_ms; });
+        assert(service.step().result == LocalGooseCycleServiceResult::prepared);
+        assert(service.step().result == LocalGooseCycleServiceResult::submitted);
+        const auto executed = service.step();
+        assert(executed.result == LocalGooseCycleServiceResult::executed);
+        assert(executed.task && executed.task->result);
+        assert(canonical_local_goose_cycle_success(*executed.task));
+        assert(runner.calls == 1);
+        completed_id = executed.task->id;
+        completed_sha = sha256_hex(executed.task->result->output);
+        const auto settled = service.step();
+        assert(settled.healthy && settled.cursor && settled.decision);
+        assert(settled.decision->decision == decision);
+        assert(settled.decision->next_wake_after_ms == delay);
+        assert(settled.active == expected_delay.has_value());
+        assert(settled.result == (expected_delay
+            ? LocalGooseCycleServiceResult::scheduled
+            : LocalGooseCycleServiceResult::dormant));
+        assert(settled.cursor->generation == 2 && settled.cursor->revision == 3);
+        assert(settled.cursor->predecessor_task_id == completed_id);
+        assert(settled.cursor->predecessor_result_sha256 == completed_sha);
+        assert(settled.cursor->current_task_id.empty());
+        assert(!settled.cursor->captured_at_ms);
+        assert(settled.cursor->blocked_reason.empty());
+        assert(settled.cursor->due_at_ms == (expected_delay
+            ? std::optional<std::int64_t>{now_ms + *expected_delay}
+            : std::nullopt));
+    }
+
+    // Reopen the durable cursor, not merely the same in-memory service.
+    // In particular, an idle or provider-request decision must not turn into
+    // a timer or a second inference even long after the original opportunity.
+    {
+        LocalGooseCycleStore reopened(path);
+        const auto persisted = reopened.find(local_goose_cycle_scope);
+        assert(persisted && persisted->revision == 3 && persisted->generation == 2);
+        assert(persisted->predecessor_task_id == completed_id);
+        assert(persisted->predecessor_result_sha256 == completed_sha);
+        gaudere::scheduling::wake::Scheduler scheduler;
+        LocalGooseCycleSchedulerBridge bridge(scheduler);
+        const auto deadline = inspect_local_goose_cycle_deadline(persisted);
+        assert(deadline.eligible && deadline.active == expected_delay.has_value());
+        if (expected_delay) {
+            assert(bridge.arm(persisted) == LocalGooseCycleSchedulerArmResult::scheduled);
+            assert(scheduler.next()
+                   && milliseconds(*scheduler.next()) == now_ms + *expected_delay);
+        } else {
+            assert(bridge.arm(persisted) == LocalGooseCycleSchedulerArmResult::inactive);
+            assert(!scheduler.next());
+            now_ms += 24 * 60 * 60 * 1'000;
+            LocalGooseCycleService service(reopened, tasks, runtime, handler, model_sha,
+                                          [&now_ms] { return now_ms; });
+            for (int i = 0; i < 3; ++i) {
+                const auto again = service.step();
+                assert(again.healthy && !again.active);
+                assert(again.result == LocalGooseCycleServiceResult::dormant);
+                assert(again.cursor && again.cursor->revision == 3);
+                assert(!again.cursor->due_at_ms);
+                assert(again.cursor->predecessor_result_sha256 == completed_sha);
+                assert(!again.task);
+            }
+        }
+        assert(runner.calls == 1);
+        assert(tasks.tasks.size() == 2); // anchor + one local cycle only
+        const auto completed = tasks.find(completed_id);
+        assert(completed && completed->result);
+        assert(sha256_hex(completed->result->output) == completed_sha);
+    }
+    std::remove(path.c_str());
+}
+
 } // namespace
 
 int main()
@@ -354,6 +472,14 @@ int main()
     assert(!inspect_local_goose_cycle_deadline(no_replay.cursor).active);
 
     std::remove(path.c_str());
+    // Exercise the decision/deadline matrix on independent durable cursors.
+    settlement_decision_test("idle", std::nullopt, std::nullopt, "idle-null");
+    settlement_decision_test("request_openai", std::nullopt, std::nullopt,
+                             "request-null");
+    settlement_decision_test("idle", 5'000, 5'000, "idle-delay");
+    settlement_decision_test("request_openai", 5'000, 5'000, "request-delay");
+    settlement_decision_test("continue_local", 0, local_goose_cycle_minimum_delay_ms,
+                             "continue-zero");
     std::cout << "local Goose cycle scheduler/service: ok\n";
     return 0;
 }
