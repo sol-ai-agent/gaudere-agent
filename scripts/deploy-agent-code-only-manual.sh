@@ -25,6 +25,7 @@ BACKUP=""
 NEXT_QUADLET=""
 STAGING_CREATED=0
 ARMED=0
+OLD_STOP_CONFIRMED=0
 NEW_STARTED=0
 COMMITTED=0
 APPLY=0
@@ -51,6 +52,20 @@ done
 fail() { printf 'RELEASE=FAIL: %s\n' "$*" >&2; exit 1; }
 service_active() { [[ "$(systemctl --user is-active "$UNIT" 2>/dev/null || :)" == active ]]; }
 running_image() { podman inspect gaudere-agent --format '{{.Image}}' 2>/dev/null | sed 's/^sha256://'; }
+agent_stop_confirmed() {
+    local container_state exists_rc=0
+    [[ "$(systemctl --user is-active "$UNIT" 2>/dev/null || :)" == inactive ]] || return 1
+    if container_state=$(podman inspect gaudere-agent --format '{{.State.Status}}' 2>/dev/null); then
+        case "$container_state" in
+            exited|stopped) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    # Only the exact "not found" result proves absence; storage errors
+    # or a container which cannot be inspected must not allow state I/O.
+    podman container exists gaudere-agent >/dev/null 2>&1 || exists_rc=$?
+    [[ "$exists_rc" == 1 ]]
+}
 state_signature() {
     local file name digest
     shopt -s nullglob
@@ -77,25 +92,17 @@ on_exit() {
         printf 'RELEASE=BLOCKED_BEFORE_STOP\n' >&2
         return "$code"
     fi
+    if [[ "$OLD_STOP_CONFIRMED" != 1 ]]; then
+        # No backup, live Quadlet replacement, or candidate start occurred.
+        # Do not blindly retry a stop or attempt recovery from an unknown
+        # old container state; keep the original configuration and data.
+        printf 'ROLLBACK=MANUAL_REVIEW_REQUIRED; original stop unverified, Quadlet and state left intact: %s\n' "$WORK" >&2
+        return 1
+    fi
     printf 'RELEASE=ROLLBACK_ATTEMPT (reason exit=%s)\n' "$code" >&2
     systemctl --user stop "$UNIT" || restored=0
-    # A successful stop command alone does not prove that the candidate is
-    # gone. Never restore its mounted SQLite state while it may still run.
-    local container_state exists_rc=0
-    [[ "$(systemctl --user is-active "$UNIT" 2>/dev/null || :)" == inactive ]] || restored=0
-    if [[ "$restored" == 1 ]]; then
-        if container_state=$(podman inspect gaudere-agent --format '{{.State.Status}}' 2>/dev/null); then
-            case "$container_state" in
-                exited|stopped) ;;
-                *) restored=0 ;;
-            esac
-        else
-            # A Quadlet may remove the stopped container. Only the exact
-            # exit code 1 proves absence; 125 denotes a Podman store error.
-            podman container exists gaudere-agent >/dev/null 2>&1 || exists_rc=$?
-            [[ "$exists_rc" == 1 ]] || restored=0
-        fi
-    fi
+    # The same proof is required before rollback may restore mounted state.
+    agent_stop_confirmed || restored=0
     if [[ "$restored" != 1 ]]; then
         printf 'ROLLBACK=MANUAL_REVIEW_REQUIRED; candidate stop unverified, Quadlet and state left intact: %s\n' "$WORK" >&2
         return 1
@@ -208,8 +215,8 @@ PY
 printf 'SERVICE_STOP=BEGIN\n'
 ARMED=1
 systemctl --user stop "$UNIT"
-[[ "$(systemctl --user is-active "$UNIT" 2>/dev/null || :)" == inactive ]] || fail 'unit not fully stopped'
-[[ "$(podman inspect gaudere-agent --format '{{.State.Status}}' 2>/dev/null || :)" != running ]] || fail 'old container still running'
+agent_stop_confirmed || fail 'original agent stop unverified; refuse backup and swap'
+OLD_STOP_CONFIRMED=1
 
 BACKUP=$(GAUDERE_STATE_DIR="$STATE" sh "$BACKUP_TOOL") || fail 'locked backup failed'
 [[ -f "$BACKUP" && -f "$BACKUP.sha256" ]] || fail 'backup archive/hash absent'

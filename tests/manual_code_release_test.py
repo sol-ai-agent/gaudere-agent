@@ -65,6 +65,8 @@ case "$1" in
  is-active) cat "$TEST_ROOT/service" ;;
  stop)
    echo stop >> "$TEST_ROOT/actions"
+   if [[ "$(cat "$TEST_ROOT/running_image")" == "$GAUDERE_MANUAL_OLD_IMAGE"
+         && "${TEST_OLD_STOP_FAIL:-}" == 1 ]]; then exit 99; fi
    if [[ "$(cat "$TEST_ROOT/running_image")" == "$GAUDERE_MANUAL_NEW_IMAGE" ]]; then
      if [[ "${TEST_ROLLBACK_STOP_STUCK:-}" == 1 ]]; then exit 0; fi
      if [[ "${TEST_ROLLBACK_INSPECT_UNKNOWN:-}" == 1 ]]; then
@@ -93,11 +95,26 @@ case "$1:$2" in
       '{{.HostConfig.NetworkMode}}') echo none ;;
       '{{.State.Status}}')
          [[ ! -f "$TEST_ROOT/inspect_unknown" ]] || exit 125
+         if [[ "$(cat "$TEST_ROOT/running_image")" == "$GAUDERE_MANUAL_OLD_IMAGE"
+               && "$(cat "$TEST_ROOT/service")" == inactive ]]; then
+            case "${TEST_OLD_STOP_STATE:-}" in
+              running|paused) echo "$TEST_OLD_STOP_STATE"; exit 0 ;;
+              absent|uninspectable) exit 1 ;;
+              unknown) exit 125 ;;
+            esac
+         fi
          [[ "$(cat "$TEST_ROOT/service")" == active ]] && echo running || echo exited ;;
       *) exit 99 ;;
     esac ;;
  'container:exists')
      [[ ! -f "$TEST_ROOT/inspect_unknown" ]] || exit 125
+     if [[ "$(cat "$TEST_ROOT/running_image")" == "$GAUDERE_MANUAL_OLD_IMAGE"
+           && "$(cat "$TEST_ROOT/service")" == inactive ]]; then
+         case "${TEST_OLD_STOP_STATE:-}" in
+           absent) exit 1 ;;
+           unknown) exit 125 ;;
+         esac
+     fi
      exit 0 ;;
  'image:inspect')
      [[ "$3" == "$GAUDERE_MANUAL_NEW_IMAGE" ]] || exit 98
@@ -195,6 +212,45 @@ echo 'image_provenance=PASS'
         self.assertEqual(foreign.read_text(), 'somebody-elses-content')
         self.assert_old_running()
         self.assertEqual((self.root / 'actions').read_text(), '')
+
+    def test_unconfirmed_old_stop_blocks_backup_and_swap(self):
+        for state in ('running', 'paused', 'uninspectable', 'unknown'):
+            with self.subTest(state=state):
+                (self.root / 'service').write_text('active')
+                (self.root / 'actions').write_text('')
+                result = self.run_script('--apply', env=dict(self.env,
+                    GAUDERE_MANUAL_RELEASE_ACK='APPLY_GAUDERE_AGENT_CODE_ONLY',
+                    TEST_OLD_STOP_STATE=state))
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('original agent stop unverified', result.stderr)
+                self.assertIn('ROLLBACK=MANUAL_REVIEW_REQUIRED', result.stderr)
+                self.assertNotIn('ROLLBACK=PASS', result.stderr)
+                self.assertEqual((self.root / 'actions').read_text(), 'stop\n')
+                self.assertEqual((self.root / 'running_image').read_text(), OLD)
+                self.assertEqual(self.quadlet.read_text(), self.original_quadlet)
+                self.assertEqual((self.state / 'state.db').read_text(), 'durable-data')
+                self.assertFalse((self.home / '.local/share/gaudere/backups').exists())
+                self.assertEqual(list(self.settings.glob('gaudere-agent.container.manual-release.*')), [])
+
+    def test_failed_old_stop_command_requires_manual_review(self):
+        result = self.run_script('--apply', env=dict(self.env,
+            GAUDERE_MANUAL_RELEASE_ACK='APPLY_GAUDERE_AGENT_CODE_ONLY',
+            TEST_OLD_STOP_FAIL='1'))
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('ROLLBACK=MANUAL_REVIEW_REQUIRED', result.stderr)
+        self.assertEqual((self.root / 'actions').read_text(), 'stop\n')
+        self.assert_old_running()
+        self.assertFalse((self.home / '.local/share/gaudere/backups').exists())
+
+    def test_confirmed_old_container_absence_allows_release(self):
+        result = self.run_script('--apply', env=dict(self.env,
+            GAUDERE_MANUAL_RELEASE_ACK='APPLY_GAUDERE_AGENT_CODE_ONLY',
+            TEST_OLD_STOP_STATE='absent'))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('RELEASE=PASS', result.stdout)
+        self.assertEqual((self.root / 'running_image').read_text(), NEW)
+        self.assertEqual(self.quadlet.read_text(), self.original_quadlet.replace(OLD, NEW))
+        self.assertEqual((self.state / 'state.db').read_text(), 'durable-data')
 
     def test_failed_backup_restores_original_service(self):
         result = self.run_script('--apply', env=dict(self.env,
