@@ -1,0 +1,7 @@
+# Settled Local Goose decision — source-only inspection
+
+This dormant-only primitive answers whether the fixed, canonically verified predecessor recorded idle or request_openai, without reading any caller-selected Task. The current cursor generation is the next opportunity; predecessor generation is one less. request_openai is an observation, not provider authorization.
+
+Run only on the Agent owner thread with trusted bounded callbacks for the fixed scope and exact Task reads and the active model digest. At most two cursor reads and three Task reads. The whole cursor is rechecked before returning evidence; owner-thread serialization is required, not replaced by this check. The immediate predecessor link and final observation anchor are validated, not the entire historical chain. The callbacks must bound materialization and latency; this pure function does not impose a transport deadline or open a database. Any future integration needs separate review of that boundary.
+
+Only verified evidence contains decision enum, cursor revision/generation, predecessor generation, null scheduling delay and exact result SHA-256. The predecessor's status is necessarily succeeded. No raw assessment, reason, request, task ID, exception or payload is returned; failure has only a status. No Runtime, provider, scheduling, stimulus, database writes, transport, polling, statistics or deployment in this tranche. Tests are registered in make check; the production binary is not changed. See gaudere-verifier issue #64 and Sol's decision 7069476459.
