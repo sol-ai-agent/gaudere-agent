@@ -1,5 +1,6 @@
 #include "GaudereChat.hpp"
 #include "GaudereChatInput.hpp"
+#include "GaudereChatOutput.hpp"
 
 #include "LiveControl.hpp"
 
@@ -130,7 +131,9 @@ int main(int argc, char* argv[])
             if (input.kind == InputKind::head) {
                 const auto head = session.inspect_head();
                 if (head.ok) print_head(head.head);
-                else std::cerr << "gaudere-chat: " << head.detail;
+                else std::cerr << "gaudere-chat: "
+                               << gaudere_agent::gaudere_chat_terminal_safe(head.detail)
+                               << '\n';
                 continue;
             }
             if (input.kind == InputKind::last) {
@@ -151,7 +154,9 @@ int main(int argc, char* argv[])
                 // this is not a new reply from a Task or provider.
                 const auto answer = session.last_verified_response();
                 if (answer) {
-                    std::cout << "Gaudere (cached)> " << *answer << '\n';
+                    std::cout << "Gaudere (cached)> "
+                              << gaudere_agent::gaudere_chat_terminal_safe(*answer)
+                              << '\n';
                 } else {
                     std::cout << "gaudere-chat: no canonically verified reply "
                                  "for the last committed Task in this session\n";
@@ -165,7 +170,8 @@ int main(int argc, char* argv[])
                               << " status=" << report.status << '\n';
                 } else {
                     std::cerr << "gaudere-chat: read-only Task inspection failed: "
-                              << report.detail << '\n';
+                              << gaudere_agent::gaudere_chat_terminal_safe(report.detail)
+                              << '\n';
                 }
                 continue;
             }
@@ -220,7 +226,9 @@ int main(int argc, char* argv[])
             switch (result.code) {
             case gaudere_agent::GaudereChatTurnCode::succeeded:
                 conflict_message.clear();
-                std::cout << "Gaudere> " << result.response << '\n';
+                std::cout << "Gaudere> "
+                          << gaudere_agent::gaudere_chat_terminal_safe(result.response)
+                          << '\n';
                 break;
             case gaudere_agent::GaudereChatTurnCode::conflict:
                 conflict_message = attempted_message;
@@ -239,7 +247,8 @@ int main(int argc, char* argv[])
                     << "gaudere-chat: submission or commit verification is "
                     << "ambiguous. Do not create a new message; use /retry for "
                     << "the exact preserved request identity.\n"
-                    << result.detail << '\n';
+                    << gaudere_agent::gaudere_chat_terminal_safe(result.detail)
+                    << '\n';
                 break;
             case gaudere_agent::GaudereChatTurnCode::timeout:
                 std::cerr
@@ -254,10 +263,13 @@ int main(int argc, char* argv[])
                 std::cerr
                     << "gaudere-chat: Task " << result.task_id
                     << " ended without a canonical success.\n"
-                    << result.detail;
+                    << gaudere_agent::gaudere_chat_terminal_safe(result.detail)
+                    << '\n';
                 break;
             case gaudere_agent::GaudereChatTurnCode::invalid_reply:
-                std::cerr << "gaudere-chat: " << result.detail << '\n';
+                std::cerr << "gaudere-chat: "
+                          << gaudere_agent::gaudere_chat_terminal_safe(result.detail)
+                          << '\n';
                 if (!result.task_id.empty()) {
                     // The commit was confirmed before observation failed.
                     // Do NOT interpret invalid response syntax as no submit.
@@ -272,7 +284,9 @@ int main(int argc, char* argv[])
         }
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "gaudere-chat: " << error.what() << '\n';
+        std::cerr << "gaudere-chat: "
+                  << gaudere_agent::gaudere_chat_terminal_safe(error.what())
+                  << '\n';
         return 1;
     }
 }
