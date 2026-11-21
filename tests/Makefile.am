@@ -20,6 +20,7 @@ check_PROGRAMS = \
 	local_goose_dialogue_responder_dispatcher_test \
 	local_goose_dialogue_v2_handler_test \
 	local_goose_dialogue_handler_test \
+	local_goose_settled_inspection_test \
 	local_goose_cycle_stimulus_service_test \
 	local_goose_cycle_stimulus_store_test \
 	local_wait_handler_test \
@@ -604,3 +605,19 @@ work_controller_test_SOURCES = \
 	../src/TaskExecutor.cpp \
 	../src/TaskExecutor.hpp
 work_controller_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
+
+local_goose_settled_inspection_test_SOURCES = \
+	local_goose_settled_inspection_test.cpp \
+	../src/LocalGooseSettledInspection.cpp \
+	../src/LocalGooseSettledInspection.hpp \
+	../src/LocalContinuityObservation.cpp \
+	../src/LocalContinuityObservation.hpp \
+	../src/LocalGooseCognition.cpp \
+	../src/LocalGooseCognition.hpp \
+	../src/LocalGooseCycle.cpp \
+	../src/LocalGooseCycle.hpp \
+	../src/LocalGooseCycleStore.cpp \
+	../src/LocalGooseCycleStore.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+local_goose_settled_inspection_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
