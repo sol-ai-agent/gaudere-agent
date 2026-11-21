@@ -213,6 +213,93 @@ bool conflict_test()
         && !session.has_ambiguous_attempt();
 }
 
+bool conflict_retry_survives_observation_test()
+{
+    int heads = 0;
+    int submits = 0;
+    int observations = 0;
+    std::string committed_request;
+    std::string rejected_request;
+    std::string retry_request;
+    const std::string advanced_head =
+        "cognition.local-goose-dialogue.v3:" + std::string(64, 'a');
+    const auto transport = [&](const LiveControlCommand& command,
+                               const std::chrono::milliseconds) {
+        if (command.operation ==
+            LiveControlOperation::inspect_local_goose_dialogue_thread_head) {
+            ++heads;
+            if (heads == 1) return GaudereChatTransportReply{0, head_report(2, old_head)};
+            if (heads == 2) return GaudereChatTransportReply{0, head_report(3, new_task)};
+            if (heads == 4) return GaudereChatTransportReply{1, "head unavailable"};
+            if (heads == 3 || heads == 5)
+                return GaudereChatTransportReply{0, head_report(4, advanced_head)};
+            return GaudereChatTransportReply{9, "unexpected head read"};
+        }
+        if (command.operation == LiveControlOperation::inspect_task
+            && command.id == new_task) {
+            ++observations;
+            return GaudereChatTransportReply{0, succeeded_task_report(committed_request)};
+        }
+        if (command.operation ==
+            LiveControlOperation::submit_local_goose_dialogue_v3_preferred_next) {
+            ++submits;
+            if (submits == 1 && check_command_common(command, command.id)) {
+                committed_request = command.id;
+                return GaudereChatTransportReply{0, submit_report(3)};
+            }
+            if (submits == 2 && command.text == "Conflit"
+                && command.expected_thread_revision == 3) {
+                rejected_request = command.id;
+                return GaudereChatTransportReply{4, "revision conflict"};
+            }
+            if (submits == 3 && command.text == "Conflit"
+                && command.expected_thread_revision == 4
+                && command.id != rejected_request && command.id != committed_request) {
+                retry_request = command.id;
+                return GaudereChatTransportReply{1, "submit outcome unknown"};
+            }
+            if (submits == 4 && command.text == "Conflit"
+                && command.expected_thread_revision == 4
+                && command.id == retry_request)
+                return GaudereChatTransportReply{4, "revision conflict"};
+        }
+        return GaudereChatTransportReply{9, "unexpected I/O"};
+    };
+    GaudereChatSession session(transport, "0123456789abcdef");
+
+    if (session.retry_conflict().code != GaudereChatTurnCode::invalid_reply
+        || heads != 0 || submits != 0) return false;
+    if (session.send_turn("Salut").code != GaudereChatTurnCode::succeeded
+        || session.send_turn("Conflit").code != GaudereChatTurnCode::conflict
+        || !session.has_conflict_message() || submits != 2 || heads != 3)
+        return false;
+
+    // Read-only /wait for the previous commit does not consume the conflict.
+    if (session.wait_last_committed().code != GaudereChatTurnCode::succeeded
+        || !session.has_conflict_message() || observations != 2 || submits != 2)
+        return false;
+
+    // A failed fresh head read during explicit conflict retry is recoverable.
+    if (session.retry_conflict().code != GaudereChatTurnCode::invalid_reply
+        || !session.has_conflict_message() || session.has_ambiguous_attempt()
+        || submits != 2 || heads != 4) return false;
+
+    const auto retry = session.retry_conflict();
+    if (retry.code != GaudereChatTurnCode::transport_ambiguous
+        || retry.request_id != retry_request || !session.has_ambiguous_attempt()
+        || session.ambiguous_message() != "Conflit" || session.has_conflict_message()
+        || heads != 5 || submits != 3) return false;
+
+    // Once ambiguous, only the original exact retry is allowed.
+    if (session.retry_conflict().code != GaudereChatTurnCode::invalid_reply
+        || submits != 3 || heads != 5) return false;
+    const auto exact_retry = session.retry_ambiguous();
+    return exact_retry.code == GaudereChatTurnCode::conflict
+        && exact_retry.request_id == retry_request
+        && session.has_conflict_message() && !session.has_ambiguous_attempt()
+        && submits == 4 && heads == 6 && observations == 2;
+}
+
 bool v2_task_id_in_conflict_is_not_v3_orphan_test()
 {
     int heads = 0;
@@ -1632,6 +1719,8 @@ int main()
     const std::vector<std::pair<const char*, std::function<bool()>>> tests{
         {"successful_turn_test", successful_turn_test},
         {"conflict_test", conflict_test},
+        {"conflict_retry_survives_observation_test",
+         conflict_retry_survives_observation_test},
         {"ambiguous_exact_retry_test", ambiguous_exact_retry_test},
         {"v2_task_id_in_conflict_is_not_v3_orphan_test",
          v2_task_id_in_conflict_is_not_v3_orphan_test},
