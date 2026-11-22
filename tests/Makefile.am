@@ -41,7 +41,7 @@ check_PROGRAMS = \
 	wake_intent_adversarial_test \
 	wake_status_test \
 	work_controller_test
-TESTS = smoke.sh image_provenance_validator_test.sh schema_v4_provenance_integration_test.sh schema_v4_staged_deployment_test.sh $(filter-out local_goose_cycle_memory_test,$(check_PROGRAMS))
+TESTS = smoke.sh image_provenance_validator_test.sh schema_v4_provenance_integration_test.sh schema_v4_staged_deployment_test.sh $(check_PROGRAMS)
 EXTRA_DIST = \
 	first_production_reflection_validator_test.sh \
 	image_provenance_validator_test.sh \
@@ -636,7 +636,3 @@ local_goose_cycle_memory_test_SOURCES = \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp
 local_goose_cycle_memory_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS)
-
-# Temporary diagnostic: run the new failing test directly so CI shows the assertion.
-check-local:
-	./local_goose_cycle_memory_test
