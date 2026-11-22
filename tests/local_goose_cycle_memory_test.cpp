@@ -6,17 +6,6 @@
 #include <nlohmann/json.hpp>
 
 #include <cassert>
-#include <cstdlib>
-
-// Keep the failing invariant visible in GitHub Actions' captured test log.
-#undef assert
-#define assert(expression) do { \
-    if (!(expression)) { \
-        std::cerr << "local_goose_cycle_memory_test.cpp:" << __LINE__ \
-                  << " failed: " #expression << '\n'; \
-        std::abort(); \
-    } \
-} while (false)
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -81,7 +70,7 @@ std::string decision(std::string assessment, std::string reason,
         {"decision", kind},
         {"next_wake_after_ms", nullptr},
         {"openai_request", kind == "request_openai"
-            ? Json("DO-NOT-LEAK-PRIVATE-REQUEST") : Json{nullptr}},
+            ? Json("DO-NOT-LEAK-PRIVATE-REQUEST") : Json(nullptr)},
         {"reason", std::move(reason)},
         {"schema", local_goose_decision_schema}
     }.dump();
@@ -92,17 +81,6 @@ Task succeeded(Task t, std::string result)
     t.status = TaskStatus::succeeded;
     t.result = TaskResult{local_goose_decision_content_type,
                            std::move(result), {}, {}};
-    if (!canonical_local_goose_cycle_success(t)) {
-        const auto inspected = inspect_local_goose_cycle_task(t);
-        const auto decision_inspected = inspect_local_goose_decision(t.result->output);
-        std::cerr << "memory fixture rejected: cycle=" << inspected.eligible
-                  << " (" << inspected.detail << "), decision="
-                  << decision_inspected.eligible << " ("
-                  << decision_inspected.detail << "), canonical_bytes="
-                  << (decision_inspected.decision.canonical_json == t.result->output)
-                  << ", status=" << static_cast<int>(t.status)
-                  << ", generation=" << inspected.generation << '\n';
-    }
     assert(canonical_local_goose_cycle_success(t));
     return t;
 }
