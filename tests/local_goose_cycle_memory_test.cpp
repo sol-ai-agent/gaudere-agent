@@ -13,7 +13,7 @@
 #define assert(expression) do { \
     if (!(expression)) { \
         std::cerr << "local_goose_cycle_memory_test.cpp:" << __LINE__ \
-                  << " failed: " #expression << '\\n'; \
+                  << " failed: " #expression << '\n'; \
         std::abort(); \
     } \
 } while (false)
