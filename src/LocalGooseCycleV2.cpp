@@ -86,8 +86,11 @@ bool valid_memory(const Json& memory, std::uint64_t generation,
         || !memory.at("entries").is_array())
         return false;
     const auto& entries = memory.at("entries");
-    if (entries.empty() || entries.size() > max_entries
-        || generation <= entries.size())
+    // A frozen snapshot cannot silently drop a recent generation. Only
+    // generations older than the four-entry window may be omitted.
+    const auto required = generation <= max_entries
+        ? static_cast<std::size_t>(generation - 1) : max_entries;
+    if (entries.empty() || entries.size() != required)
         return false;
 
     const auto first_generation = generation - entries.size();
