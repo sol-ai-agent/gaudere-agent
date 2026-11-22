@@ -16,6 +16,13 @@ statistics project, portal maintenance or the historical local-activity pulse.
   Nothing in the V1 CAS queries a V2 migration fence.
 - Work Tasks are in a *different* Core `TaskStore`; creation and
   cursor replacement **cannot currently be one atomic cross-store commit**.
+  In current Core, `Runtime::submit()` does `find(id)` /
+  `find_by_idempotency_key(key)` then `store_.save(task)`; the SQLite
+  `TaskStore::save()` implementation uses **`INSERT ... ON CONFLICT(id)
+  DO UPDATE`**, rewriting the stored Task definition, status and result.
+  This is not an atomic insert-if-absent API. A migration must never call
+  the raw save path to "retry" a pre-existing Task or treat an unverified
+  `Runtime::submit` duplicate as proof of the exact same definition.
 - `LocalGooseCycleService::step()` first returns `dormant` without an
   implicit restart. A generation-2 dormant cursor is the *next opportunity*,
   not two completed generations or permission to run V2.
@@ -104,9 +111,16 @@ contract for future transaction-backed integration, not a task runner.
 | Published V2 or later | **No automatic rollback to V1 dormant**; explicit separate repair protocol, preserving V2 Task lineage | V1 remains fenced |
 
 The two durable stores impose a **saga/reconciliation**, not an unqualified
-single atomic commit. Exactly-once *inference* is not asserted by deterministic
-Task IDs alone; the future runner's lease and retry semantics need their
-own validation.
+single atomic commit. **Before integrating V2**, add or prove an atomic,
+conflict-safe Core insertion primitive that either persists a new exact Task
+or returns an exact-existing identical Task without rewriting its status/result.
+Check both ID **and idempotency key** collisions; a mismatched existing record
+must quarantine. Calling `TaskStore::save` on replay could overwrite a
+succeeded Task with a pending version. The present `Runtime::submit` two-read
+precheck is not, by itself, a cross-process atomic guarantee.
+
+Exactly-once *inference* is not asserted by deterministic Task IDs alone;
+the future runner's lease and retry semantics need their own validation.
 
 ## 5. Rollback: reversible before the freeze boundary only
 
