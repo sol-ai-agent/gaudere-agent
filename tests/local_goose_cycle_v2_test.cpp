@@ -7,12 +7,14 @@
 
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace {
 using namespace gaudere_agent;
@@ -192,6 +194,15 @@ int main()
         v2.input = json.dump();
         resign(v2);
         assert(!inspect_local_goose_cycle_v2_task(v2).eligible);
+        // Even with a rehashed Task ID, shortening the recent history
+        // is invalid; only entries older than the fixed window are omitted.
+        auto shortened = f.next();
+        auto shrink = Json::parse(shortened.input);
+        shrink["memory"]["entries"].erase(
+            shrink["memory"]["entries"].begin());
+        shortened.input = shrink.dump();
+        resign(shortened);
+        assert(!inspect_local_goose_cycle_v2_task(shortened).eligible);
         // A missing Task *inside* the bounded window cannot be skipped.
         f.stored.erase(f.history[2].id);
         assert(throws_invalid([&] { (void)f.next(); }));
