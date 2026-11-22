@@ -101,7 +101,10 @@ jobs:
           export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/prefix/lib/pkgconfig"
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
-          make --jobs=2 check
+          if ! make --jobs=2 check; then
+            cat build/tests/local_goose_cycle_memory_test.log || true
+            exit 1
+          fi
 
       - name: Validate copied schema migration
         run: |
