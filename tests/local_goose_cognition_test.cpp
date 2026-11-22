@@ -251,6 +251,23 @@ int main()
     assert(handled.outcome == HandlerOutcome::succeeded);
     assert(handled.content_type == local_goose_decision_content_type);
     assert(handled.output == decision("idle", ""));
+    // Model text may contain formatting, but stored canonical evidence may not.
+    auto stored = a;
+    stored.status = TaskStatus::succeeded;
+    stored.result = TaskResult{
+        local_goose_decision_content_type, handled.output, {}, {}};
+    assert(canonical_local_goose_cognition_success(stored));
+
+    auto trailing_whitespace = stored;
+    trailing_whitespace.result->output += "\n";
+    assert(inspect_local_goose_decision(trailing_whitespace.result->output).eligible);
+    assert(!canonical_local_goose_cognition_success(trailing_whitespace));
+
+    auto fenced_evidence = stored;
+    fenced_evidence.result->output = fenced_idle_decision();
+    assert(inspect_local_goose_decision(fenced_evidence.result->output).eligible);
+    assert(!canonical_local_goose_cognition_success(fenced_evidence));
+
     assert(runner.calls == 1);
     assert(runner.seen.model_id == model_id);
     assert(runner.seen.prompt.find("Reason as Gaudere, for Gaudere") != std::string::npos);
