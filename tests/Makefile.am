@@ -23,6 +23,7 @@ check_PROGRAMS = \
 	local_goose_settled_inspection_test \
 	local_goose_cycle_v2_test \
 	local_goose_v2_bridge_proof_test \
+	local_goose_v2_cutover_model_test \
 	local_goose_cycle_memory_test \
 	local_goose_cycle_stimulus_service_test \
 	local_goose_cycle_stimulus_store_test \
@@ -674,3 +675,26 @@ local_goose_v2_bridge_proof_test_SOURCES = \
 	../src/Sha256.cpp \
 	../src/Sha256.hpp
 local_goose_v2_bridge_proof_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
+
+
+local_goose_v2_cutover_model_test_SOURCES = \
+	local_goose_v2_cutover_model_test.cpp \
+	../src/LocalGooseV2CutoverModel.cpp \
+	../src/LocalGooseV2CutoverModel.hpp \
+	../src/LocalGooseV2BridgeProof.cpp \
+	../src/LocalGooseV2BridgeProof.hpp \
+	../src/LocalGooseCycleV2.cpp \
+	../src/LocalGooseCycleV2.hpp \
+	../src/LocalGooseCycleMemory.cpp \
+	../src/LocalGooseCycleMemory.hpp \
+	../src/LocalGooseCycle.cpp \
+	../src/LocalGooseCycle.hpp \
+	../src/LocalGooseCognition.cpp \
+	../src/LocalGooseCognition.hpp \
+	../src/LocalContinuityObservation.cpp \
+	../src/LocalContinuityObservation.hpp \
+	../src/LocalGooseCycleStore.cpp \
+	../src/LocalGooseCycleStore.hpp \
+	../src/Sha256.cpp \
+	../src/Sha256.hpp
+local_goose_v2_cutover_model_test_LDADD = $(GAUDERE_LIBS) $(JSON_LIBS) -lsqlite3
