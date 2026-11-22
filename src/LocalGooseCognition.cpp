@@ -346,7 +346,12 @@ bool canonical_local_goose_cognition_success(const Task& task) noexcept
         || task.result->content_type != local_goose_decision_content_type
         || !task.result->failure_code.empty() || !task.result->failure_message.empty())
         return false;
-    return inspect_local_goose_decision(task.result->output).eligible;
+    // The handler normalizes permissively framed model text before persisting it.
+    // Succeeded durable cognition is lineage evidence: require those exact
+    // canonical bytes, not merely a response that can be normalized later.
+    const auto decision = inspect_local_goose_decision(task.result->output);
+    return decision.eligible
+        && decision.decision.canonical_json == task.result->output;
 }
 
 } // namespace gaudere_agent
