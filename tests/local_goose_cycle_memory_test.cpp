@@ -70,7 +70,7 @@ std::string decision(std::string assessment, std::string reason,
         {"decision", kind},
         {"next_wake_after_ms", nullptr},
         {"openai_request", kind == "request_openai"
-            ? Json{"DO-NOT-LEAK-PRIVATE-REQUEST"} : Json{nullptr}},
+            ? Json("DO-NOT-LEAK-PRIVATE-REQUEST") : Json{nullptr}},
         {"reason", std::move(reason)},
         {"schema", local_goose_decision_schema}
     }.dump();
