@@ -81,12 +81,14 @@ LocalGooseCycleMemory build_local_goose_cycle_memory(
                 excerpt(decision.decision.assessment);
             const auto [reason, reason_cut] =
                 excerpt(decision.decision.reason);
+            const Json delay = decision.decision.next_wake_after_ms
+                ? Json{*decision.decision.next_wake_after_ms} : Json{nullptr};
             reverse_entries.push_back(Json{
                 {"assessment", assessment},
                 {"assessment_truncated", assessment_cut},
                 {"decision", decision.decision.decision},
                 {"generation", facts.generation},
-                {"next_wake_after_ms", decision.decision.next_wake_after_ms},
+                {"next_wake_after_ms", delay},
                 {"reason", reason},
                 {"reason_truncated", reason_cut},
                 {"result_sha256", sha256_hex(task.result->output)},
