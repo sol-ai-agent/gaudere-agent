@@ -1,6 +1,8 @@
 #include "LocalGooseV2CutoverModel.hpp"
 
 #include "Sha256.hpp"
+#include "LocalContinuityObservation.hpp"
+#include "LocalGooseCycle.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -69,6 +71,45 @@ bool candidate_consistent(const LocalGooseV2CutoverCandidate& candidate)
     };
     for (const auto& kv : doc.items())
         if (keys.count(kv.key()) != 1) return false;
+
+    const auto& revision = doc.at("cursor_revision");
+    const auto& generation = doc.at("generation");
+    const auto& due = doc.at("due_at_ms");
+    const auto& captured = doc.at("captured_at_ms");
+    const auto nonnegative_i64 = [](const Json& value) {
+        if (!value.is_number_integer()) return false;
+        if (value.is_number_unsigned())
+            return value.get<std::uint64_t>() <=
+                static_cast<std::uint64_t>(
+                    std::numeric_limits<std::int64_t>::max());
+        return value.get<std::int64_t>() >= 0;
+    };
+    if (!revision.is_number_unsigned() || !generation.is_number_unsigned()
+        || revision.get<std::uint64_t>() >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max())
+        || generation.get<std::uint64_t>() < 2
+        || generation.get<std::uint64_t>() >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max())
+        || !nonnegative_i64(due) || !nonnegative_i64(captured)
+        || due.get<std::uint64_t>() > captured.get<std::uint64_t>())
+        return false;
+    if (!doc.at("anchor_observation_task_id").is_string()
+        || !identity(doc.at("anchor_observation_task_id").get<std::string>(),
+                     local_continuity_observation_task_prefix)
+        || !doc.at("anchor_observation_result_sha256").is_string()
+        || !digest(doc.at("anchor_observation_result_sha256").get<std::string>())
+        || !doc.at("predecessor_task_id").is_string()
+        || !identity(doc.at("predecessor_task_id").get<std::string>(),
+                     local_goose_cycle_task_prefix)
+        || !doc.at("predecessor_result_sha256").is_string()
+        || !digest(doc.at("predecessor_result_sha256").get<std::string>())
+        || !doc.at("model_sha256").is_string()
+        || !digest(doc.at("model_sha256").get<std::string>())
+        || !doc.at("bounded_memory_sha256").is_string()
+        || !digest(doc.at("bounded_memory_sha256").get<std::string>()))
+        return false;
     return true;
 }
 
