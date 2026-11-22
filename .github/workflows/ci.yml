@@ -102,7 +102,7 @@ jobs:
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/prefix/lib"
           ../configure CXXFLAGS="-O2 -Wall -Wextra -Wpedantic -Werror"
           if ! make --jobs=2 check; then
-            cat build/tests/local_goose_cycle_memory_test.log || true
+            cat tests/local_goose_cycle_memory_test.log || true
             exit 1
           fi
 
