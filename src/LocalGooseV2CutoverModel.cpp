@@ -309,6 +309,12 @@ LocalGooseV2CutoverStep simulate_local_goose_v2_cutover(
             return {Result::duplicate, current};
         return fail(Result::conflict);
     }
+    // A terminal ledger cannot be restarted, regardless of a forged or
+    // stale owner epoch. Preserve only exact previous-transition replay
+    // handled above as a duplicate.
+    if (current.phase == Phase::aborted
+        || current.phase == Phase::quarantined)
+        return fail(Result::invalid);
     if (current.phase != Phase::proposal
         && epoch != current.fence_epoch)
         return fail(Result::conflict);
