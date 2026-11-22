@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -179,7 +180,8 @@ int main()
         *record, Event::fence_v1, 0, 0), Result::invalid);
     denied(simulate_local_goose_v2_cutover(
         *record, Event::fence_v1, 0,
-        static_cast<std::uint64_t>(INT64_MAX) + 1), Result::invalid);
+        static_cast<std::uint64_t>(
+            std::numeric_limits<std::int64_t>::max()) + 1), Result::invalid);
     auto fenced = accepted(simulate_local_goose_v2_cutover(
         *record, Event::fence_v1, 0, 42), Phase::fenced);
     assert(fenced.fence_epoch == 42);
@@ -280,6 +282,23 @@ int main()
       assert(!initial_local_goose_v2_cutover_record(fake)); }
     { auto fake = candidate;
       fake.v2_task_id += "0";
+      assert(!initial_local_goose_v2_cutover_record(fake)); }
+    { auto fake = candidate;
+      auto json = Json::parse(fake.canonical_json);
+      json["bounded_memory_sha256"] = "PRIVATE-FAKE-MEMORY";
+      fake.canonical_json = json.dump();
+      fake.candidate_id =
+          std::string(local_goose_v2_cutover_candidate_prefix)
+          + sha256_hex(fake.canonical_json);
+      assert(!initial_local_goose_v2_cutover_record(fake)); }
+    { auto fake = candidate;
+      auto json = Json::parse(fake.canonical_json);
+      json["due_at_ms"] = static_cast<std::uint64_t>(
+          std::numeric_limits<std::int64_t>::max()) + 1;
+      fake.canonical_json = json.dump();
+      fake.candidate_id =
+          std::string(local_goose_v2_cutover_candidate_prefix)
+          + sha256_hex(fake.canonical_json);
       assert(!initial_local_goose_v2_cutover_record(fake)); }
     { Record fake = *record; fake.revision = 99;
       assert(!valid_local_goose_v2_cutover_record(fake));
