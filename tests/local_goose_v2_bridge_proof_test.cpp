@@ -253,7 +253,7 @@ int main()
       f.cursor.due_at_ms = 20000;
       f.cursor.captured_at_ms = 20001;
       f.cursor.current_task_id = f.history[0].id;
-      f.expect(Status::noncanonical);
+      f.expect(Status::not_applicable);
       assert(f.task_reads == 0); }
     std::cout << "V1 dormant cursor V2 bridge read-only proof: ok\n";
     return 0;
