@@ -168,6 +168,14 @@ LocalGooseV2CutoverCandidate make_local_goose_v2_cutover_candidate(
             out.detail = "V1 dormant or bridge evidence invalid";
             return out;
         }
+        // A candidate can describe only a hypothetical not-yet-submitted
+        // Task. A persisted or active V2 Task is not a fresh preview.
+        if (v2.status != gaudere::work::TaskStatus::pending
+            || v2.attempts_started != 0 || v2.lease
+            || v2.result || !v2.cancel_reason.empty()) {
+            out.detail = "V2 candidate Task has mutable execution state";
+            return out;
+        }
         const auto& evidence = *bridge.evidence;
         const auto inspected = inspect_local_goose_cycle_v2_task(v2);
         if (!inspected.eligible
