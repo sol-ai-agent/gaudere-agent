@@ -270,6 +270,14 @@ int main()
           f.cursor, altered, f.preview(), f.model).eligible); }
     { assert(!make_local_goose_v2_cutover_candidate(
           f.cursor, proof, f.preview(), hex('f')).eligible); }
+    { auto executed = f.preview();
+      executed.status = TaskStatus::succeeded;
+      assert(!make_local_goose_v2_cutover_candidate(
+          f.cursor, proof, executed, f.model).eligible); }
+    { auto leased = f.preview();
+      leased.attempts_started = 1;
+      assert(!make_local_goose_v2_cutover_candidate(
+          f.cursor, proof, leased, f.model).eligible); }
     { auto different = f.preview(20002, 20003);
       const auto new_candidate = make_local_goose_v2_cutover_candidate(
           f.cursor, proof, different, f.model);
