@@ -234,8 +234,13 @@ LocalGooseV2CutoverCandidate make_local_goose_v2_cutover_candidate(
             + sha256_hex(out.canonical_json);
         out.v2_task_id = v2.id;
         out.v2_input_sha256 = sha256_hex(inspected.canonical_input);
-        out.eligible = candidate_consistent(out);
-        if (!out.eligible) out.detail = "cutover candidate self-check failed";
+        // Self-check expects an explicitly eligible candidate. The producer
+        // sets it before checking; a failed check must clear it again.
+        out.eligible = true;
+        if (!candidate_consistent(out)) {
+            out.eligible = false;
+            out.detail = "cutover candidate self-check failed";
+        }
     } catch (...) {
         out = {};
         out.detail = "cutover candidate failed closed";
